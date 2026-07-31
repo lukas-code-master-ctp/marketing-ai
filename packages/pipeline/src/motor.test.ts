@@ -1,8 +1,8 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { permanente, transitorio } from '@gc/shared'
-import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { eq, sql } from 'drizzle-orm'
+import { describe, expect, it, vi } from 'vitest'
 import { definirPaso, ejecutarFlujo } from './motor.js'
 
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
@@ -271,6 +271,58 @@ describe('ejecutarFlujo', () => {
       await expect(
         ejecutarFlujo(db, flujo, {}, { organizationId: otra!.id, runId: r.runId }, SIN_ESPERA),
       ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  it('deja rastro cuando ni siquiera puede marcar la corrida como fallida', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({
+            nombre: 'revienta',
+            ejecutar: async () => {
+              throw permanente('el paso falló')
+            },
+          }),
+        ],
+      }
+
+      await db.execute(sql`
+        create or replace function gc_romper_corridas() returns trigger
+        language plpgsql as $$ begin raise exception 'caída simulada al marcar'; end; $$
+      `)
+      await db.execute(sql`
+        create trigger gc_romper_corridas before update on pipeline_runs
+        for each row execute function gc_romper_corridas()
+      `)
+
+      // Se acumulan aparte: mockRestore() borra el historial del espía.
+      const trazas: string[] = []
+      const errores = vi
+        .spyOn(console, 'error')
+        .mockImplementation((...args: unknown[]) => void trazas.push(args.map(String).join(' ')))
+      try {
+        // El error del paso sigue siendo el que llega a quien llama.
+        await expect(
+          ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA),
+        ).rejects.toMatchObject({ clase: 'permanente' })
+      } finally {
+        await db.execute(sql`drop trigger if exists gc_romper_corridas on pipeline_runs`)
+        await db.execute(sql`drop function if exists gc_romper_corridas()`)
+        errores.mockRestore()
+      }
+
+      // La corrida queda 'en_curso' con error NULL: indistinguible de una que
+      // sigue ejecutándose. Lo único que la delata es la traza en consola.
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      expect(corrida!.status).toBe('en_curso')
+      expect(corrida!.error).toBeNull()
+
+      expect(trazas).toHaveLength(1)
+      expect(trazas[0]).toContain(corrida!.id)
+      expect(trazas[0]).toContain('caída simulada al marcar')
     })
   })
 })

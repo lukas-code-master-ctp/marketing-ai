@@ -154,9 +154,19 @@ async function marcarCorridaFallida(
       .update(esquema.pipelineRuns)
       .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
       .where(eq(esquema.pipelineRuns.id, runId))
-  } catch {
-    // Se descarta a propósito: el error del paso es el que le importa a quien
-    // llama, y reemplazarlo por uno de la base perdería su clasificación.
+  } catch (fallaSecundaria) {
+    // El error del paso se propaga intacto a propósito: es el que le importa a
+    // quien llama, y reemplazarlo por uno de la base perdería su clasificación.
+    //
+    // El console.error es la única excepción deliberada a la convención de no
+    // usar console.* en código de librería, y no un descuido: sin él, la
+    // corrida se queda en 'en_curso' con `error` NULL —indistinguible de una
+    // que sigue ejecutándose— y en ningún lado queda registrado por qué. La
+    // alternativa es una falla operativa invisible por construcción.
+    console.error(
+      `[pipeline] no se pudo marcar como fallida la corrida ${runId}:`,
+      fallaSecundaria,
+    )
   }
 }
 
