@@ -341,4 +341,58 @@ describe('flujo P2 · grilla', () => {
       expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
     })
   })
+
+  it('exige la estrategia del trimestre que corresponde al mes', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      // sembrar() crea la estrategia de 2026-Q3. Septiembre calza; diciembre no.
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const error = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-12' }, ref, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toContain('2026-Q4')
+      expect((error as Error).message).toContain('2026-12')
+    })
+  })
+
+  it('no usa una estrategia archivada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'archivada' })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  it('ignora una estrategia más reciente de otro trimestre', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      // Estrategia de Q4, creada después, con un mix que excluye blog.
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q4',
+        data: { ...ESTRATEGIA, mixDeCanales: [{ canal: 'tiktok', publicacionesPorSemana: 1 }] },
+        brandProfileVersion: 1,
+      })
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+
+      // Si hubiera tomado la de Q4, los slots de blog serían canal_fuera_de_mix.
+      expect(r.estado).toBe('completado')
+    })
+  })
 })

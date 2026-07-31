@@ -10,6 +10,7 @@ import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
+import { validarPeriodo } from './periodos.js'
 import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({
@@ -36,6 +37,10 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
   const paso = definirPaso<EntradaP1, SalidaP1>({
     nombre: 'generar_estrategia',
     ejecutar: async (entrada, ctx) => {
+      // Un periodo con formato inválido no cuesta nada: se valida antes de
+      // tocar la base o el presupuesto.
+      validarPeriodo(entrada.period)
+
       // Se consulta el estado antes del presupuesto y de cualquier llamada al
       // modelo: si la estrategia ya salió de borrador el upsert la va a
       // rechazar igual, y hoy eso se pagaba con una o dos llamadas primero.
