@@ -92,6 +92,8 @@ export async function generarGrilla(
   return r.salida as SalidaP2
 }
 
+const MES_VALIDO = /^\d{4}-(0[1-9]|1[0-2])$/
+
 export interface FilaDeGrilla {
   fecha: string
   canal: string
@@ -106,6 +108,13 @@ export async function verGrilla(
   args: { slug: string; mes: string },
 ): Promise<FilaDeGrilla[]> {
   const ref = await resolverMarca(db, args.slug)
+
+  // Sin esta validación un mes mal escrito produce fechas Invalid Date y el
+  // usuario recibe un error del driver en vez de saber qué escribió mal.
+  if (!MES_VALIDO.test(args.mes)) {
+    throw permanente(`Mes inválido "${args.mes}": se espera el formato AAAA-MM`)
+  }
+
   const [anio, mes] = args.mes.split('-').map(Number)
   const desde = new Date(Date.UTC(anio!, mes! - 1, 1))
   const hasta = new Date(Date.UTC(anio!, mes!, 1))

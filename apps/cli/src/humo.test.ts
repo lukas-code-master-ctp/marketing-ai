@@ -57,4 +57,14 @@ describe('marcha en seco de punta a punta', () => {
       ).rejects.toMatchObject({ clase: 'permanente' })
     })
   })
+
+  it('rechaza ver la grilla con un mes mal formado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await crearMarca(db, { slug: 'parcelas', nombre: 'Compra Tu Parcela' })
+
+      await expect(
+        verGrilla(db, { slug: 'parcelas', mes: '2026-13' }),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
 })

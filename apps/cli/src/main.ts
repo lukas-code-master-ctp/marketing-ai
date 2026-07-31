@@ -114,4 +114,11 @@ function exigir(valor: string | undefined, bandera: string): string {
   return valor
 }
 
-await principal()
+try {
+  await principal()
+} catch (error) {
+  // El CLI es superficie humana: los mensajes ya están en español y explican
+  // qué hacer, pero sin esto salen enterrados en un stack trace.
+  console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+}
