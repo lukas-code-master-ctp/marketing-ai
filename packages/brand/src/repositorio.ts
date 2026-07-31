@@ -21,21 +21,35 @@ export async function guardarPerfil(
 ): Promise<number> {
   const perfil = validarPerfil(crudo)
 
-  const [ultimo] = await db
-    .select({ maximo: sql<number | null>`max(${esquema.brandProfiles.version})` })
-    .from(esquema.brandProfiles)
-    .where(eq(esquema.brandProfiles.brandId, ref.brandId))
+  return db.transaction(async (tx) => {
+    // Se bloquea la fila de la marca antes de calcular la versión: sin esto,
+    // dos guardados simultáneos leen el mismo máximo, calculan la misma
+    // versión y el segundo choca contra la restricción única con un error
+    // crudo del driver, fuera de la taxonomía del sistema.
+    const [marca] = await tx
+      .select({ id: esquema.brands.id })
+      .from(esquema.brands)
+      .where(eq(esquema.brands.id, ref.brandId))
+      .for('update')
 
-  const version = (ultimo?.maximo ?? 0) + 1
+    if (!marca) throw permanente(`No existe la marca ${ref.brandId}`)
 
-  await db.insert(esquema.brandProfiles).values({
-    organizationId: ref.organizationId,
-    brandId: ref.brandId,
-    version,
-    data: perfil,
+    const [ultimo] = await tx
+      .select({ maximo: sql<number | null>`max(${esquema.brandProfiles.version})` })
+      .from(esquema.brandProfiles)
+      .where(eq(esquema.brandProfiles.brandId, ref.brandId))
+
+    const version = (ultimo?.maximo ?? 0) + 1
+
+    await tx.insert(esquema.brandProfiles).values({
+      organizationId: ref.organizationId,
+      brandId: ref.brandId,
+      version,
+      data: perfil,
+    })
+
+    return version
   })
-
-  return version
 }
 
 export async function cargarPerfilVigente(

@@ -33,8 +33,8 @@ describe('validarPerfil', () => {
     const malo = {
       ...PERFIL_VALIDO,
       pilares: [
-        { nombre: 'Educación Financiera', descripcion: 'x', proporcion: 0.5 },
-        { nombre: 'producto', descripcion: 'y', proporcion: 0.5 },
+        { nombre: 'Educación Financiera', descripcion: 'Cómo evaluar', proporcion: 0.5 },
+        { nombre: 'producto', descripcion: 'Proyectos disponibles', proporcion: 0.5 },
       ],
     }
     expect(() => validarPerfil(malo)).toThrow(/snake_case/)
@@ -51,7 +51,7 @@ describe('contextoDeMarca', () => {
 
     expect(texto).toContain('Parcelas con factibilidad garantizada')
     expect(texto).toContain('educacion (40%)')
-    expect(texto).toContain('oportunidad única')
-    expect(texto).toContain('Rentabilidad garantizada')
+    expect(texto).toContain('Preferido: factibilidad, rol, trazabilidad')
+    expect(texto).toContain('PROHIBIDO usar: Rentabilidad garantizada')
   })
 })

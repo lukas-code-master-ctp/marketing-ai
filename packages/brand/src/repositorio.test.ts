@@ -50,4 +50,28 @@ describe('repositorio de perfiles', () => {
       })
     })
   })
+
+  it('falla de forma permanente si la marca no existe', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const inexistente = { ...ref, brandId: '00000000-0000-4000-8000-000000000000' }
+      await expect(
+        guardarPerfil(db, inexistente, PERFIL_VALIDO),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  it('dos guardados simultáneos producen versiones distintas', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      const versiones = await Promise.all([
+        guardarPerfil(db, ref, PERFIL_VALIDO),
+        guardarPerfil(db, ref, PERFIL_VALIDO),
+      ])
+
+      expect([...versiones].sort()).toEqual([1, 2])
+      expect(await db.select().from(esquema.brandProfiles)).toHaveLength(2)
+    })
+  })
 })
