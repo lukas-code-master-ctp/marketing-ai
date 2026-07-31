@@ -17,6 +17,8 @@
 - **Ninguna salida de modelo se parsea con expresiones regulares.** Toda tarea de IA declara un esquema Zod y valida.
 - **Ningún paquete fuera de `@gc/ai` importa `openai` ni menciona nombres de modelos.**
 - **Los modelos se leen de variables de entorno**, nunca se escriben literales en el código.
+- **Existe un único `.env`, en la raíz del repositorio.** Ningún paquete tiene el suyo. Las pruebas lo cargan con `setupFiles: ['../../vitest.setup.ts']`; los scripts y binarios resuelven la ruta desde `import.meta.url`.
+- **Los tipos enumerados del esquema se hacen cumplir en Postgres con `CHECK`**, no solo en TypeScript: `text(col, { enum })` de Drizzle no genera restricción alguna en la base.
 - **Toda tabla lleva `organization_id`**, incluso mientras exista una sola organización.
 - **Todos los identificadores son UUID v4** generados por la base de datos (`gen_random_uuid()`).
 - **Todas las marcas de tiempo son `timestamptz`** y se guardan en UTC.
@@ -32,6 +34,7 @@
 - Create: `package.json`
 - Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.base.json`
+- Create: `vitest.setup.ts`
 - Create: `.gitignore`
 - Create: `.github/workflows/ci.yml`
 - Create: `packages/shared/package.json`
@@ -54,7 +57,7 @@
   "name": "gestor-de-contenido",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.12.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "pnpm -r test",
@@ -63,10 +66,24 @@
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
+    "dotenv": "^16.4.5",
     "@types/node": "^22.7.0"
   }
 }
 ```
+
+`vitest.setup.ts` (raíz):
+
+```ts
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
+
+// pnpm ejecuta cada paquete con su propia carpeta como cwd, así que el .env
+// de la raíz no se encuentra solo. Se resuelve desde la ubicación de este archivo.
+config({ path: fileURLToPath(new URL('.env', import.meta.url)) })
+```
+
+> Existe un único `.env`, en la raíz. Ningún paquete tiene el suyo. Los paquetes que necesiten variables de entorno en sus pruebas apuntan a este archivo con `setupFiles: ['../../vitest.setup.ts']`.
 
 `pnpm-workspace.yaml`:
 
@@ -421,7 +438,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -430,8 +447,12 @@ export default defineConfig({
 `packages/db/drizzle.config.ts`:
 
 ```ts
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'drizzle-kit'
+
+// pnpm ejecuta este script con cwd en packages/db; el .env vive en la raíz.
+config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) })
 
 export default defineConfig({
   schema: './src/esquema.ts',
@@ -1685,11 +1706,7 @@ En `packages/ai/package.json`, agregar a `dependencies`:
     "drizzle-orm": "^0.36.0"
 ```
 
-y a `devDependencies` (crear la clave si no existe):
-
-```json
-    "dotenv": "^16.4.5"
-```
+> `dotenv` no se agrega aquí: el `vitest.setup.ts` de la raíz ya carga el único `.env` del repositorio.
 
 Reemplazar `packages/ai/vitest.config.ts`:
 
@@ -1700,7 +1717,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -2008,9 +2025,6 @@ git add -A && git commit -m "feat: registro de costos de IA y guardia de presupu
     "@gc/db": "workspace:*",
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -2033,7 +2047,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -2554,9 +2568,6 @@ git add -A && git commit -m "feat: motor de pipeline con reintentos, backoff e i
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -2579,7 +2590,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -3045,9 +3056,6 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -3070,7 +3078,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -4289,6 +4297,7 @@ git add -A && git commit -m "feat: flujo P2 de generación de grilla mensual con
 - Create: `apps/cli/tsconfig.json`
 - Create: `apps/cli/vitest.config.ts`
 - Create: `apps/cli/src/comandos.ts`
+- Create: `apps/cli/src/entorno.ts`
 - Create: `apps/cli/src/main.ts`
 - Modify: `package.json` (script `cli`)
 - Modify: `.env.example` (`CARPETA_DE_MUESTRAS`)
@@ -4320,14 +4329,16 @@ git add -A && git commit -m "feat: flujo P2 de generación de grilla mensual con
     "@gc/pipeline": "workspace:*",
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
+    "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0"
   },
   "devDependencies": {
-    "dotenv": "^16.4.5",
     "tsx": "^4.19.1"
   }
 }
 ```
+
+> Aquí `dotenv` sí es dependencia de ejecución, no de desarrollo: el CLI lee el `.env` al arrancar.
 
 `apps/cli/tsconfig.json`:
 
@@ -4347,7 +4358,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
     testTimeout: 30_000,
   },
@@ -4603,10 +4614,22 @@ Esperado: PASA, 2 pruebas.
 
 - [ ] **Step 6: Implementar el punto de entrada**
 
+`apps/cli/src/entorno.ts`:
+
+```ts
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
+
+// pnpm ejecuta el CLI con cwd en apps/cli; el .env vive en la raíz.
+// Este módulo se importa primero para que las variables existan antes de que
+// se evalúe cualquier otro módulo.
+config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
+```
+
 `apps/cli/src/main.ts`:
 
 ```ts
-import 'dotenv/config'
+import './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
