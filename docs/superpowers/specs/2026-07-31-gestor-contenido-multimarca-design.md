@@ -326,6 +326,15 @@ interface ConectorDeCanal {
 
 `validar()` corre **antes** de generar, no después: informa al generador de los límites del canal (largo, hashtags, duración mínima de video). Descubrirlos al publicar significa haber pagado tokens por una pieza inválida.
 
+### El conector de blog
+
+Las tres marcas tienen sitios propios en **Next.js o HTML estático** — no hay CMS de terceros, así que no se requiere conector de WordPress ni equivalente. El artículo se guarda en `content_piece` como cualquier otra pieza; lo que cambia es cómo llega al sitio. Dos modos tras la misma interfaz:
+
+- **`blog_api`** (sitios Next.js): el sistema expone los artículos publicados de una marca en un endpoint autenticado y de solo lectura. El sitio los consume con ISR. Publicar = marcar el artículo como publicado y llamar al webhook de revalidación del sitio. Es el modo preferido: publicar y despublicar son instantáneos y no requieren build.
+- **`blog_estatico`** (sitios HTML): el sistema genera el archivo del artículo y lo entrega al repositorio del sitio mediante un commit, lo que dispara su despliegue. Más lento y con más partes móviles; se usa solo donde el primer modo no aplique.
+
+El modo se configura por marca en `channel_account`. Este es el único canal donde `publicar()` no habla con una API de terceros, y por eso es el primero en implementarse: permite ejercitar el pipeline completo de punta a punta sin depender de ninguna aprobación externa.
+
 ### Renovación de tokens
 
 Cron diario que renueva credenciales antes de expirar (los tokens de Meta y LinkedIn duran del orden de 60 días) y alerta ante fallos. Combinado con el cortacircuitos: un canal que empieza a fallar se pausa, cae a modo asistido y notifica. **Los tokens expirados son la causa número uno de que estos sistemas mueran en silencio.**
@@ -405,7 +414,6 @@ Los trámites empiezan el **día 1**, no en la Fase 3. Crear las apps de Meta y 
 
 | Punto | Supuesto por defecto | Cuándo se resuelve |
 |---|---|---|
-| Plataforma del blog | Blog propio en Next.js, dentro del mismo proyecto. Si alguna marca usa WordPress u otra, se implementa como un conector más tras la misma interfaz | Fase 1, al cargar los perfiles de marca |
 | Modelos concretos por nivel | Se fijan en la Fase 0 mediante evals; el registro de tareas declara niveles, no modelos | Fase 0 |
 | Agregador vs. apps propias | Arquitectura dual desde el diseño; arranque con blog propio + modo asistido | Inicio de Fase 3 |
 | Notificaciones del modo asistido | Correo electrónico en la Fase 2; un bot de mensajería puede sumarse después sin cambios de diseño | Fase 2 |
