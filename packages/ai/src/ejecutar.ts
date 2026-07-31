@@ -52,9 +52,9 @@ export async function ejecutarTarea<S extends z.ZodTypeAny>(
 
   let conversacion = [...mensajes]
   let ultimoProblema = ''
-  const inicio = Date.now()
 
   for (let intento = 1; intento <= 2; intento++) {
+    const inicio = Date.now()
     const respuesta = await ctx.cliente.completar({
       modelos,
       mensajes: conversacion,
@@ -64,20 +64,23 @@ export async function ejecutarTarea<S extends z.ZodTypeAny>(
       maxTokens: tarea.maxTokensSalida,
     })
 
-    const analisis = analizar(tarea.esquema, respuesta.texto)
-    if (analisis.ok) {
-      const uso: UsoDeLlamada = {
-        tarea: tarea.nombre,
-        modelo: respuesta.modelo,
-        tokensEntrada: respuesta.tokensEntrada,
-        tokensSalida: respuesta.tokensSalida,
-        costoUsd: respuesta.costoUsd,
-        latenciaMs: Date.now() - inicio,
-        hashDePrompt: hashDePrompt(mensajes),
-      }
-      await ctx.registrarUso?.(uso)
-      return { datos: analisis.datos, uso }
+    // Se registra antes de validar y en todos los caminos: una respuesta que
+    // no cumple el esquema costó tokens igual que una que sí, y el control de
+    // presupuesto es la única barrera con dinero detrás. La latencia es la de
+    // esta llamada, no la acumulada, para que cada fila describa su llamada.
+    const uso: UsoDeLlamada = {
+      tarea: tarea.nombre,
+      modelo: respuesta.modelo,
+      tokensEntrada: respuesta.tokensEntrada,
+      tokensSalida: respuesta.tokensSalida,
+      costoUsd: respuesta.costoUsd,
+      latenciaMs: Date.now() - inicio,
+      hashDePrompt: hashDePrompt(mensajes),
     }
+    await ctx.registrarUso?.(uso)
+
+    const analisis = analizar(tarea.esquema, respuesta.texto)
+    if (analisis.ok) return { datos: analisis.datos, uso }
 
     ultimoProblema = analisis.problema
     conversacion = [

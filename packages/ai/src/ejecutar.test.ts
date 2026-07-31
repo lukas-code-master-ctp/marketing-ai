@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { ejecutarTarea } from './ejecutar.js'
+import { ejecutarTarea, type UsoDeLlamada } from './ejecutar.js'
 import { ClienteFalso } from './falso.js'
 import { definirTarea } from './tarea.js'
 
@@ -74,5 +74,40 @@ describe('ejecutarTarea', () => {
       registrarUso: async (u) => void registrado.push(u),
     })
     expect(registrado).toHaveLength(1)
+  })
+
+  it('registra también la llamada que falló y disparó la reparación', async () => {
+    // La primera respuesta consumió tokens igual que la segunda: si no se
+    // registra, el presupuesto mide algo distinto del gasto real.
+    const registrado: UsoDeLlamada[] = []
+    const cliente = new ClienteFalso([
+      '{"titulo":"Hola"}',
+      '{"titulo":"Hola","puntaje":8}',
+    ])
+    const { uso } = await ejecutarTarea(TAREA, MENSAJES, {
+      cliente,
+      env: ENTORNO,
+      registrarUso: async (u) => void registrado.push(u),
+    })
+
+    expect(registrado).toHaveLength(2)
+    expect(registrado.every((u) => u.tarea === 'tarea_de_prueba')).toBe(true)
+    // El uso devuelto es el de la llamada que sí valió, y es la última fila.
+    expect(registrado[1]).toEqual(uso)
+  })
+
+  it('registra las dos llamadas aunque la tarea termine fallando', async () => {
+    const registrado: UsoDeLlamada[] = []
+    const cliente = new ClienteFalso(['{"titulo":"a"}', '{"titulo":"b"}'])
+
+    await expect(
+      ejecutarTarea(TAREA, MENSAJES, {
+        cliente,
+        env: ENTORNO,
+        registrarUso: async (u) => void registrado.push(u),
+      }),
+    ).rejects.toMatchObject({ clase: 'permanente' })
+
+    expect(registrado).toHaveLength(2)
   })
 })
