@@ -6,7 +6,7 @@ import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expandirDerivados } from './derivados.js'
@@ -39,6 +39,14 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
   const paso = definirPaso<EntradaP2, SalidaP2>({
     nombre: 'proponer_grilla',
     ejecutar: async (entrada, ctx) => {
+      // Se consulta el estado antes del presupuesto y de cualquier llamada al
+      // modelo: si la grilla ya salió de borrador el upsert la va a rechazar
+      // igual, y hoy eso se pagaba con hasta cuatro llamadas primero.
+      const estadoPrevio = await estadoDeLaGrilla(ctx.db, entrada.brandId, entrada.mes)
+      if (estadoPrevio !== null && estadoPrevio !== 'borrador') {
+        throw grillaNoRegenerable(entrada, estadoPrevio)
+      }
+
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
 
       const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
@@ -162,6 +170,36 @@ async function cargarEstrategiaVigente(
   return { id: fila.id, estrategia: r.data }
 }
 
+async function estadoDeLaGrilla(
+  db: BaseDeDatos,
+  brandId: string,
+  mes: string,
+): Promise<string | null> {
+  const [fila] = await db
+    .select({ status: esquema.contentPlans.status })
+    .from(esquema.contentPlans)
+    .where(
+      and(
+        eq(esquema.contentPlans.brandId, brandId),
+        eq(esquema.contentPlans.month, `${mes}-01`),
+      ),
+    )
+  return fila?.status ?? null
+}
+
+/**
+ * El remedio que se indica es el único que existe: `content_plans` no tiene
+ * estado "archivada" —sus estados son borrador, aprobada, en_ejecucion y
+ * cerrada— así que pedir archivar la grilla llevaba a violar el CHECK.
+ */
+function grillaNoRegenerable(entrada: EntradaP2, estado: string) {
+  return permanente(
+    `La grilla de ${entrada.mes} para la marca ${entrada.brandId} está en estado ` +
+      `"${estado}" y solo se regenera una que esté en borrador. ` +
+      `Devuélvela a "borrador" para regenerarla.`,
+  )
+}
+
 async function persistir(
   ctx: ContextoDePaso,
   entrada: EntradaP2,
@@ -188,14 +226,13 @@ async function persistir(
     })
     .returning()
 
-  // Sin fila devuelta, la grilla existente ya salió de borrador. Se escala
-  // antes de borrar nada: regenerar destruiría planificación ya revisada y,
-  // desde la Fase 2, las piezas de contenido colgadas de esos slots.
+  // Sin fila devuelta, la grilla dejó de estar en borrador entre la
+  // comprobación previa y este upsert. Se escala antes de borrar nada:
+  // regenerar destruiría planificación ya revisada y, desde la Fase 2, las
+  // piezas de contenido colgadas de esos slots.
   if (!plan) {
-    throw permanente(
-      `La grilla de ${entrada.mes} para la marca ${entrada.brandId} ya no está en ` +
-        `borrador. Archívala antes de regenerarla.`,
-    )
+    const estado = await estadoDeLaGrilla(ctx.db, entrada.brandId, entrada.mes)
+    throw grillaNoRegenerable(entrada, estado ?? 'desconocido')
   }
 
   const contentPlanId = plan.id

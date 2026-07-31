@@ -132,4 +132,48 @@ describe('flujo P1 · estrategia', () => {
       expect(fila!.data).toEqual({ marca: 'revisada a mano' })
     })
   })
+
+  it('nombra el estado real y no gasta llamadas al reintentar sobre una aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q4',
+        status: 'aprobada',
+        data: { marca: 'revisada a mano' },
+        brandProfileVersion: 1,
+      })
+
+      const cliente = new ClienteFalso([ESTRATEGIA_JSON])
+      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
+      ).rejects.toThrow(/"aprobada"/)
+
+      // El estado ya condena la regeneración: ni una llamada al modelo.
+      expect(cliente.peticiones).toHaveLength(0)
+      expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
+    })
+  })
+
+  it('nombra el estado archivada, que el upsert tampoco deja regenerar', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q4',
+        status: 'archivada',
+        data: { marca: 'vieja' },
+        brandProfileVersion: 1,
+      })
+
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
+      ).rejects.toThrow(/"archivada".*borrador/s)
+    })
+  })
 })

@@ -3,10 +3,10 @@ import {
   type MensajeLlm,
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
-import { esquema } from '@gc/db'
+import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
@@ -36,6 +36,14 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
   const paso = definirPaso<EntradaP1, SalidaP1>({
     nombre: 'generar_estrategia',
     ejecutar: async (entrada, ctx) => {
+      // Se consulta el estado antes del presupuesto y de cualquier llamada al
+      // modelo: si la estrategia ya salió de borrador el upsert la va a
+      // rechazar igual, y hoy eso se pagaba con una o dos llamadas primero.
+      const estadoPrevio = await estadoDeLaEstrategia(ctx.db, entrada.brandId, entrada.period)
+      if (estadoPrevio !== null && estadoPrevio !== 'borrador') {
+        throw estrategiaNoRegenerable(entrada, estadoPrevio)
+      }
+
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
 
       const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
@@ -83,14 +91,12 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         })
         .returning()
 
-      // Sin fila devuelta, el setWhere descartó la actualización: ya hay una
-      // estrategia aprobada o archivada para ese periodo. Se escala en vez de
-      // descartar en silencio el trabajo de revisión humana.
+      // Sin fila devuelta, el setWhere descartó la actualización: la estrategia
+      // dejó de estar en borrador entre la comprobación previa y este upsert.
+      // Se escala en vez de descartar en silencio el trabajo de revisión humana.
       if (!fila) {
-        throw permanente(
-          `Ya existe una estrategia aprobada para ${entrada.period} en la marca ` +
-            `${entrada.brandId}. Archívala antes de regenerarla.`,
-        )
+        const estado = await estadoDeLaEstrategia(ctx.db, entrada.brandId, entrada.period)
+        throw estrategiaNoRegenerable(entrada, estado ?? 'desconocido')
       }
 
       return { strategyId: fila.id, estrategia: datos }
@@ -98,4 +104,31 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
   })
 
   return { nombre: 'p1_estrategia', pasos: [paso] }
+}
+
+async function estadoDeLaEstrategia(
+  db: BaseDeDatos,
+  brandId: string,
+  period: string,
+): Promise<string | null> {
+  const [fila] = await db
+    .select({ status: esquema.strategies.status })
+    .from(esquema.strategies)
+    .where(
+      and(eq(esquema.strategies.brandId, brandId), eq(esquema.strategies.period, period)),
+    )
+  return fila?.status ?? null
+}
+
+/**
+ * El remedio que se indica es el único que existe: el upsert exige
+ * `status = 'borrador'`, así que archivar no destraba nada —una estrategia
+ * archivada queda tan irregenerable como una aprobada.
+ */
+function estrategiaNoRegenerable(entrada: EntradaP1, estado: string) {
+  return permanente(
+    `La estrategia de ${entrada.period} para la marca ${entrada.brandId} está en ` +
+      `estado "${estado}" y solo se regenera una que esté en borrador. ` +
+      `Devuélvela a "borrador" para regenerarla.`,
+  )
 }

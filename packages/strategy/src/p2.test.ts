@@ -256,4 +256,32 @@ describe('flujo P2 · grilla', () => {
       expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
     })
   })
+
+  it('nombra el estado real de la grilla y no gasta llamadas al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.contentPlans)
+        .set({ status: 'en_ejecucion' })
+        .where(eq(esquema.contentPlans.brandId, ref.brandId))
+      await db.delete(esquema.aiCalls)
+
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const otro = crearFlujoGrilla({ cliente, env: ENV })
+
+      // El mensaje nombra el estado que de verdad bloquea y el remedio real:
+      // content_plans no tiene estado "archivada", así que pedirlo era imposible.
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toThrow(/"en_ejecucion".*borrador/s)
+
+      expect(cliente.peticiones).toHaveLength(0)
+      expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
+    })
+  })
 })
