@@ -5,6 +5,8 @@ import {
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
+import { permanente } from '@gc/shared'
+import { eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
@@ -74,11 +76,24 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         })
         .onConflictDoUpdate({
           target: [esquema.strategies.brandId, esquema.strategies.period],
-          set: { data: datos, brandProfileVersion: version, status: 'borrador' },
+          // `status` queda fuera del set a propósito: un borrador sigue siendo
+          // borrador, y el setWhere impide tocar una estrategia ya aprobada.
+          set: { data: datos, brandProfileVersion: version },
+          setWhere: eq(esquema.strategies.status, 'borrador'),
         })
         .returning()
 
-      return { strategyId: fila!.id, estrategia: datos }
+      // Sin fila devuelta, el setWhere descartó la actualización: ya hay una
+      // estrategia aprobada o archivada para ese periodo. Se escala en vez de
+      // descartar en silencio el trabajo de revisión humana.
+      if (!fila) {
+        throw permanente(
+          `Ya existe una estrategia aprobada para ${entrada.period} en la marca ` +
+            `${entrada.brandId}. Archívala antes de regenerarla.`,
+        )
+      }
+
+      return { strategyId: fila.id, estrategia: datos }
     },
   })
 

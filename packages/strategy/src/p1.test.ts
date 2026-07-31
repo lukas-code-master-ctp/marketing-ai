@@ -3,6 +3,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoEstrategia } from './p1.js'
 
@@ -105,6 +106,30 @@ describe('flujo P1 · estrategia', () => {
       }
 
       expect(await db.select().from(esquema.strategies)).toHaveLength(1)
+    })
+  })
+
+  it('no pisa una estrategia ya aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, period: '2026-Q4' }
+
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'aprobada', data: { marca: 'revisada a mano' } })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const otro = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      const [fila] = await db.select().from(esquema.strategies)
+      expect(fila!.status).toBe('aprobada')
+      expect(fila!.data).toEqual({ marca: 'revisada a mano' })
     })
   })
 })
