@@ -2290,6 +2290,105 @@ describe('ejecutarFlujo', () => {
       expect(corridas[0]!.status).toBe('completado')
     })
   })
+
+  it('no reejecuta un paso completado cuya salida fue null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let efectos = 0
+      let debeFallarElSegundo = true
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, null>({
+            nombre: 'efecto_sin_retorno',
+            ejecutar: async () => {
+              efectos++
+              return null
+            },
+          }),
+          definirPaso<null, { ok: boolean }>({
+            nombre: 'fragil',
+            ejecutar: async () => {
+              if (debeFallarElSegundo) throw permanente('todavía no')
+              return { ok: true }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA),
+      ).rejects.toThrow()
+      expect(efectos).toBe(1)
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      await ejecutarFlujo(db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA)
+
+      // Un paso que devuelve null sigue estando completado: no se repite.
+      expect(efectos).toBe(1)
+
+      const [fragil] = await db
+        .select()
+        .from(esquema.pipelineSteps)
+        .where(eq(esquema.pipelineSteps.name, 'fragil'))
+      expect(fragil!.status).toBe('completado')
+      expect(fragil!.error).toBeNull()
+      expect(fragil!.finishedAt).not.toBeNull()
+    })
+  })
+
+  it('espera con backoff exponencial entre reintentos', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const esperas: number[] = []
+      let llamadas = 0
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({
+            nombre: 'inestable',
+            ejecutar: async () => {
+              llamadas++
+              if (llamadas < 3) throw transitorio('502')
+              return {}
+            },
+          }),
+        ],
+      }
+
+      await ejecutarFlujo(db, flujo, {}, { organizationId }, {
+        dormir: async (ms) => void esperas.push(ms),
+        aleatorio: () => 0,
+      })
+
+      expect(esperas).toEqual([1000, 2000])
+    })
+  })
+
+  it('rechaza reanudar una corrida de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Otra' })
+        .returning()
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({ nombre: 'trivial', ejecutar: async () => ({}) }),
+        ],
+      }
+      const r = await ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA)
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId: otra!.id, runId: r.runId }, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
 })
 ```
 
@@ -2307,7 +2406,7 @@ Esperado: FALLA con `Failed to resolve import "./motor.js"`.
 
 ```ts
 import { esquema, type BaseDeDatos } from '@gc/db'
-import { ErrorDeDominio, esTransitorio } from '@gc/shared'
+import { ErrorDeDominio, esTransitorio, permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { calcularEspera } from './espera.js'
 
@@ -2366,7 +2465,10 @@ export async function ejecutarFlujo(
   const dormir = opciones.dormir ?? dormirDeVerdad
   const aleatorio = opciones.aleatorio ?? Math.random
 
-  const runId = ctx.runId ?? (await crearCorrida(db, flujo, entrada, ctx))
+  const runId = ctx.runId
+    ? await reanudarCorrida(db, ctx.runId, ctx.organizationId)
+    : await crearCorrida(db, flujo, entrada, ctx)
+
   const ctxPaso: ContextoDePaso = {
     db,
     runId,
@@ -2379,21 +2481,22 @@ export async function ejecutarFlujo(
   for (const paso of flujo.pasos) {
     const clave = `${runId}:${paso.nombre}`
 
+    // Se pregunta por la existencia de la fila, no por su contenido: un paso
+    // completado puede haber devuelto null o void y aun así no debe reejecutarse.
     const previo = await pasoCompletado(db, clave)
     if (previo) {
-      valor = previo
+      valor = previo.output
       continue
     }
 
-    valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
-      maxIntentos, dormir, aleatorio,
-    }).catch(async (error: unknown) => {
-      await db
-        .update(esquema.pipelineRuns)
-        .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
-        .where(eq(esquema.pipelineRuns.id, runId))
+    try {
+      valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
+        maxIntentos, dormir, aleatorio,
+      })
+    } catch (error) {
+      await marcarCorridaFallida(db, runId, error)
       throw error
-    })
+    }
   }
 
   await db
@@ -2422,7 +2525,9 @@ async function crearCorrida(
   return corrida!.id
 }
 
-async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown | null> {
+/** Devuelve la fila completa, no su salida: distinguir "no hay fila" de
+ *  "hay fila cuya salida es null" es lo que sostiene la idempotencia. */
+async function pasoCompletado(db: BaseDeDatos, clave: string) {
   const [fila] = await db
     .select()
     .from(esquema.pipelineSteps)
@@ -2432,7 +2537,50 @@ async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown |
         eq(esquema.pipelineSteps.status, 'completado'),
       ),
     )
-  return fila ? fila.output : null
+  return fila ?? null
+}
+
+/** Reanudar exige que la corrida exista y pertenezca a la organización.
+ *  Además vuelve a marcarla en curso: dejarla 'fallido' mientras se reejecuta
+ *  la mostraría como fallada y corriendo al mismo tiempo. */
+async function reanudarCorrida(
+  db: BaseDeDatos,
+  runId: string,
+  organizationId: string,
+): Promise<string> {
+  const [corrida] = await db
+    .select({ id: esquema.pipelineRuns.id })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.id, runId),
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+      ),
+    )
+  if (!corrida) throw permanente(`No existe la corrida ${runId} en esta organización`)
+
+  await db
+    .update(esquema.pipelineRuns)
+    .set({ status: 'en_curso', error: null, finishedAt: null })
+    .where(eq(esquema.pipelineRuns.id, runId))
+
+  return corrida.id
+}
+
+async function marcarCorridaFallida(
+  db: BaseDeDatos,
+  runId: string,
+  error: unknown,
+): Promise<void> {
+  try {
+    await db
+      .update(esquema.pipelineRuns)
+      .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
+      .where(eq(esquema.pipelineRuns.id, runId))
+  } catch {
+    // Se descarta a propósito: el error del paso es el que le importa a quien
+    // llama, y reemplazarlo por uno de la base perdería su clasificación.
+  }
 }
 
 async function ejecutarPaso(
@@ -2456,7 +2604,16 @@ async function ejecutarPaso(
     })
     .onConflictDoUpdate({
       target: esquema.pipelineSteps.idempotencyKey,
-      set: { status: 'en_curso', attempt: 1, error: null },
+      // Se reescribe la fila entera del intento anterior: conservar su `input`
+      // o su `finished_at` dejaría un registro que miente sobre qué se ejecutó.
+      set: {
+        status: 'en_curso',
+        attempt: 1,
+        error: null,
+        input: entrada as object,
+        startedAt: new Date(),
+        finishedAt: null,
+      },
     })
     .returning()
 
