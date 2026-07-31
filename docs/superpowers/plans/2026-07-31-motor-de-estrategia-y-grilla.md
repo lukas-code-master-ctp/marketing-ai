@@ -17,12 +17,14 @@
 - **Ninguna salida de modelo se parsea con expresiones regulares.** Toda tarea de IA declara un esquema Zod y valida.
 - **Ningún paquete fuera de `@gc/ai` importa `openai` ni menciona nombres de modelos.**
 - **Los modelos se leen de variables de entorno**, nunca se escriben literales en el código.
+- **Existe un único `.env`, en la raíz del repositorio.** Ningún paquete tiene el suyo. Las pruebas lo cargan con `setupFiles: ['../../vitest.setup.ts']`; los scripts y binarios resuelven la ruta desde `import.meta.url`.
+- **Los tipos enumerados del esquema se hacen cumplir en Postgres con `CHECK`**, no solo en TypeScript: `text(col, { enum })` de Drizzle no genera restricción alguna en la base.
 - **Toda tabla lleva `organization_id`**, incluso mientras exista una sola organización.
 - **Todos los identificadores son UUID v4** generados por la base de datos (`gen_random_uuid()`).
 - **Todas las marcas de tiempo son `timestamptz`** y se guardan en UTC.
 - **TDD estricto:** ningún paso de implementación se escribe antes de tener su prueba fallando.
 - **Commits frecuentes:** un commit por tarea como mínimo, en español, con prefijo convencional (`feat:`, `test:`, `chore:`).
-- Ejecutar pruebas con `pnpm -r test`. Ejecutar las de un paquete con `pnpm --filter @gc/<nombre> test`.
+- **Ejecutar la suite completa con `pnpm test` desde la raíz**, nunca con `pnpm -r test` directo. Todos los paquetes comparten la misma base de datos de pruebas y cada prueba la vacía al empezar, así que corriéndolos en paralelo se pisan entre sí. El script de la raíz serializa los paquetes con `--workspace-concurrency=1`. Las de un paquete suelto: `pnpm --filter @gc/<nombre> test`.
 
 ---
 
@@ -32,6 +34,7 @@
 - Create: `package.json`
 - Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.base.json`
+- Create: `vitest.setup.ts`
 - Create: `.gitignore`
 - Create: `.github/workflows/ci.yml`
 - Create: `packages/shared/package.json`
@@ -54,19 +57,33 @@
   "name": "gestor-de-contenido",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.12.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
+    "dotenv": "^16.4.5",
     "@types/node": "^22.7.0"
   }
 }
 ```
+
+`vitest.setup.ts` (raíz):
+
+```ts
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
+
+// pnpm ejecuta cada paquete con su propia carpeta como cwd, así que el .env
+// de la raíz no se encuentra solo. Se resuelve desde la ubicación de este archivo.
+config({ path: fileURLToPath(new URL('.env', import.meta.url)) })
+```
+
+> Existe un único `.env`, en la raíz. Ningún paquete tiene el suyo. Los paquetes que necesiten variables de entorno en sus pruebas apuntan a este archivo con `setupFiles: ['../../vitest.setup.ts']`.
 
 `pnpm-workspace.yaml`:
 
@@ -106,6 +123,9 @@ dist/
 .env.local
 *.tsbuildinfo
 coverage/
+
+# Perfiles de marca reales: son datos de operación, no código fuente.
+perfiles/
 ```
 
 - [ ] **Step 2: Crear el paquete `@gc/shared`**
@@ -296,7 +316,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm -r test
+      - run: pnpm test
 ```
 
 - [ ] **Step 8: Commit**
@@ -421,7 +441,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -430,8 +450,12 @@ export default defineConfig({
 `packages/db/drizzle.config.ts`:
 
 ```ts
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'drizzle-kit'
+
+// pnpm ejecuta este script con cwd en packages/db; el .env vive en la raíz.
+config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) })
 
 export default defineConfig({
   schema: './src/esquema.ts',
@@ -709,6 +733,8 @@ export const pipelineRuns = pgTable('pipeline_runs', {
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
   runId: uuid('run_id').notNull()
     .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
@@ -1685,11 +1711,7 @@ En `packages/ai/package.json`, agregar a `dependencies`:
     "drizzle-orm": "^0.36.0"
 ```
 
-y a `devDependencies` (crear la clave si no existe):
-
-```json
-    "dotenv": "^16.4.5"
-```
+> `dotenv` no se agrega aquí: el `vitest.setup.ts` de la raíz ya carga el único `.env` del repositorio.
 
 Reemplazar `packages/ai/vitest.config.ts`:
 
@@ -1700,7 +1722,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -2008,9 +2030,6 @@ git add -A && git commit -m "feat: registro de costos de IA y guardia de presupu
     "@gc/db": "workspace:*",
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -2033,7 +2052,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -2138,8 +2157,11 @@ describe('ejecutarFlujo', () => {
       expect(r.estado).toBe('completado')
       expect(r.salida).toEqual({ n: 11 })
 
+      // Postgres no garantiza el orden de filas sin ORDER BY, así que aquí se
+      // comparan como conjunto. El encadenamiento ya quedó probado por
+      // `salida`: 5*2+1 = 11, mientras que invertir los pasos daría 12.
       const pasos = await db.select().from(esquema.pipelineSteps)
-      expect(pasos.map((p) => p.name)).toEqual(['doblar', 'sumar_uno'])
+      expect(pasos.map((p) => p.name).sort()).toEqual(['doblar', 'sumar_uno'])
       expect(pasos.every((p) => p.status === 'completado')).toBe(true)
     })
   })
@@ -2274,6 +2296,105 @@ describe('ejecutarFlujo', () => {
       expect(corridas[0]!.status).toBe('completado')
     })
   })
+
+  it('no reejecuta un paso completado cuya salida fue null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let efectos = 0
+      let debeFallarElSegundo = true
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, null>({
+            nombre: 'efecto_sin_retorno',
+            ejecutar: async () => {
+              efectos++
+              return null
+            },
+          }),
+          definirPaso<null, { ok: boolean }>({
+            nombre: 'fragil',
+            ejecutar: async () => {
+              if (debeFallarElSegundo) throw permanente('todavía no')
+              return { ok: true }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA),
+      ).rejects.toThrow()
+      expect(efectos).toBe(1)
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      await ejecutarFlujo(db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA)
+
+      // Un paso que devuelve null sigue estando completado: no se repite.
+      expect(efectos).toBe(1)
+
+      const [fragil] = await db
+        .select()
+        .from(esquema.pipelineSteps)
+        .where(eq(esquema.pipelineSteps.name, 'fragil'))
+      expect(fragil!.status).toBe('completado')
+      expect(fragil!.error).toBeNull()
+      expect(fragil!.finishedAt).not.toBeNull()
+    })
+  })
+
+  it('espera con backoff exponencial entre reintentos', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const esperas: number[] = []
+      let llamadas = 0
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({
+            nombre: 'inestable',
+            ejecutar: async () => {
+              llamadas++
+              if (llamadas < 3) throw transitorio('502')
+              return {}
+            },
+          }),
+        ],
+      }
+
+      await ejecutarFlujo(db, flujo, {}, { organizationId }, {
+        dormir: async (ms) => void esperas.push(ms),
+        aleatorio: () => 0,
+      })
+
+      expect(esperas).toEqual([1000, 2000])
+    })
+  })
+
+  it('rechaza reanudar una corrida de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Otra' })
+        .returning()
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({ nombre: 'trivial', ejecutar: async () => ({}) }),
+        ],
+      }
+      const r = await ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA)
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId: otra!.id, runId: r.runId }, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
 })
 ```
 
@@ -2291,7 +2412,7 @@ Esperado: FALLA con `Failed to resolve import "./motor.js"`.
 
 ```ts
 import { esquema, type BaseDeDatos } from '@gc/db'
-import { ErrorDeDominio, esTransitorio } from '@gc/shared'
+import { ErrorDeDominio, esTransitorio, permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { calcularEspera } from './espera.js'
 
@@ -2350,7 +2471,10 @@ export async function ejecutarFlujo(
   const dormir = opciones.dormir ?? dormirDeVerdad
   const aleatorio = opciones.aleatorio ?? Math.random
 
-  const runId = ctx.runId ?? (await crearCorrida(db, flujo, entrada, ctx))
+  const runId = ctx.runId
+    ? await reanudarCorrida(db, ctx.runId, ctx.organizationId)
+    : await crearCorrida(db, flujo, entrada, ctx)
+
   const ctxPaso: ContextoDePaso = {
     db,
     runId,
@@ -2363,21 +2487,22 @@ export async function ejecutarFlujo(
   for (const paso of flujo.pasos) {
     const clave = `${runId}:${paso.nombre}`
 
+    // Se pregunta por la existencia de la fila, no por su contenido: un paso
+    // completado puede haber devuelto null o void y aun así no debe reejecutarse.
     const previo = await pasoCompletado(db, clave)
     if (previo) {
-      valor = previo
+      valor = previo.output
       continue
     }
 
-    valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
-      maxIntentos, dormir, aleatorio,
-    }).catch(async (error: unknown) => {
-      await db
-        .update(esquema.pipelineRuns)
-        .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
-        .where(eq(esquema.pipelineRuns.id, runId))
+    try {
+      valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
+        maxIntentos, dormir, aleatorio,
+      })
+    } catch (error) {
+      await marcarCorridaFallida(db, runId, error)
       throw error
-    })
+    }
   }
 
   await db
@@ -2406,7 +2531,9 @@ async function crearCorrida(
   return corrida!.id
 }
 
-async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown | null> {
+/** Devuelve la fila completa, no su salida: distinguir "no hay fila" de
+ *  "hay fila cuya salida es null" es lo que sostiene la idempotencia. */
+async function pasoCompletado(db: BaseDeDatos, clave: string) {
   const [fila] = await db
     .select()
     .from(esquema.pipelineSteps)
@@ -2416,7 +2543,50 @@ async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown |
         eq(esquema.pipelineSteps.status, 'completado'),
       ),
     )
-  return fila ? fila.output : null
+  return fila ?? null
+}
+
+/** Reanudar exige que la corrida exista y pertenezca a la organización.
+ *  Además vuelve a marcarla en curso: dejarla 'fallido' mientras se reejecuta
+ *  la mostraría como fallada y corriendo al mismo tiempo. */
+async function reanudarCorrida(
+  db: BaseDeDatos,
+  runId: string,
+  organizationId: string,
+): Promise<string> {
+  const [corrida] = await db
+    .select({ id: esquema.pipelineRuns.id })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.id, runId),
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+      ),
+    )
+  if (!corrida) throw permanente(`No existe la corrida ${runId} en esta organización`)
+
+  await db
+    .update(esquema.pipelineRuns)
+    .set({ status: 'en_curso', error: null, finishedAt: null })
+    .where(eq(esquema.pipelineRuns.id, runId))
+
+  return corrida.id
+}
+
+async function marcarCorridaFallida(
+  db: BaseDeDatos,
+  runId: string,
+  error: unknown,
+): Promise<void> {
+  try {
+    await db
+      .update(esquema.pipelineRuns)
+      .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
+      .where(eq(esquema.pipelineRuns.id, runId))
+  } catch {
+    // Se descarta a propósito: el error del paso es el que le importa a quien
+    // llama, y reemplazarlo por uno de la base perdería su clasificación.
+  }
 }
 
 async function ejecutarPaso(
@@ -2431,6 +2601,7 @@ async function ejecutarPaso(
   const [fila] = await db
     .insert(esquema.pipelineSteps)
     .values({
+      organizationId: ctx.organizationId,
       runId: ctx.runId,
       name: paso.nombre,
       status: 'en_curso',
@@ -2439,7 +2610,16 @@ async function ejecutarPaso(
     })
     .onConflictDoUpdate({
       target: esquema.pipelineSteps.idempotencyKey,
-      set: { status: 'en_curso', attempt: 1, error: null },
+      // Se reescribe la fila entera del intento anterior: conservar su `input`
+      // o su `finished_at` dejaría un registro que miente sobre qué se ejecutó.
+      set: {
+        status: 'en_curso',
+        attempt: 1,
+        error: null,
+        input: entrada as object,
+        startedAt: new Date(),
+        finishedAt: null,
+      },
     })
     .returning()
 
@@ -2519,7 +2699,6 @@ git add -A && git commit -m "feat: motor de pipeline con reintentos, backoff e i
 - Create: `packages/brand/vitest.config.ts`
 - Create: `packages/brand/src/perfil.ts`
 - Create: `packages/brand/src/repositorio.ts`
-- Create: `packages/brand/src/contexto.ts`
 - Create: `packages/brand/src/index.ts`
 - Test: `packages/brand/src/perfil.test.ts`
 - Test: `packages/brand/src/repositorio.test.ts`
@@ -2555,9 +2734,6 @@ git add -A && git commit -m "feat: motor de pipeline con reintentos, backoff e i
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -2580,7 +2756,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -2604,12 +2780,15 @@ describe('validarPerfil', () => {
     expect(validarPerfil(PERFIL_VALIDO).pilares).toHaveLength(3)
   })
 
+  // Las descripciones de estos pilares son válidas a propósito: con
+  // `descripcion: 'x'` Zod fallaría por forma y el test pasaría sin llegar
+  // nunca a la regla que dice verificar.
   it('rechaza pilares cuyas proporciones no suman 1', () => {
     const malo = {
       ...PERFIL_VALIDO,
       pilares: [
-        { nombre: 'educacion', descripcion: 'x', proporcion: 0.5 },
-        { nombre: 'producto', descripcion: 'y', proporcion: 0.2 },
+        { nombre: 'educacion', descripcion: 'Cómo evaluar', proporcion: 0.5 },
+        { nombre: 'producto', descripcion: 'Proyectos disponibles', proporcion: 0.2 },
       ],
     }
     expect(() => validarPerfil(malo)).toThrow(/proporciones/i)
@@ -2619,8 +2798,8 @@ describe('validarPerfil', () => {
     const malo = {
       ...PERFIL_VALIDO,
       pilares: [
-        { nombre: 'educacion', descripcion: 'x', proporcion: 0.5 },
-        { nombre: 'educacion', descripcion: 'y', proporcion: 0.5 },
+        { nombre: 'educacion', descripcion: 'Cómo evaluar', proporcion: 0.5 },
+        { nombre: 'educacion', descripcion: 'Otra cosa distinta', proporcion: 0.5 },
       ],
     }
     expect(() => validarPerfil(malo)).toThrow(/repetid/i)
@@ -2630,8 +2809,8 @@ describe('validarPerfil', () => {
     const malo = {
       ...PERFIL_VALIDO,
       pilares: [
-        { nombre: 'Educación Financiera', descripcion: 'x', proporcion: 0.5 },
-        { nombre: 'producto', descripcion: 'y', proporcion: 0.5 },
+        { nombre: 'Educación Financiera', descripcion: 'Cómo evaluar', proporcion: 0.5 },
+        { nombre: 'producto', descripcion: 'Proyectos disponibles', proporcion: 0.5 },
       ],
     }
     expect(() => validarPerfil(malo)).toThrow(/snake_case/)
@@ -2648,8 +2827,8 @@ describe('contextoDeMarca', () => {
 
     expect(texto).toContain('Parcelas con factibilidad garantizada')
     expect(texto).toContain('educacion (40%)')
-    expect(texto).toContain('inversión segura')
-    expect(texto).toContain('Rentabilidad garantizada')
+    expect(texto).toContain('Preferido: factibilidad, rol, trazabilidad')
+    expect(texto).toContain('PROHIBIDO usar: Rentabilidad garantizada')
   })
 })
 ```
@@ -2898,6 +3077,36 @@ describe('repositorio de perfiles', () => {
       })
     })
   })
+
+  it('falla de forma permanente si la marca no existe', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const inexistente = { ...ref, brandId: '00000000-0000-4000-8000-000000000000' }
+      await expect(
+        guardarPerfil(db, inexistente, PERFIL_VALIDO),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  // Verifica el comportamiento correcto bajo concurrencia, pero NO es una
+  // prueba de regresión confiable de la carrera: sin el FOR UPDATE también
+  // pasa, porque un Postgres local responde antes de que las dos operaciones
+  // alcancen a solaparse. La garantía real está en el bloqueo de
+  // repositorio.ts, no aquí. Que este test esté verde no prueba que el
+  // bloqueo siga puesto.
+  it('dos guardados simultáneos producen versiones distintas', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      const versiones = await Promise.all([
+        guardarPerfil(db, ref, PERFIL_VALIDO),
+        guardarPerfil(db, ref, PERFIL_VALIDO),
+      ])
+
+      expect([...versiones].sort()).toEqual([1, 2])
+      expect(await db.select().from(esquema.brandProfiles)).toHaveLength(2)
+    })
+  })
 })
 ```
 
@@ -2937,21 +3146,35 @@ export async function guardarPerfil(
 ): Promise<number> {
   const perfil = validarPerfil(crudo)
 
-  const [ultimo] = await db
-    .select({ maximo: sql<number | null>`max(${esquema.brandProfiles.version})` })
-    .from(esquema.brandProfiles)
-    .where(eq(esquema.brandProfiles.brandId, ref.brandId))
+  return db.transaction(async (tx) => {
+    // Se bloquea la fila de la marca antes de calcular la versión: sin esto,
+    // dos guardados simultáneos leen el mismo máximo, calculan la misma
+    // versión y el segundo choca contra la restricción única con un error
+    // crudo del driver, fuera de la taxonomía del sistema.
+    const [marca] = await tx
+      .select({ id: esquema.brands.id })
+      .from(esquema.brands)
+      .where(eq(esquema.brands.id, ref.brandId))
+      .for('update')
 
-  const version = (ultimo?.maximo ?? 0) + 1
+    if (!marca) throw permanente(`No existe la marca ${ref.brandId}`)
 
-  await db.insert(esquema.brandProfiles).values({
-    organizationId: ref.organizationId,
-    brandId: ref.brandId,
-    version,
-    data: perfil,
+    const [ultimo] = await tx
+      .select({ maximo: sql<number | null>`max(${esquema.brandProfiles.version})` })
+      .from(esquema.brandProfiles)
+      .where(eq(esquema.brandProfiles.brandId, ref.brandId))
+
+    const version = (ultimo?.maximo ?? 0) + 1
+
+    await tx.insert(esquema.brandProfiles).values({
+      organizationId: ref.organizationId,
+      brandId: ref.brandId,
+      version,
+      data: perfil,
+    })
+
+    return version
   })
-
-  return version
 }
 
 export async function cargarPerfilVigente(
@@ -2974,21 +3197,14 @@ export async function cargarPerfilVigente(
 `packages/brand/src/index.ts`:
 
 ```ts
-export * from './contexto.js'
 export * from './perfil.js'
 export * from './perfil.fixture.js'
 export * from './repositorio.js'
 ```
 
 > `PERFIL_VALIDO` se exporta desde el índice a propósito: las Tasks 8, 9 y 11 lo usan como marca de referencia en sus pruebas y en la marcha en seco.
-
-`packages/brand/src/contexto.ts`:
-
-```ts
-// `contextoDeMarca` vive en perfil.ts junto al esquema que describe.
-// Este módulo existe para futuras capas de contexto (ejemplos, histórico).
-export { contextoDeMarca } from './perfil.js'
-```
+>
+> `contextoDeMarca` vive en `perfil.ts`, junto al esquema que describe. No crees un módulo `contexto.ts` que solo lo reexporte: cuando la Fase 2 agregue capas de contexto (ejemplos, histórico), ese módulo se crea con contenido real.
 
 - [ ] **Step 9: Ejecutar todas las pruebas del paquete**
 
@@ -3013,6 +3229,7 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
 - Create: `packages/strategy/tsconfig.json`
 - Create: `packages/strategy/vitest.config.ts`
 - Create: `packages/strategy/src/esquemas.ts`
+- Create: `packages/strategy/src/tipos.ts`
 - Create: `packages/strategy/src/prompts/generar-estrategia.md`
 - Create: `packages/strategy/src/p1.ts`
 - Create: `packages/strategy/src/index.ts`
@@ -3024,7 +3241,8 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
 - Produces:
   - `Estrategia` (esquema Zod) y `TipoEstrategia`
   - `TAREA_ESTRATEGIA: DefinicionDeTarea<typeof Estrategia>`
-  - `crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo` con `Dependencias { cliente: ClienteLlm; env?: Record<string, string | undefined> }`
+  - `Dependencias { cliente: ClienteLlm; env?: Record<string, string | undefined> }` en `src/tipos.ts` — compartida por P1 y P2, para que ningún flujo dependa del otro
+  - `crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo`
   - `EntradaP1 { brandId: string; period: string }`, `SalidaP1 { strategyId: string; estrategia: TipoEstrategia }`
 
 - [ ] **Step 1: Crear el paquete `@gc/strategy`**
@@ -3051,9 +3269,6 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "dotenv": "^16.4.5"
   }
 }
 ```
@@ -3076,7 +3291,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
   },
 })
@@ -3096,6 +3311,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoEstrategia } from './p1.js'
 
@@ -3198,6 +3414,30 @@ describe('flujo P1 · estrategia', () => {
       }
 
       expect(await db.select().from(esquema.strategies)).toHaveLength(1)
+    })
+  })
+
+  it('no pisa una estrategia ya aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, period: '2026-Q4' }
+
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'aprobada', data: { marca: 'revisada a mano' } })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const otro = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      const [fila] = await db.select().from(esquema.strategies)
+      expect(fila!.status).toBe('aprobada')
+      expect(fila!.data).toEqual({ marca: 'revisada a mano' })
     })
   })
 })
@@ -3305,19 +3545,34 @@ Responde únicamente con el JSON que cumple el esquema solicitado.
 
 - [ ] **Step 5: Implementar el flujo P1**
 
+`packages/strategy/src/tipos.ts`:
+
+```ts
+import type { ClienteLlm } from '@gc/ai'
+
+/** Dependencias inyectadas a los flujos P1 y P2. */
+export interface Dependencias {
+  cliente: ClienteLlm
+  env?: Record<string, string | undefined>
+}
+```
+
 `packages/strategy/src/p1.ts`:
 
 ```ts
 import {
   crearRegistrador, definirTarea, ejecutarTarea, exigirPresupuesto,
-  type ClienteLlm, type MensajeLlm,
+  type MensajeLlm,
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
+import { permanente } from '@gc/shared'
+import { eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
+import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({
   nombre: 'generar_estrategia',
@@ -3328,11 +3583,6 @@ export const TAREA_ESTRATEGIA = definirTarea({
 })
 
 const RUTA_PROMPT = fileURLToPath(new URL('./prompts/generar-estrategia.md', import.meta.url))
-
-export interface Dependencias {
-  cliente: ClienteLlm
-  env?: Record<string, string | undefined>
-}
 
 export interface EntradaP1 {
   brandId: string
@@ -3388,11 +3638,24 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         })
         .onConflictDoUpdate({
           target: [esquema.strategies.brandId, esquema.strategies.period],
-          set: { data: datos, brandProfileVersion: version, status: 'borrador' },
+          // `status` queda fuera del set a propósito: un borrador sigue siendo
+          // borrador, y el setWhere impide tocar una estrategia ya aprobada.
+          set: { data: datos, brandProfileVersion: version },
+          setWhere: eq(esquema.strategies.status, 'borrador'),
         })
         .returning()
 
-      return { strategyId: fila!.id, estrategia: datos }
+      // Sin fila devuelta, el setWhere descartó la actualización: ya hay una
+      // estrategia aprobada o archivada para ese periodo. Se escala en vez de
+      // descartar en silencio el trabajo de revisión humana.
+      if (!fila) {
+        throw permanente(
+          `Ya existe una estrategia aprobada para ${entrada.period} en la marca ` +
+            `${entrada.brandId}. Archívala antes de regenerarla.`,
+        )
+      }
+
+      return { strategyId: fila.id, estrategia: datos }
     },
   })
 
@@ -3405,6 +3668,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
 ```ts
 export * from './esquemas.js'
 export * from './p1.js'
+export * from './tipos.js'
 ```
 
 - [ ] **Step 6: Ejecutar las pruebas y verificar que pasan**
@@ -3475,7 +3739,7 @@ import type { TipoEstrategia } from './esquemas.js'
 import { hayBloqueantes, validarGrilla, type ContextoDeValidacion } from './validacion.js'
 
 const ESTRATEGIA: TipoEstrategia = {
-  objetivos: [{ nombre: 'A', metrica: 'alcance', meta: '+10%' }],
+  objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
   mensajesClave: ['uno que es largo', 'otro que es largo'],
   mixDeCanales: [
     { canal: 'blog', publicacionesPorSemana: 1 },
@@ -3815,7 +4079,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { eq, isNotNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoGrilla } from './p2.js'
 
@@ -3823,7 +4087,7 @@ const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA = {
-  objetivos: [{ nombre: 'A', metrica: 'alcance', meta: '+10%' }],
+  objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
   mensajesClave: ['mensaje uno largo', 'mensaje dos largo'],
   mixDeCanales: [{ canal: 'blog', publicacionesPorSemana: 1 }],
   reciclaje: [{ desde: 'blog', hacia: ['linkedin'], diasDespues: 2 }],
@@ -3884,12 +4148,22 @@ describe('flujo P2 · grilla', () => {
       const slots = await db.select().from(esquema.planSlots)
       expect(slots).toHaveLength(8)
 
-      const derivados = await db
-        .select()
-        .from(esquema.planSlots)
-        .where(isNotNull(esquema.planSlots.sourceSlotId))
+      // No basta con que cada derivado cuelgue de algún padre: los cuatro
+      // artículos son idénticos salvo la fecha, así que un mapeo barajado
+      // pasaría igual. La fecha del hijo debe ser la del padre + diasDespues.
+      const porId = new Map(slots.map((s) => [s.id, s]))
+      const derivados = slots.filter((s) => s.sourceSlotId !== null)
       expect(derivados).toHaveLength(4)
-      expect(derivados.every((d) => d.channel === 'linkedin')).toBe(true)
+
+      for (const d of derivados) {
+        expect(d.channel).toBe('linkedin')
+        const padre = porId.get(d.sourceSlotId!)
+        expect(padre).toBeDefined()
+        expect(padre!.channel).toBe('blog')
+        const dias =
+          (d.scheduledFor.getTime() - padre!.scheduledFor.getTime()) / 86_400_000
+        expect(dias).toBe(2)
+      }
     })
   })
 
@@ -3950,6 +4224,31 @@ describe('flujo P2 · grilla', () => {
       }
 
       expect(await db.select().from(esquema.contentPlans)).toHaveLength(1)
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+    })
+  })
+
+  it('no regenera una grilla que ya salió de borrador', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.contentPlans)
+        .set({ status: 'aprobada' })
+        .where(eq(esquema.contentPlans.brandId, ref.brandId))
+
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      // Ni el estado ni los slots se tocan: el throw ocurre antes del delete.
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.status).toBe('aprobada')
       expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
     })
   })
@@ -4070,7 +4369,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expandirDerivados } from './derivados.js'
 import { Estrategia, GrillaPropuesta, type TipoEstrategia, type TipoSlotPropuesto } from './esquemas.js'
-import type { Dependencias } from './p1.js'
+import type { Dependencias } from './tipos.js'
 import { hayBloqueantes, validarGrilla, type Problema } from './validacion.js'
 
 export const TAREA_GRILLA = definirTarea({
@@ -4217,13 +4516,27 @@ async function persistir(
     })
     .onConflictDoUpdate({
       target: [esquema.contentPlans.brandId, esquema.contentPlans.month],
-      set: { strategyId, status: 'borrador' },
+      // `status` queda fuera del set: un borrador sigue siendo borrador, y el
+      // setWhere impide tocar una grilla aprobada, en ejecución o cerrada.
+      set: { strategyId },
+      setWhere: eq(esquema.contentPlans.status, 'borrador'),
     })
     .returning()
 
-  const contentPlanId = plan!.id
+  // Sin fila devuelta, la grilla existente ya salió de borrador. Se escala
+  // antes de borrar nada: regenerar destruiría planificación ya revisada y,
+  // desde la Fase 2, las piezas de contenido colgadas de esos slots.
+  if (!plan) {
+    throw permanente(
+      `La grilla de ${entrada.mes} para la marca ${entrada.brandId} ya no está en ` +
+        `borrador. Archívala antes de regenerarla.`,
+    )
+  }
 
-  // Regenerar reemplaza la grilla anterior por completo.
+  const contentPlanId = plan.id
+
+  // Solo se llega aquí con un borrador: regenerar lo reemplaza por completo,
+  // para que un mes nunca mezcle planificación vieja con nueva.
   await ctx.db
     .delete(esquema.planSlots)
     .where(eq(esquema.planSlots.contentPlanId, contentPlanId))
@@ -4286,6 +4599,7 @@ git add -A && git commit -m "feat: flujo P2 de generación de grilla mensual con
 - Create: `apps/cli/tsconfig.json`
 - Create: `apps/cli/vitest.config.ts`
 - Create: `apps/cli/src/comandos.ts`
+- Create: `apps/cli/src/entorno.ts`
 - Create: `apps/cli/src/main.ts`
 - Modify: `package.json` (script `cli`)
 - Modify: `.env.example` (`CARPETA_DE_MUESTRAS`)
@@ -4317,14 +4631,16 @@ git add -A && git commit -m "feat: flujo P2 de generación de grilla mensual con
     "@gc/pipeline": "workspace:*",
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
+    "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0"
   },
   "devDependencies": {
-    "dotenv": "^16.4.5",
     "tsx": "^4.19.1"
   }
 }
 ```
+
+> Aquí `dotenv` sí es dependencia de ejecución, no de desarrollo: el CLI lee el `.env` al arrancar.
 
 `apps/cli/tsconfig.json`:
 
@@ -4344,7 +4660,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    setupFiles: ['dotenv/config'],
+    setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
     testTimeout: 30_000,
   },
@@ -4354,8 +4670,10 @@ export default defineConfig({
 Agregar a los `scripts` de `package.json` de la raíz:
 
 ```json
-    "cli": "pnpm --filter @gc/cli start --"
+    "cli": "pnpm --filter @gc/cli start"
 ```
+
+> Sin `--` al final: al anidarse `pnpm run` sobre `pnpm run`, el separador se duplica y llega como argumento posicional a `parseArgs`, que lo rechaza.
 
 Agregar a `.env.example`:
 
@@ -4550,11 +4868,20 @@ export interface FilaDeGrilla {
   derivado: boolean
 }
 
+const MES_VALIDO = /^\d{4}-(0[1-9]|1[0-2])$/
+
 export async function verGrilla(
   db: BaseDeDatos,
   args: { slug: string; mes: string },
 ): Promise<FilaDeGrilla[]> {
   const ref = await resolverMarca(db, args.slug)
+
+  // Sin esta validación un mes mal escrito produce fechas Invalid Date y el
+  // usuario recibe un error del driver en vez de saber qué escribió mal.
+  if (!MES_VALIDO.test(args.mes)) {
+    throw permanente(`Mes inválido "${args.mes}": se espera el formato AAAA-MM`)
+  }
+
   const [anio, mes] = args.mes.split('-').map(Number)
   const desde = new Date(Date.UTC(anio!, mes! - 1, 1))
   const hasta = new Date(Date.UTC(anio!, mes!, 1))
@@ -4600,10 +4927,33 @@ Esperado: PASA, 2 pruebas.
 
 - [ ] **Step 6: Implementar el punto de entrada**
 
+`apps/cli/src/entorno.ts`:
+
+```ts
+import { config } from 'dotenv'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// pnpm ejecuta el CLI con cwd en apps/cli; el .env vive en la raíz.
+// Este módulo se importa primero para que las variables existan antes de que
+// se evalúe cualquier otro módulo.
+config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
+
+/**
+ * Resuelve una ruta relativa contra el directorio donde el usuario escribió el
+ * comando, no contra `apps/cli`. pnpm cambia el cwd al del paquete y deja el
+ * original en INIT_CWD; sin esto, `--archivo perfiles/x.json` buscaría en
+ * `apps/cli/perfiles/x.json`.
+ */
+export function resolverDesdeInvocacion(ruta: string): string {
+  return resolve(process.env.INIT_CWD ?? process.cwd(), ruta)
+}
+```
+
 `apps/cli/src/main.ts`:
 
 ```ts
-import 'dotenv/config'
+import { resolverDesdeInvocacion } from './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
@@ -4650,6 +5000,16 @@ async function principal(): Promise<void> {
   if (!url) throw new Error('Falta DATABASE_URL')
 
   const env = values.seco ? { ...process.env, IA_EN_SECO: 'true' } : process.env
+
+  // Las rutas del entorno y de la línea de comandos son relativas a donde el
+  // usuario está parado, no a apps/cli.
+  const opcionesDeCliente = {
+    env,
+    ...(env.CARPETA_DE_MUESTRAS !== undefined
+      ? { carpetaDeMuestras: resolverDesdeInvocacion(env.CARPETA_DE_MUESTRAS) }
+      : {}),
+  }
+
   const { db, cerrar } = crearConexion(url)
 
   try {
@@ -4666,13 +5026,13 @@ async function principal(): Promise<void> {
       case 'perfil:cargar': {
         const version = await cargarPerfilDeArchivo(db, {
           slug: exigir(values.marca, '--marca'),
-          archivo: exigir(values.archivo, '--archivo'),
+          archivo: resolverDesdeInvocacion(exigir(values.archivo, '--archivo')),
         })
         console.log(`Perfil guardado como versión ${version}`)
         break
       }
       case 'estrategia:generar': {
-        const r = await generarEstrategia(db, crearCliente({ env }), {
+        const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           periodo: exigir(values.periodo, '--periodo'),
           env,
@@ -4681,7 +5041,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'grilla:generar': {
-        const r = await generarGrilla(db, crearCliente({ env }), {
+        const r = await generarGrilla(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
           env,
@@ -4711,7 +5071,14 @@ function exigir(valor: string | undefined, bandera: string): string {
   return valor
 }
 
-await principal()
+try {
+  await principal()
+} catch (error) {
+  // El CLI es superficie humana: los mensajes ya están en español y explican
+  // qué hacer, pero sin esto salen enterrados en un stack trace.
+  console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+}
 ```
 
 - [ ] **Step 7: Verificar el flujo real en seco**
@@ -4759,7 +5126,7 @@ Esperado: una tabla de 12 filas ordenada por fecha, con 8 marcadas como `derivad
 - [ ] **Step 8: Ejecutar la suite completa**
 
 ```bash
-pnpm -r test && pnpm typecheck
+pnpm test && pnpm typecheck
 ```
 
 Esperado: PASA todo — 7 paquetes, 74 pruebas.

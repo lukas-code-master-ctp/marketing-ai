@@ -1,0 +1,6 @@
+export * from './derivados.js'
+export * from './esquemas.js'
+export * from './p1.js'
+export * from './p2.js'
+export * from './tipos.js'
+export * from './validacion.js'

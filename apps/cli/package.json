@@ -1,0 +1,24 @@
+{
+  "name": "@gc/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gc/ai": "workspace:*",
+    "@gc/brand": "workspace:*",
+    "@gc/db": "workspace:*",
+    "@gc/pipeline": "workspace:*",
+    "@gc/shared": "workspace:*",
+    "@gc/strategy": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.1"
+  }
+}

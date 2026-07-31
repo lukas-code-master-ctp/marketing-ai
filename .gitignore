@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+*.tsbuildinfo
+coverage/
+
+# Perfiles de marca reales: son datos de operación, no código fuente.
+perfiles/
