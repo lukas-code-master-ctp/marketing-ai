@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS "approval_policies" (
 	"channel" text NOT NULL,
 	"policy" text NOT NULL,
 	CONSTRAINT "approval_policies_brand_id_channel_unique" UNIQUE("brand_id","channel"),
+	CONSTRAINT "approval_policies_channel_check" CHECK (channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog')),
 	CONSTRAINT "approval_policies_policy_check" CHECK (policy in ('auto', 'manual', 'asistido'))
 );
 --> statement-breakpoint
@@ -54,7 +55,8 @@ CREATE TABLE IF NOT EXISTS "channel_accounts" (
 	"expires_at" timestamp with time zone,
 	"config" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "channel_accounts_brand_id_channel_unique" UNIQUE("brand_id","channel")
+	CONSTRAINT "channel_accounts_brand_id_channel_unique" UNIQUE("brand_id","channel"),
+	CONSTRAINT "channel_accounts_channel_check" CHECK (channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog'))
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "content_plans" (
@@ -65,7 +67,8 @@ CREATE TABLE IF NOT EXISTS "content_plans" (
 	"month" date NOT NULL,
 	"status" text DEFAULT 'borrador' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "content_plans_brand_id_month_unique" UNIQUE("brand_id","month")
+	CONSTRAINT "content_plans_brand_id_month_unique" UNIQUE("brand_id","month"),
+	CONSTRAINT "content_plans_status_check" CHECK (status in ('borrador', 'aprobada', 'en_ejecucion', 'cerrada'))
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "organizations" (
@@ -83,7 +86,8 @@ CREATE TABLE IF NOT EXISTS "pipeline_runs" (
 	"input" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"finished_at" timestamp with time zone
+	"finished_at" timestamp with time zone,
+	CONSTRAINT "pipeline_runs_status_check" CHECK (status in ('en_curso', 'completado', 'fallido'))
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pipeline_steps" (
@@ -98,7 +102,8 @@ CREATE TABLE IF NOT EXISTS "pipeline_steps" (
 	"error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"finished_at" timestamp with time zone,
-	CONSTRAINT "pipeline_steps_idempotency_key_unique" UNIQUE("idempotency_key")
+	CONSTRAINT "pipeline_steps_idempotency_key_unique" UNIQUE("idempotency_key"),
+	CONSTRAINT "pipeline_steps_status_check" CHECK (status in ('en_curso', 'completado', 'fallido'))
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "plan_slots" (
@@ -113,7 +118,9 @@ CREATE TABLE IF NOT EXISTS "plan_slots" (
 	"angle" text NOT NULL,
 	"brief" text NOT NULL,
 	"status" text DEFAULT 'planificado' NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "plan_slots_channel_check" CHECK (channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog')),
+	CONSTRAINT "plan_slots_status_check" CHECK (status in ('planificado', 'descartado'))
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "strategies" (
@@ -125,7 +132,8 @@ CREATE TABLE IF NOT EXISTS "strategies" (
 	"data" jsonb NOT NULL,
 	"brand_profile_version" integer NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "strategies_brand_id_period_unique" UNIQUE("brand_id","period")
+	CONSTRAINT "strategies_brand_id_period_unique" UNIQUE("brand_id","period"),
+	CONSTRAINT "strategies_status_check" CHECK (status in ('borrador', 'aprobada', 'archivada'))
 );
 --> statement-breakpoint
 DO $$ BEGIN

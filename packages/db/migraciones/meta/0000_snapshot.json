@@ -1,5 +1,5 @@
 {
-  "id": "21c59ccb-3e9c-432a-a421-23858f592aa8",
+  "id": "2daba54d-a62d-4393-9661-71ae96b8b224",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -241,6 +241,10 @@
       },
       "policies": {},
       "checkConstraints": {
+        "approval_policies_channel_check": {
+          "name": "approval_policies_channel_check",
+          "value": "channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog')"
+        },
         "approval_policies_policy_check": {
           "name": "approval_policies_policy_check",
           "value": "policy in ('auto', 'manual', 'asistido')"
@@ -514,7 +518,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "channel_accounts_channel_check": {
+          "name": "channel_accounts_channel_check",
+          "value": "channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.content_plans": {
@@ -621,7 +630,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "content_plans_status_check": {
+          "name": "content_plans_status_check",
+          "value": "status in ('borrador', 'aprobada', 'en_ejecucion', 'cerrada')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.organizations": {
@@ -752,7 +766,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "pipeline_runs_status_check": {
+          "name": "pipeline_runs_status_check",
+          "value": "status in ('en_curso', 'completado', 'fallido')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.pipeline_steps": {
@@ -856,7 +875,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "pipeline_steps_status_check": {
+          "name": "pipeline_steps_status_check",
+          "value": "status in ('en_curso', 'completado', 'fallido')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.plan_slots": {
@@ -993,7 +1017,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "plan_slots_channel_check": {
+          "name": "plan_slots_channel_check",
+          "value": "channel in ('instagram', 'linkedin', 'facebook', 'tiktok', 'blog')"
+        },
+        "plan_slots_status_check": {
+          "name": "plan_slots_status_check",
+          "value": "status in ('planificado', 'descartado')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.strategies": {
@@ -1093,7 +1126,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "strategies_status_check": {
+          "name": "strategies_status_check",
+          "value": "status in ('borrador', 'aprobada', 'archivada')"
+        }
+      },
       "isRLSEnabled": false
     }
   },

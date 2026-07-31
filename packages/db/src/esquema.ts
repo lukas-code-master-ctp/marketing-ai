@@ -13,6 +13,19 @@ export type PoliticaDeAprobacion = (typeof POLITICAS)[number]
 const id = () => uuid('id').primaryKey().default(sql`gen_random_uuid()`)
 const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 
+// `text(col, { enum })` de Drizzle solo tipa en TypeScript; no genera ninguna
+// restricción en Postgres. Para que la base rechace valores fuera del enum
+// (ver esquema.test.ts) cada columna `text(..., { enum })` lleva su propio
+// CHECK explícito, generado con este helper para mantener el mismo criterio
+// y la misma convención de nombre en todas.
+const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readonly string[]) =>
+  check(nombreRestriccion, sql.raw(`${columna} in (${valores.map((v) => `'${v}'`).join(', ')})`))
+
+const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
+const ESTADOS_CONTENT_PLAN = ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'] as const
+const ESTADOS_PLAN_SLOT = ['planificado', 'descartado'] as const
+const ESTADOS_PIPELINE = ['en_curso', 'completado', 'fallido'] as const
+
 export const organizations = pgTable('organizations', {
   id: id(),
   name: text('name').notNull(),
@@ -53,7 +66,10 @@ export const channelAccounts = pgTable('channel_accounts', {
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   config: jsonb('config').notNull().default({}),
   createdAt: creadoEn(),
-}, (t) => ({ canalPorMarca: unique().on(t.brandId, t.channel) }))
+}, (t) => ({
+  canalPorMarca: unique().on(t.brandId, t.channel),
+  canalValido: chequeoEnum('channel_accounts_channel_check', 'channel', CANALES),
+}))
 
 export const approvalPolicies = pgTable('approval_policies', {
   id: id(),
@@ -65,13 +81,8 @@ export const approvalPolicies = pgTable('approval_policies', {
   policy: text('policy', { enum: POLITICAS }).notNull(),
 }, (t) => ({
   politicaPorCanal: unique().on(t.brandId, t.channel),
-  // `text(..., { enum })` de Drizzle solo tipa en TypeScript; no genera
-  // restricción en la base. Esta tabla necesita rechazo real en Postgres
-  // (ver esquema.test.ts), así que se agrega el CHECK explícito.
-  politicaValida: check(
-    'approval_policies_policy_check',
-    sql.raw(`policy in (${POLITICAS.map((p) => `'${p}'`).join(', ')})`),
-  ),
+  canalValido: chequeoEnum('approval_policies_channel_check', 'channel', CANALES),
+  politicaValida: chequeoEnum('approval_policies_policy_check', 'policy', POLITICAS),
 }))
 
 export const strategies = pgTable('strategies', {
@@ -81,12 +92,15 @@ export const strategies = pgTable('strategies', {
   brandId: uuid('brand_id').notNull()
     .references(() => brands.id, { onDelete: 'cascade' }),
   period: text('period').notNull(),
-  status: text('status', { enum: ['borrador', 'aprobada', 'archivada'] })
+  status: text('status', { enum: ESTADOS_STRATEGY })
     .notNull().default('borrador'),
   data: jsonb('data').notNull(),
   brandProfileVersion: integer('brand_profile_version').notNull(),
   createdAt: creadoEn(),
-}, (t) => ({ periodoPorMarca: unique().on(t.brandId, t.period) }))
+}, (t) => ({
+  periodoPorMarca: unique().on(t.brandId, t.period),
+  estadoValido: chequeoEnum('strategies_status_check', 'status', ESTADOS_STRATEGY),
+}))
 
 export const contentPlans = pgTable('content_plans', {
   id: id(),
@@ -97,10 +111,13 @@ export const contentPlans = pgTable('content_plans', {
   strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
   month: date('month').notNull(),
   status: text('status', {
-    enum: ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'],
+    enum: ESTADOS_CONTENT_PLAN,
   }).notNull().default('borrador'),
   createdAt: creadoEn(),
-}, (t) => ({ mesPorMarca: unique().on(t.brandId, t.month) }))
+}, (t) => ({
+  mesPorMarca: unique().on(t.brandId, t.month),
+  estadoValido: chequeoEnum('content_plans_status_check', 'status', ESTADOS_CONTENT_PLAN),
+}))
 
 export const planSlots = pgTable('plan_slots', {
   id: id(),
@@ -115,10 +132,14 @@ export const planSlots = pgTable('plan_slots', {
   pillar: text('pillar').notNull(),
   angle: text('angle').notNull(),
   brief: text('brief').notNull(),
-  status: text('status', { enum: ['planificado', 'descartado'] })
+  status: text('status', { enum: ESTADOS_PLAN_SLOT })
     .notNull().default('planificado'),
   createdAt: creadoEn(),
-}, (t) => ({ porPlan: index('plan_slots_por_plan').on(t.contentPlanId, t.scheduledFor) }))
+}, (t) => ({
+  porPlan: index('plan_slots_por_plan').on(t.contentPlanId, t.scheduledFor),
+  canalValido: chequeoEnum('plan_slots_channel_check', 'channel', CANALES),
+  estadoValido: chequeoEnum('plan_slots_status_check', 'status', ESTADOS_PLAN_SLOT),
+}))
 
 export const pipelineRuns = pgTable('pipeline_runs', {
   id: id(),
@@ -126,20 +147,22 @@ export const pipelineRuns = pgTable('pipeline_runs', {
     .references(() => organizations.id, { onDelete: 'cascade' }),
   brandId: uuid('brand_id').references(() => brands.id, { onDelete: 'cascade' }),
   flow: text('flow').notNull(),
-  status: text('status', { enum: ['en_curso', 'completado', 'fallido'] })
+  status: text('status', { enum: ESTADOS_PIPELINE })
     .notNull().default('en_curso'),
   input: jsonb('input').notNull().default({}),
   error: text('error'),
   startedAt: creadoEn(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
-})
+}, (t) => ({
+  estadoValido: chequeoEnum('pipeline_runs_status_check', 'status', ESTADOS_PIPELINE),
+}))
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: id(),
   runId: uuid('run_id').notNull()
     .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
-  status: text('status', { enum: ['en_curso', 'completado', 'fallido'] }).notNull(),
+  status: text('status', { enum: ESTADOS_PIPELINE }).notNull(),
   attempt: integer('attempt').notNull().default(1),
   idempotencyKey: text('idempotency_key').notNull(),
   input: jsonb('input'),
@@ -147,7 +170,10 @@ export const pipelineSteps = pgTable('pipeline_steps', {
   error: text('error'),
   startedAt: creadoEn(),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
-}, (t) => ({ claveUnica: unique().on(t.idempotencyKey) }))
+}, (t) => ({
+  claveUnica: unique().on(t.idempotencyKey),
+  estadoValido: chequeoEnum('pipeline_steps_status_check', 'status', ESTADOS_PIPELINE),
+}))
 
 export const aiCalls = pgTable('ai_calls', {
   id: id(),
