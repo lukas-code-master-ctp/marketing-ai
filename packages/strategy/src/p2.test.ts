@@ -126,6 +126,30 @@ describe('flujo P2 · grilla', () => {
     })
   })
 
+  it('no persiste en octubre un slot del 30 de septiembre a las 24:00', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      // 24:00 desbordaba al 1 de octubre: un slot colgado del content_plan de
+      // septiembre que `grilla:ver --mes 2026-09` no ve y que aparece en octubre.
+      const conHora = (hora: string) => grilla([{ ...SLOT('2026-09-30', 'educacion'), hora }])
+      const cliente = new ClienteFalso([conHora('24:00'), conHora('23:00')])
+      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+      expect(r.estado).toBe('completado')
+
+      // El esquema rechazó la primera respuesta y el modelo tuvo su reparación.
+      expect(cliente.peticiones).toHaveLength(2)
+      expect(cliente.peticiones[1]!.mensajes.at(-1)!.texto).toContain('hora')
+
+      const slots = await db.select().from(esquema.planSlots)
+      expect(slots).toHaveLength(1)
+      expect(slots[0]!.scheduledFor.toISOString()).toBe('2026-09-30T23:00:00.000Z')
+    })
+  })
+
   it('no persiste un derivado que choca con un slot ya propuesto', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)

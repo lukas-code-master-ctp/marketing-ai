@@ -38,7 +38,15 @@ export type TipoEstrategia = z.infer<typeof Estrategia>
 
 export const SlotPropuesto = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'formato esperado AAAA-MM-DD'),
-  hora: z.string().regex(/^\d{2}:\d{2}$/, 'formato esperado HH:MM (UTC)'),
+  // El rango va en el patrón, no en `validarGrilla`: aquí no hay ambigüedad que
+  // valga la pena enrutar por el ciclo de reparación de la grilla, y el rechazo
+  // del esquema ya le llega al modelo con su mensaje y su intento de reparación
+  // (ver `ejecutarTarea`). Con `\d{2}` pasaban horas inexistentes: 24:00
+  // desbordaba en silencio al día —y al mes— siguiente, y 23:60 o 99:99
+  // reventaban en el driver con un RangeError fuera de la taxonomía.
+  hora: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'formato esperado HH:MM (UTC), 00:00–23:59'),
   canal: Canal,
   formato: z.string().min(2),
   pilar: z.string().min(2),
