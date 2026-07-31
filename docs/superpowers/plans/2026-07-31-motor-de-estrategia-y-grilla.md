@@ -2519,7 +2519,6 @@ git add -A && git commit -m "feat: motor de pipeline con reintentos, backoff e i
 - Create: `packages/brand/vitest.config.ts`
 - Create: `packages/brand/src/perfil.ts`
 - Create: `packages/brand/src/repositorio.ts`
-- Create: `packages/brand/src/contexto.ts`
 - Create: `packages/brand/src/index.ts`
 - Test: `packages/brand/src/perfil.test.ts`
 - Test: `packages/brand/src/repositorio.test.ts`
@@ -2974,21 +2973,14 @@ export async function cargarPerfilVigente(
 `packages/brand/src/index.ts`:
 
 ```ts
-export * from './contexto.js'
 export * from './perfil.js'
 export * from './perfil.fixture.js'
 export * from './repositorio.js'
 ```
 
 > `PERFIL_VALIDO` se exporta desde el índice a propósito: las Tasks 8, 9 y 11 lo usan como marca de referencia en sus pruebas y en la marcha en seco.
-
-`packages/brand/src/contexto.ts`:
-
-```ts
-// `contextoDeMarca` vive en perfil.ts junto al esquema que describe.
-// Este módulo existe para futuras capas de contexto (ejemplos, histórico).
-export { contextoDeMarca } from './perfil.js'
-```
+>
+> `contextoDeMarca` vive en `perfil.ts`, junto al esquema que describe. No crees un módulo `contexto.ts` que solo lo reexporte: cuando la Fase 2 agregue capas de contexto (ejemplos, histórico), ese módulo se crea con contenido real.
 
 - [ ] **Step 9: Ejecutar todas las pruebas del paquete**
 
@@ -3013,6 +3005,7 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
 - Create: `packages/strategy/tsconfig.json`
 - Create: `packages/strategy/vitest.config.ts`
 - Create: `packages/strategy/src/esquemas.ts`
+- Create: `packages/strategy/src/tipos.ts`
 - Create: `packages/strategy/src/prompts/generar-estrategia.md`
 - Create: `packages/strategy/src/p1.ts`
 - Create: `packages/strategy/src/index.ts`
@@ -3024,7 +3017,8 @@ git add -A && git commit -m "feat: perfil de marca versionado y contexto para pr
 - Produces:
   - `Estrategia` (esquema Zod) y `TipoEstrategia`
   - `TAREA_ESTRATEGIA: DefinicionDeTarea<typeof Estrategia>`
-  - `crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo` con `Dependencias { cliente: ClienteLlm; env?: Record<string, string | undefined> }`
+  - `Dependencias { cliente: ClienteLlm; env?: Record<string, string | undefined> }` en `src/tipos.ts` — compartida por P1 y P2, para que ningún flujo dependa del otro
+  - `crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo`
   - `EntradaP1 { brandId: string; period: string }`, `SalidaP1 { strategyId: string; estrategia: TipoEstrategia }`
 
 - [ ] **Step 1: Crear el paquete `@gc/strategy`**
@@ -3305,12 +3299,24 @@ Responde únicamente con el JSON que cumple el esquema solicitado.
 
 - [ ] **Step 5: Implementar el flujo P1**
 
+`packages/strategy/src/tipos.ts`:
+
+```ts
+import type { ClienteLlm } from '@gc/ai'
+
+/** Dependencias inyectadas a los flujos P1 y P2. */
+export interface Dependencias {
+  cliente: ClienteLlm
+  env?: Record<string, string | undefined>
+}
+```
+
 `packages/strategy/src/p1.ts`:
 
 ```ts
 import {
   crearRegistrador, definirTarea, ejecutarTarea, exigirPresupuesto,
-  type ClienteLlm, type MensajeLlm,
+  type MensajeLlm,
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema } from '@gc/db'
@@ -3318,6 +3324,7 @@ import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
+import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({
   nombre: 'generar_estrategia',
@@ -3328,11 +3335,6 @@ export const TAREA_ESTRATEGIA = definirTarea({
 })
 
 const RUTA_PROMPT = fileURLToPath(new URL('./prompts/generar-estrategia.md', import.meta.url))
-
-export interface Dependencias {
-  cliente: ClienteLlm
-  env?: Record<string, string | undefined>
-}
 
 export interface EntradaP1 {
   brandId: string
@@ -3405,6 +3407,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
 ```ts
 export * from './esquemas.js'
 export * from './p1.js'
+export * from './tipos.js'
 ```
 
 - [ ] **Step 6: Ejecutar las pruebas y verificar que pasan**
@@ -4070,7 +4073,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expandirDerivados } from './derivados.js'
 import { Estrategia, GrillaPropuesta, type TipoEstrategia, type TipoSlotPropuesto } from './esquemas.js'
-import type { Dependencias } from './p1.js'
+import type { Dependencias } from './tipos.js'
 import { hayBloqueantes, validarGrilla, type Problema } from './validacion.js'
 
 export const TAREA_GRILLA = definirTarea({
