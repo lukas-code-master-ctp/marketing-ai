@@ -1,0 +1,40 @@
+{
+  "slots": [
+    {
+      "fecha": "2026-09-02",
+      "hora": "13:00",
+      "canal": "blog",
+      "formato": "articulo",
+      "pilar": "educacion",
+      "angulo": "Checklist previo a la compra",
+      "brief": "Explicar los cinco documentos que un comprador debe exigir antes de firmar una promesa de compraventa."
+    },
+    {
+      "fecha": "2026-09-09",
+      "hora": "13:00",
+      "canal": "blog",
+      "formato": "articulo",
+      "pilar": "confianza",
+      "angulo": "Cómo se verifica la factibilidad de agua",
+      "brief": "Detallar el procedimiento real de verificación de factibilidad, con los organismos involucrados y los plazos habituales."
+    },
+    {
+      "fecha": "2026-09-16",
+      "hora": "13:00",
+      "canal": "blog",
+      "formato": "articulo",
+      "pilar": "producto",
+      "angulo": "Qué incluye la asesoría de factibilidad",
+      "brief": "Describir el alcance concreto de la asesoría y en qué casos conviene contratarla."
+    },
+    {
+      "fecha": "2026-09-23",
+      "hora": "13:00",
+      "canal": "blog",
+      "formato": "articulo",
+      "pilar": "educacion",
+      "angulo": "Diferencia entre rol propio y rol matriz",
+      "brief": "Aclarar en lenguaje simple qué implica cada figura para el comprador y qué riesgos trae la segunda."
+    }
+  ]
+}

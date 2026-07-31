@@ -1,0 +1,161 @@
+import { ClienteFalso } from '@gc/ai'
+import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
+import { esquema } from '@gc/db'
+import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { ejecutarFlujo } from '@gc/pipeline'
+import { eq, isNotNull } from 'drizzle-orm'
+import { describe, expect, it } from 'vitest'
+import { crearFlujoGrilla } from './p2.js'
+
+const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
+const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
+
+const ESTRATEGIA = {
+  objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
+  mensajesClave: ['mensaje uno largo', 'mensaje dos largo'],
+  mixDeCanales: [{ canal: 'blog', publicacionesPorSemana: 1 }],
+  reciclaje: [{ desde: 'blog', hacia: ['linkedin'], diasDespues: 2 }],
+  temasPrioritarios: ['factibilidad de agua'],
+}
+
+const grilla = (slots: unknown[]) => JSON.stringify({ slots })
+
+const SLOT = (fecha: string, pilar: string) => ({
+  fecha,
+  hora: '12:00',
+  canal: 'blog',
+  formato: 'articulo',
+  pilar,
+  angulo: 'guía práctica',
+  brief: 'Explicar paso a paso cómo verificar la factibilidad antes de comprar.',
+})
+
+const GRILLA_VALIDA = grilla([
+  SLOT('2026-09-02', 'educacion'),
+  SLOT('2026-09-09', 'educacion'),
+  SLOT('2026-09-16', 'confianza'),
+  SLOT('2026-09-23', 'producto'),
+])
+
+async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [marca] = await db
+    .insert(esquema.brands)
+    .values({ organizationId: org!.id, slug: 'parcelas', name: 'CTP' })
+    .returning()
+  const ref = { organizationId: org!.id, brandId: marca!.id }
+  await guardarPerfil(db, ref, PERFIL_VALIDO)
+  await db.insert(esquema.strategies).values({
+    organizationId: ref.organizationId,
+    brandId: ref.brandId,
+    period: '2026-Q3',
+    data: ESTRATEGIA,
+    brandProfileVersion: 1,
+  })
+  return ref
+}
+
+describe('flujo P2 · grilla', () => {
+  it('persiste el plan, los slots y sus derivados enlazados', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+      expect(r.estado).toBe('completado')
+
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.status).toBe('borrador')
+
+      const slots = await db.select().from(esquema.planSlots)
+      expect(slots).toHaveLength(8)
+
+      const derivados = await db
+        .select()
+        .from(esquema.planSlots)
+        .where(isNotNull(esquema.planSlots.sourceSlotId))
+      expect(derivados).toHaveLength(4)
+      expect(derivados.every((d) => d.channel === 'linkedin')).toBe(true)
+    })
+  })
+
+  it('repara una sola vez cuando la grilla tiene problemas bloqueantes', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const invalida = grilla([SLOT('2026-10-05', 'educacion')])
+      const cliente = new ClienteFalso([invalida, GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+
+      await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
+
+      expect(cliente.peticiones).toHaveLength(2)
+      const reintento = cliente.peticiones[1]!.mensajes.at(-1)!.texto
+      expect(reintento).toContain('fuera_de_mes')
+    })
+  })
+
+  it('falla de forma permanente si la reparación sigue siendo inválida', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const invalida = grilla([SLOT('2026-10-05', 'educacion')])
+      const flujo = crearFlujoGrilla({
+        cliente: new ClienteFalso([invalida, invalida]),
+        env: ENV,
+      })
+
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(0)
+    })
+  })
+
+  it('devuelve los avisos sin bloquear', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const pocos = grilla([SLOT('2026-09-02', 'educacion')])
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([pocos]), env: ENV })
+
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+      const salida = r.salida as { avisos: Array<{ regla: string }> }
+      expect(salida.avisos.map((a) => a.regla)).toContain('cadencia')
+    })
+  })
+
+  it('regenerar el mismo mes reemplaza los slots anteriores', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      for (const _ of [1, 2]) {
+        const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+        await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+      }
+
+      expect(await db.select().from(esquema.contentPlans)).toHaveLength(1)
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+    })
+  })
+
+  it('falla si la marca no tiene estrategia', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'sin', name: 'Sin' })
+        .returning()
+      const ref = { organizationId: org!.id, brandId: marca!.id }
+      await guardarPerfil(db, ref, PERFIL_VALIDO)
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+})
