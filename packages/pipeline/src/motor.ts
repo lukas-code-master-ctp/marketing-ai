@@ -1,5 +1,5 @@
 import { esquema, type BaseDeDatos } from '@gc/db'
-import { ErrorDeDominio, esTransitorio } from '@gc/shared'
+import { ErrorDeDominio, esTransitorio, permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { calcularEspera } from './espera.js'
 
@@ -58,7 +58,9 @@ export async function ejecutarFlujo(
   const dormir = opciones.dormir ?? dormirDeVerdad
   const aleatorio = opciones.aleatorio ?? Math.random
 
-  const runId = ctx.runId ?? (await crearCorrida(db, flujo, entrada, ctx))
+  const runId = ctx.runId
+    ? await reanudarCorrida(db, ctx.runId, ctx.organizationId)
+    : await crearCorrida(db, flujo, entrada, ctx)
   const ctxPaso: ContextoDePaso = {
     db,
     runId,
@@ -71,21 +73,22 @@ export async function ejecutarFlujo(
   for (const paso of flujo.pasos) {
     const clave = `${runId}:${paso.nombre}`
 
+    // Se pregunta por la existencia de la fila, no por su contenido: un paso
+    // completado puede haber devuelto null o void y aun así no debe reejecutarse.
     const previo = await pasoCompletado(db, clave)
     if (previo) {
-      valor = previo
+      valor = previo.output
       continue
     }
 
-    valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
-      maxIntentos, dormir, aleatorio,
-    }).catch(async (error: unknown) => {
-      await db
-        .update(esquema.pipelineRuns)
-        .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
-        .where(eq(esquema.pipelineRuns.id, runId))
+    try {
+      valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
+        maxIntentos, dormir, aleatorio,
+      })
+    } catch (error) {
+      await marcarCorridaFallida(db, runId, error)
       throw error
-    })
+    }
   }
 
   await db
@@ -114,7 +117,52 @@ async function crearCorrida(
   return corrida!.id
 }
 
-async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown | null> {
+/** Reanudar exige que la corrida exista y pertenezca a la organización.
+ *  Además vuelve a marcarla en curso: dejarla 'fallido' mientras se reejecuta
+ *  la mostraría como fallada y corriendo al mismo tiempo. */
+async function reanudarCorrida(
+  db: BaseDeDatos,
+  runId: string,
+  organizationId: string,
+): Promise<string> {
+  const [corrida] = await db
+    .select({ id: esquema.pipelineRuns.id })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.id, runId),
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+      ),
+    )
+  if (!corrida) throw permanente(`No existe la corrida ${runId} en esta organización`)
+
+  await db
+    .update(esquema.pipelineRuns)
+    .set({ status: 'en_curso', error: null, finishedAt: null })
+    .where(eq(esquema.pipelineRuns.id, runId))
+
+  return corrida.id
+}
+
+async function marcarCorridaFallida(
+  db: BaseDeDatos,
+  runId: string,
+  error: unknown,
+): Promise<void> {
+  try {
+    await db
+      .update(esquema.pipelineRuns)
+      .set({ status: 'fallido', error: mensaje(error), finishedAt: new Date() })
+      .where(eq(esquema.pipelineRuns.id, runId))
+  } catch {
+    // Se descarta a propósito: el error del paso es el que le importa a quien
+    // llama, y reemplazarlo por uno de la base perdería su clasificación.
+  }
+}
+
+/** Devuelve la fila completa, no su salida: distinguir "no hay fila" de
+ *  "hay fila cuya salida es null" es lo que sostiene la idempotencia. */
+async function pasoCompletado(db: BaseDeDatos, clave: string) {
   const [fila] = await db
     .select()
     .from(esquema.pipelineSteps)
@@ -124,7 +172,7 @@ async function pasoCompletado(db: BaseDeDatos, clave: string): Promise<unknown |
         eq(esquema.pipelineSteps.status, 'completado'),
       ),
     )
-  return fila ? fila.output : null
+  return fila ?? null
 }
 
 async function ejecutarPaso(
@@ -148,7 +196,16 @@ async function ejecutarPaso(
     })
     .onConflictDoUpdate({
       target: esquema.pipelineSteps.idempotencyKey,
-      set: { status: 'en_curso', attempt: 1, error: null },
+      // Se reescribe la fila entera del intento anterior: conservar su `input`
+      // o su `finished_at` dejaría un registro que miente sobre qué se ejecutó.
+      set: {
+        status: 'en_curso',
+        attempt: 1,
+        error: null,
+        input: entrada as object,
+        startedAt: new Date(),
+        finishedAt: null,
+      },
     })
     .returning()
 

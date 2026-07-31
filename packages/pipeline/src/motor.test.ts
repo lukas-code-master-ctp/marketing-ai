@@ -171,4 +171,103 @@ describe('ejecutarFlujo', () => {
       expect(corridas[0]!.status).toBe('completado')
     })
   })
+
+  it('no reejecuta un paso completado cuya salida fue null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let efectos = 0
+      let debeFallarElSegundo = true
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, null>({
+            nombre: 'efecto_sin_retorno',
+            ejecutar: async () => {
+              efectos++
+              return null
+            },
+          }),
+          definirPaso<null, { ok: boolean }>({
+            nombre: 'fragil',
+            ejecutar: async () => {
+              if (debeFallarElSegundo) throw permanente('todavía no')
+              return { ok: true }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA),
+      ).rejects.toThrow()
+      expect(efectos).toBe(1)
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      await ejecutarFlujo(db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA)
+
+      // Un paso que devuelve null sigue estando completado: no se repite.
+      expect(efectos).toBe(1)
+
+      const [fragil] = await db
+        .select()
+        .from(esquema.pipelineSteps)
+        .where(eq(esquema.pipelineSteps.name, 'fragil'))
+      expect(fragil!.status).toBe('completado')
+      expect(fragil!.error).toBeNull()
+      expect(fragil!.finishedAt).not.toBeNull()
+    })
+  })
+
+  it('espera con backoff exponencial entre reintentos', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const esperas: number[] = []
+      let llamadas = 0
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({
+            nombre: 'inestable',
+            ejecutar: async () => {
+              llamadas++
+              if (llamadas < 3) throw transitorio('502')
+              return {}
+            },
+          }),
+        ],
+      }
+
+      await ejecutarFlujo(db, flujo, {}, { organizationId }, {
+        dormir: async (ms) => void esperas.push(ms),
+        aleatorio: () => 0,
+      })
+
+      expect(esperas).toEqual([1000, 2000])
+    })
+  })
+
+  it('rechaza reanudar una corrida de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Otra' })
+        .returning()
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({ nombre: 'trivial', ejecutar: async () => ({}) }),
+        ],
+      }
+      const r = await ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA)
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId: otra!.id, runId: r.runId }, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
 })
