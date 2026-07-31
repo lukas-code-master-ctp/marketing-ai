@@ -25,15 +25,6 @@ const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull()
 const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readonly string[]) =>
   check(nombreRestriccion, sql.raw(`${columna} in (${valores.map((v) => `'${v}'`).join(', ')})`))
 
-// Multi-tenencia exigible: cada tabla lleva `organization_id`, pero una clave
-// foránea simple hacia el padre no impide que la fila declare una organización
-// distinta a la de ese padre. Por eso las tablas padre (`brands`,
-// `content_plans`, `pipeline_runs`, `plan_slots`) llevan una única sobre
-// (id, organization_id) y cada hija apunta con una clave foránea COMPUESTA
-// (<padre>_id, organization_id). Así es Postgres —y no la capa de
-// aplicación— quien rechaza una fila cuya organización no coincida con la de
-// su padre. Al declarar la compuesta hay que quitar el `.references()` de la
-// columna, o quedarían las dos restricciones sobre lo mismo.
 const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
 const ESTADOS_CONTENT_PLAN = ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'] as const
 const ESTADOS_PLAN_SLOT = ['planificado', 'descartado'] as const
@@ -45,6 +36,15 @@ export const organizations = pgTable('organizations', {
   createdAt: creadoEn(),
 })
 
+// Multi-tenencia exigible: cada tabla lleva `organization_id`, pero una clave
+// foránea simple hacia el padre no impide que la fila declare una organización
+// distinta a la de ese padre. Por eso las tablas padre (`brands`, `strategies`,
+// `content_plans`, `pipeline_runs`, `plan_slots`) llevan una única sobre
+// (id, organization_id) y cada hija apunta con una clave foránea COMPUESTA
+// (<padre>_id, organization_id). Así es Postgres —y no la capa de
+// aplicación— quien rechaza una fila cuya organización no coincida con la de
+// su padre. Al declarar la compuesta hay que quitar el `.references()` de la
+// columna, o quedarían las dos restricciones sobre lo mismo.
 export const brands = pgTable('brands', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
@@ -131,6 +131,7 @@ export const strategies = pgTable('strategies', {
 }, (t) => ({
   periodoPorMarca: unique().on(t.brandId, t.period),
   estadoValido: chequeoEnum('strategies_status_check', 'status', ESTADOS_STRATEGY),
+  idPorOrg: unique('strategies_id_organization_id_unique').on(t.id, t.organizationId),
   marcaPorOrg: foreignKey({
     columns: [t.brandId, t.organizationId],
     foreignColumns: [brands.id, brands.organizationId],
@@ -143,7 +144,7 @@ export const contentPlans = pgTable('content_plans', {
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
   brandId: uuid('brand_id').notNull(),
-  strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
+  strategyId: uuid('strategy_id'),
   month: date('month').notNull(),
   status: text('status', {
     enum: ESTADOS_CONTENT_PLAN,
@@ -158,6 +159,32 @@ export const contentPlans = pgTable('content_plans', {
     foreignColumns: [brands.id, brands.organizationId],
     name: 'content_plans_brand_org_fk',
   }).onDelete('cascade'),
+  // ⚠️ AQUÍ EL SQL NO COINCIDE CON ESTE ESQUEMA. LEER ANTES DE REGENERAR. ⚠️
+  //
+  // Lo que dice esta declaración:  ON DELETE SET NULL
+  // Lo que hay en la base de datos: ON DELETE SET NULL ("strategy_id")
+  //
+  // Mismo caso que `aiCalls.corridaPorOrg`: `SET NULL` sobre una compuesta
+  // anula TODAS sus columnas, y `content_plans.organization_id` es NOT NULL,
+  // así que la forma simple revienta con 23502 al borrar una estrategia que
+  // tenga planes colgando. La forma con lista de columnas (Postgres 15+) anula
+  // solo `strategy_id` y deja el plan vivo, que es la semántica que tenía la
+  // clave simple original.
+  //
+  // Sin esta compuesta, un plan de la organización A podía apuntar a una
+  // estrategia de la B: P2 lee la estrategia del plan, así que un join
+  // terminaba sirviendo la estrategia de otro inquilino.
+  //
+  // drizzle-kit 0.28 NO sabe expresar la lista de columnas: la sentencia real
+  // se escribió a mano en `migraciones/0002_empty_kulan_gath.sql`.
+  // CONSECUENCIA: regenerar esta restricción reintroduce el bug y hay que
+  // repetir la edición. La prueba «conserva los planes al borrar su
+  // estrategia, anulando solo strategy_id» es la red que lo detecta.
+  estrategiaPorOrg: foreignKey({
+    columns: [t.strategyId, t.organizationId],
+    foreignColumns: [strategies.id, strategies.organizationId],
+    name: 'content_plans_strategy_org_fk',
+  }).onDelete('set null'),
 }))
 
 export const planSlots = pgTable('plan_slots', {
@@ -278,8 +305,9 @@ export const aiCalls = pgTable('ai_calls', {
   // La forma con lista de columnas (Postgres 15+, acá corremos 16) anula
   // solo `run_id` y deja intacta `organization_id`. drizzle-kit 0.28 NO sabe
   // expresarla: por eso la declaración de abajo dice `set null` a secas y la
-  // sentencia real se editó a mano en
-  // `migraciones/0001_fancy_sugar_man.sql`.
+  // sentencia real se escribió a mano en
+  // `migraciones/0002_empty_kulan_gath.sql`, que reemplaza la versión
+  // rota que `0001` había creado.
   //
   // CONSECUENCIA: si algún día se regenera esta restricción con
   // `drizzle-kit generate`, la migración nueva volverá a emitir el `SET NULL`

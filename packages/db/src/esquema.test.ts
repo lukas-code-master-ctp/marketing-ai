@@ -155,7 +155,80 @@ describe('integridad multi-tenant', () => {
           version: 1,
           data: {},
         }),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/brand_profiles_brand_org_fk/)
+    })
+  })
+
+  it('rechaza un plan que apunta a una estrategia de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [marcaA] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
+        .returning()
+      const [marcaB] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: orgB!.id, slug: 'b', name: 'B' })
+        .returning()
+      const [estrategiaDeB] = await db
+        .insert(esquema.strategies)
+        .values({
+          organizationId: orgB!.id,
+          brandId: marcaB!.id,
+          period: '2026-Q3',
+          data: {},
+          brandProfileVersion: 1,
+        })
+        .returning()
+
+      // El plan es de orgA; la estrategia que referencia es de orgB. P2 lee la
+      // estrategia del plan, así que sin esta compuesta el join serviría la
+      // estrategia de otro inquilino.
+      await expect(
+        db.insert(esquema.contentPlans).values({
+          organizationId: orgA!.id,
+          brandId: marcaA!.id,
+          strategyId: estrategiaDeB!.id,
+          month: '2026-09-01',
+        }),
+      ).rejects.toThrow(/content_plans_strategy_org_fk/)
+    })
+  })
+
+  // Mismo trato que el registro de costo: borrar una estrategia no puede
+  // llevarse por delante los planes que la referencian.
+  it('conserva los planes al borrar su estrategia, anulando solo strategy_id', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'a', name: 'A' })
+        .returning()
+      const [estrategia] = await db
+        .insert(esquema.strategies)
+        .values({
+          organizationId: org!.id,
+          brandId: marca!.id,
+          period: '2026-Q3',
+          data: {},
+          brandProfileVersion: 1,
+        })
+        .returning()
+      await db.insert(esquema.contentPlans).values({
+        organizationId: org!.id,
+        brandId: marca!.id,
+        strategyId: estrategia!.id,
+        month: '2026-09-01',
+      })
+
+      await db.delete(esquema.strategies).where(eq(esquema.strategies.id, estrategia!.id))
+
+      const planes = await db.select().from(esquema.contentPlans)
+      expect(planes).toHaveLength(1)
+      expect(planes[0]!.strategyId).toBeNull()
+      expect(planes[0]!.organizationId).toBe(org!.id)
+      expect(planes[0]!.brandId).toBe(marca!.id)
     })
   })
 
@@ -183,7 +256,7 @@ describe('integridad multi-tenant', () => {
           angle: 'x',
           brief: 'Un brief suficientemente largo para pasar la validación.',
         }),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/plan_slots_plan_org_fk/)
     })
   })
 
@@ -233,7 +306,7 @@ describe('integridad multi-tenant', () => {
           angle: 'x',
           brief: 'Un brief suficientemente largo para pasar la validación.',
         }),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/plan_slots_source_org_fk/)
     })
   })
 
