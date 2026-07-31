@@ -3736,7 +3736,7 @@ import type { TipoEstrategia } from './esquemas.js'
 import { hayBloqueantes, validarGrilla, type ContextoDeValidacion } from './validacion.js'
 
 const ESTRATEGIA: TipoEstrategia = {
-  objetivos: [{ nombre: 'A', metrica: 'alcance', meta: '+10%' }],
+  objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
   mensajesClave: ['uno que es largo', 'otro que es largo'],
   mixDeCanales: [
     { canal: 'blog', publicacionesPorSemana: 1 },
@@ -4084,7 +4084,7 @@ const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA = {
-  objetivos: [{ nombre: 'A', metrica: 'alcance', meta: '+10%' }],
+  objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
   mensajesClave: ['mensaje uno largo', 'mensaje dos largo'],
   mixDeCanales: [{ canal: 'blog', publicacionesPorSemana: 1 }],
   reciclaje: [{ desde: 'blog', hacia: ['linkedin'], diasDespues: 2 }],
@@ -4211,6 +4211,28 @@ describe('flujo P2 · grilla', () => {
       }
 
       expect(await db.select().from(esquema.contentPlans)).toHaveLength(1)
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+    })
+  })
+
+  it('no regenera una grilla que ya salió de borrador', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db.update(esquema.contentPlans).set({ status: 'aprobada' })
+
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      // Ni el estado ni los slots se tocan: el throw ocurre antes del delete.
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.status).toBe('aprobada')
       expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
     })
   })
@@ -4478,13 +4500,27 @@ async function persistir(
     })
     .onConflictDoUpdate({
       target: [esquema.contentPlans.brandId, esquema.contentPlans.month],
-      set: { strategyId, status: 'borrador' },
+      // `status` queda fuera del set: un borrador sigue siendo borrador, y el
+      // setWhere impide tocar una grilla aprobada, en ejecución o cerrada.
+      set: { strategyId },
+      setWhere: eq(esquema.contentPlans.status, 'borrador'),
     })
     .returning()
 
-  const contentPlanId = plan!.id
+  // Sin fila devuelta, la grilla existente ya salió de borrador. Se escala
+  // antes de borrar nada: regenerar destruiría planificación ya revisada y,
+  // desde la Fase 2, las piezas de contenido colgadas de esos slots.
+  if (!plan) {
+    throw permanente(
+      `La grilla de ${entrada.mes} para la marca ${entrada.brandId} ya no está en ` +
+        `borrador. Archívala antes de regenerarla.`,
+    )
+  }
 
-  // Regenerar reemplaza la grilla anterior por completo.
+  const contentPlanId = plan.id
+
+  // Solo se llega aquí con un borrador: regenerar lo reemplaza por completo,
+  // para que un mes nunca mezcle planificación vieja con nueva.
   await ctx.db
     .delete(esquema.planSlots)
     .where(eq(esquema.planSlots.contentPlanId, contentPlanId))
