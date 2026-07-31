@@ -55,6 +55,18 @@ importers:
         specifier: ^0.28.0
         version: 0.28.1
 
+  packages/pipeline:
+    dependencies:
+      '@gc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@gc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(postgres@3.4.9)
+
   packages/shared: {}
 
 packages:
