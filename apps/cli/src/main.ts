@@ -1,4 +1,4 @@
-import './entorno.js'
+import { resolverDesdeInvocacion } from './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
@@ -45,6 +45,14 @@ async function principal(): Promise<void> {
   if (!url) throw new Error('Falta DATABASE_URL')
 
   const env = values.seco ? { ...process.env, IA_EN_SECO: 'true' } : process.env
+  // Las rutas del entorno y de la línea de comandos son relativas a donde el
+  // usuario está parado, no a apps/cli.
+  const opcionesDeCliente = {
+    env,
+    ...(env.CARPETA_DE_MUESTRAS !== undefined
+      ? { carpetaDeMuestras: resolverDesdeInvocacion(env.CARPETA_DE_MUESTRAS) }
+      : {}),
+  }
   const { db, cerrar } = crearConexion(url)
 
   try {
@@ -61,13 +69,13 @@ async function principal(): Promise<void> {
       case 'perfil:cargar': {
         const version = await cargarPerfilDeArchivo(db, {
           slug: exigir(values.marca, '--marca'),
-          archivo: exigir(values.archivo, '--archivo'),
+          archivo: resolverDesdeInvocacion(exigir(values.archivo, '--archivo')),
         })
         console.log(`Perfil guardado como versión ${version}`)
         break
       }
       case 'estrategia:generar': {
-        const r = await generarEstrategia(db, crearCliente({ env }), {
+        const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           periodo: exigir(values.periodo, '--periodo'),
           env,
@@ -76,7 +84,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'grilla:generar': {
-        const r = await generarGrilla(db, crearCliente({ env }), {
+        const r = await generarGrilla(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
           env,
