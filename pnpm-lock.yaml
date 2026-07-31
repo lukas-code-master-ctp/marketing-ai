@@ -84,6 +84,30 @@ importers:
 
   packages/shared: {}
 
+  packages/strategy:
+    dependencies:
+      '@gc/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@gc/brand':
+        specifier: workspace:*
+        version: link:../brand
+      '@gc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@gc/pipeline':
+        specifier: workspace:*
+        version: link:../pipeline
+      '@gc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(postgres@3.4.9)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
 packages:
 
   '@drizzle-team/brocli@0.10.2':

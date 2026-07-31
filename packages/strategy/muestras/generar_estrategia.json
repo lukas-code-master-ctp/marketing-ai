@@ -1,0 +1,21 @@
+{
+  "objetivos": [
+    { "nombre": "Autoridad en factibilidad", "metrica": "alcance", "meta": "+30% en el trimestre" }
+  ],
+  "mensajesClave": [
+    "La factibilidad se verifica antes de comprar, no después",
+    "Cada parcela tiene rol propio y trazabilidad legal completa"
+  ],
+  "mixDeCanales": [
+    { "canal": "blog", "publicacionesPorSemana": 1 },
+    { "canal": "linkedin", "publicacionesPorSemana": 2 },
+    { "canal": "instagram", "publicacionesPorSemana": 3 }
+  ],
+  "reciclaje": [
+    { "desde": "blog", "hacia": ["linkedin", "instagram"], "diasDespues": 2 }
+  ],
+  "temasPrioritarios": [
+    "Cómo verificar la factibilidad de agua",
+    "Qué significa que una parcela tenga rol propio"
+  ]
+}
