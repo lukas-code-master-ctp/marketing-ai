@@ -107,12 +107,35 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
       }
 
       const derivados = expandirDerivados(slots, estrategia, entrada.mes)
+
+      // La grilla que se guarda es la expandida, no la que propuso el modelo:
+      // se vuelve a validar sobre ella para que los avisos de cadencia y de
+      // pilares describan lo que de verdad queda en la base.
+      const problemasFinales = validarGrilla([...slots, ...derivados], {
+        mes: entrada.mes,
+        perfil,
+        estrategia,
+      })
+
+      // Un bloqueante aquí no es algo que el modelo pueda reparar: `slots` ya
+      // pasó la validación y `expandirDerivados` es determinístico. Si aparece,
+      // las dos mitades dejaron de estar de acuerdo y es un defecto del código.
+      if (hayBloqueantes(problemasFinales)) {
+        throw permanente(
+          `La grilla expandida incumple reglas que la expansión debía respetar:\n` +
+            problemasFinales
+              .filter((p) => p.severidad === 'bloqueante')
+              .map((p) => `- [${p.regla}] ${p.detalle}`)
+              .join('\n'),
+        )
+      }
+
       const contentPlanId = await persistir(ctx, entrada, strategyId, slots, derivados)
 
       return {
         contentPlanId,
         totalSlots: slots.length + derivados.length,
-        avisos: problemas.filter((p) => p.severidad === 'aviso'),
+        avisos: problemasFinales.filter((p) => p.severidad === 'aviso'),
       }
     },
   })

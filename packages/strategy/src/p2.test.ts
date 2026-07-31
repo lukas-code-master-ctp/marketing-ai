@@ -13,17 +13,20 @@ const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 const ESTRATEGIA = {
   objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
   mensajesClave: ['mensaje uno largo', 'mensaje dos largo'],
-  mixDeCanales: [{ canal: 'blog', publicacionesPorSemana: 1 }],
+  mixDeCanales: [
+    { canal: 'blog', publicacionesPorSemana: 1 },
+    { canal: 'linkedin', publicacionesPorSemana: 1 },
+  ],
   reciclaje: [{ desde: 'blog', hacia: ['linkedin'], diasDespues: 2 }],
   temasPrioritarios: ['factibilidad de agua'],
 }
 
 const grilla = (slots: unknown[]) => JSON.stringify({ slots })
 
-const SLOT = (fecha: string, pilar: string) => ({
+const SLOT = (fecha: string, pilar: string, canal = 'blog') => ({
   fecha,
   hora: '12:00',
-  canal: 'blog',
+  canal,
   formato: 'articulo',
   pilar,
   angulo: 'guía práctica',
@@ -120,6 +123,66 @@ describe('flujo P2 · grilla', () => {
       ).rejects.toMatchObject({ clase: 'permanente' })
 
       expect(await db.select().from(esquema.planSlots)).toHaveLength(0)
+    })
+  })
+
+  it('no persiste un derivado que choca con un slot ya propuesto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      // El derivado de blog(02) cae en linkedin el 04, donde el modelo ya puso
+      // un post: la propuesta no tiene bloqueantes, pero persistir ambos sí.
+      const choque = grilla([
+        SLOT('2026-09-02', 'educacion'),
+        SLOT('2026-09-04', 'educacion', 'linkedin'),
+      ])
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([choque]), env: ENV })
+
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+      expect(r.estado).toBe('completado')
+
+      const slots = await db.select().from(esquema.planSlots)
+      expect(slots).toHaveLength(2)
+      expect(slots.filter((s) => s.sourceSlotId !== null)).toHaveLength(0)
+    })
+  })
+
+  it('no genera derivados hacia un canal ausente del mix de la estrategia', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db
+        .update(esquema.strategies)
+        .set({
+          data: {
+            ...ESTRATEGIA,
+            mixDeCanales: [{ canal: 'blog', publicacionesPorSemana: 1 }],
+          },
+        })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
+
+      const slots = await db.select().from(esquema.planSlots)
+      expect(slots).toHaveLength(4)
+      expect(slots.every((s) => s.channel === 'blog')).toBe(true)
+    })
+  })
+
+  it('los avisos describen la grilla expandida, no la propuesta', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      // La propuesta trae 0 publicaciones de linkedin frente a las ~4 que pide
+      // la estrategia; la expansión aporta exactamente esas 4. El aviso de
+      // cadencia solo desaparece si se valida la grilla final.
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+      const salida = r.salida as { avisos: Array<{ regla: string; detalle: string }> }
+      expect(salida.avisos.filter((a) => a.regla === 'cadencia')).toEqual([])
     })
   })
 
