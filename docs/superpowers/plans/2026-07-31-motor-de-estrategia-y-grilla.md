@@ -123,6 +123,9 @@ dist/
 .env.local
 *.tsbuildinfo
 coverage/
+
+# Perfiles de marca reales: son datos de operación, no código fuente.
+perfiles/
 ```
 
 - [ ] **Step 2: Crear el paquete `@gc/shared`**
@@ -4667,8 +4670,10 @@ export default defineConfig({
 Agregar a los `scripts` de `package.json` de la raíz:
 
 ```json
-    "cli": "pnpm --filter @gc/cli start --"
+    "cli": "pnpm --filter @gc/cli start"
 ```
+
+> Sin `--` al final: al anidarse `pnpm run` sobre `pnpm run`, el separador se duplica y llega como argumento posicional a `parseArgs`, que lo rechaza.
 
 Agregar a `.env.example`:
 
@@ -4917,18 +4922,29 @@ Esperado: PASA, 2 pruebas.
 
 ```ts
 import { config } from 'dotenv'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // pnpm ejecuta el CLI con cwd en apps/cli; el .env vive en la raíz.
 // Este módulo se importa primero para que las variables existan antes de que
 // se evalúe cualquier otro módulo.
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) })
+
+/**
+ * Resuelve una ruta relativa contra el directorio donde el usuario escribió el
+ * comando, no contra `apps/cli`. pnpm cambia el cwd al del paquete y deja el
+ * original en INIT_CWD; sin esto, `--archivo perfiles/x.json` buscaría en
+ * `apps/cli/perfiles/x.json`.
+ */
+export function resolverDesdeInvocacion(ruta: string): string {
+  return resolve(process.env.INIT_CWD ?? process.cwd(), ruta)
+}
 ```
 
 `apps/cli/src/main.ts`:
 
 ```ts
-import './entorno.js'
+import { resolverDesdeInvocacion } from './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
@@ -4975,6 +4991,16 @@ async function principal(): Promise<void> {
   if (!url) throw new Error('Falta DATABASE_URL')
 
   const env = values.seco ? { ...process.env, IA_EN_SECO: 'true' } : process.env
+
+  // Las rutas del entorno y de la línea de comandos son relativas a donde el
+  // usuario está parado, no a apps/cli.
+  const opcionesDeCliente = {
+    env,
+    ...(env.CARPETA_DE_MUESTRAS !== undefined
+      ? { carpetaDeMuestras: resolverDesdeInvocacion(env.CARPETA_DE_MUESTRAS) }
+      : {}),
+  }
+
   const { db, cerrar } = crearConexion(url)
 
   try {
@@ -4991,13 +5017,13 @@ async function principal(): Promise<void> {
       case 'perfil:cargar': {
         const version = await cargarPerfilDeArchivo(db, {
           slug: exigir(values.marca, '--marca'),
-          archivo: exigir(values.archivo, '--archivo'),
+          archivo: resolverDesdeInvocacion(exigir(values.archivo, '--archivo')),
         })
         console.log(`Perfil guardado como versión ${version}`)
         break
       }
       case 'estrategia:generar': {
-        const r = await generarEstrategia(db, crearCliente({ env }), {
+        const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           periodo: exigir(values.periodo, '--periodo'),
           env,
@@ -5006,7 +5032,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'grilla:generar': {
-        const r = await generarGrilla(db, crearCliente({ env }), {
+        const r = await generarGrilla(db, crearCliente(opcionesDeCliente), {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
           env,
