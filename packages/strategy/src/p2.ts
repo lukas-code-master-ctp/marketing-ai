@@ -170,8 +170,11 @@ async function cargarEstrategiaVigente(
   return { id: fila.id, estrategia: r.data }
 }
 
+/** Acepta tanto la conexión como una transacción abierta. */
+type Consultable = Pick<BaseDeDatos, 'select'>
+
 async function estadoDeLaGrilla(
-  db: BaseDeDatos,
+  db: Consultable,
   brandId: string,
   mes: string,
 ): Promise<string | null> {
@@ -200,6 +203,12 @@ function grillaNoRegenerable(entrada: EntradaP2, estado: string) {
   )
 }
 
+/**
+ * Todo en una transacción: el upsert del plan, el borrado de los slots
+ * anteriores y las dos inserciones. Sueltos, una falla al insertar los padres
+ * dejaba el mes con su content_plan y sin un solo slot —el borrador anterior
+ * destruido y nada en su lugar.
+ */
 async function persistir(
   ctx: ContextoDePaso,
   entrada: EntradaP2,
@@ -209,62 +218,64 @@ async function persistir(
 ): Promise<string> {
   const mes = `${entrada.mes}-01`
 
-  const [plan] = await ctx.db
-    .insert(esquema.contentPlans)
-    .values({
+  return ctx.db.transaction(async (tx) => {
+    const [plan] = await tx
+      .insert(esquema.contentPlans)
+      .values({
+        organizationId: ctx.organizationId,
+        brandId: entrada.brandId,
+        strategyId,
+        month: mes,
+      })
+      .onConflictDoUpdate({
+        target: [esquema.contentPlans.brandId, esquema.contentPlans.month],
+        // `status` queda fuera del set: un borrador sigue siendo borrador, y el
+        // setWhere impide tocar una grilla aprobada, en ejecución o cerrada.
+        set: { strategyId },
+        setWhere: eq(esquema.contentPlans.status, 'borrador'),
+      })
+      .returning()
+
+    // Sin fila devuelta, la grilla dejó de estar en borrador entre la
+    // comprobación previa y este upsert. Se escala antes de borrar nada:
+    // regenerar destruiría planificación ya revisada y, desde la Fase 2, las
+    // piezas de contenido colgadas de esos slots.
+    if (!plan) {
+      const estado = await estadoDeLaGrilla(tx, entrada.brandId, entrada.mes)
+      throw grillaNoRegenerable(entrada, estado ?? 'desconocido')
+    }
+
+    const contentPlanId = plan.id
+
+    // Solo se llega aquí con un borrador: regenerar lo reemplaza por completo,
+    // para que un mes nunca mezcle planificación vieja con nueva.
+    await tx
+      .delete(esquema.planSlots)
+      .where(eq(esquema.planSlots.contentPlanId, contentPlanId))
+
+    const aFila = (s: TipoSlotPropuesto, sourceSlotId: string | null) => ({
       organizationId: ctx.organizationId,
-      brandId: entrada.brandId,
-      strategyId,
-      month: mes,
+      contentPlanId,
+      sourceSlotId,
+      scheduledFor: new Date(`${s.fecha}T${s.hora}:00Z`),
+      channel: s.canal,
+      format: s.formato,
+      pillar: s.pilar,
+      angle: s.angulo,
+      brief: s.brief,
     })
-    .onConflictDoUpdate({
-      target: [esquema.contentPlans.brandId, esquema.contentPlans.month],
-      // `status` queda fuera del set: un borrador sigue siendo borrador, y el
-      // setWhere impide tocar una grilla aprobada, en ejecución o cerrada.
-      set: { strategyId },
-      setWhere: eq(esquema.contentPlans.status, 'borrador'),
-    })
-    .returning()
 
-  // Sin fila devuelta, la grilla dejó de estar en borrador entre la
-  // comprobación previa y este upsert. Se escala antes de borrar nada:
-  // regenerar destruiría planificación ya revisada y, desde la Fase 2, las
-  // piezas de contenido colgadas de esos slots.
-  if (!plan) {
-    const estado = await estadoDeLaGrilla(ctx.db, entrada.brandId, entrada.mes)
-    throw grillaNoRegenerable(entrada, estado ?? 'desconocido')
-  }
-
-  const contentPlanId = plan.id
-
-  // Solo se llega aquí con un borrador: regenerar lo reemplaza por completo,
-  // para que un mes nunca mezcle planificación vieja con nueva.
-  await ctx.db
-    .delete(esquema.planSlots)
-    .where(eq(esquema.planSlots.contentPlanId, contentPlanId))
-
-  const aFila = (s: TipoSlotPropuesto, sourceSlotId: string | null) => ({
-    organizationId: ctx.organizationId,
-    contentPlanId,
-    sourceSlotId,
-    scheduledFor: new Date(`${s.fecha}T${s.hora}:00Z`),
-    channel: s.canal,
-    format: s.formato,
-    pillar: s.pilar,
-    angle: s.angulo,
-    brief: s.brief,
-  })
-
-  const padres = await ctx.db
-    .insert(esquema.planSlots)
-    .values(slots.map((s) => aFila(s, null)))
-    .returning({ id: esquema.planSlots.id })
-
-  if (derivados.length > 0) {
-    await ctx.db
+    const padres = await tx
       .insert(esquema.planSlots)
-      .values(derivados.map((d) => aFila(d, padres[d.indiceDelPadre]!.id)))
-  }
+      .values(slots.map((s) => aFila(s, null)))
+      .returning({ id: esquema.planSlots.id })
 
-  return contentPlanId
+    if (derivados.length > 0) {
+      await tx
+        .insert(esquema.planSlots)
+        .values(derivados.map((d) => aFila(d, padres[d.indiceDelPadre]!.id)))
+    }
+
+    return contentPlanId
+  })
 }

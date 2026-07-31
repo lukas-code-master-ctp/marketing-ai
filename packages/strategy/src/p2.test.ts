@@ -3,7 +3,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoGrilla } from './p2.js'
 
@@ -253,6 +253,39 @@ describe('flujo P2 · grilla', () => {
       // Ni el estado ni los slots se tocan: el throw ocurre antes del delete.
       const [plan] = await db.select().from(esquema.contentPlans)
       expect(plan!.status).toBe('aprobada')
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+    })
+  })
+
+  it('no destruye la grilla anterior si falla la inserción de los slots', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+
+      // Falla real de la base al insertar, después de que el delete ya corrió.
+      await db.execute(sql`
+        create or replace function gc_romper_slots() returns trigger
+        language plpgsql as $$ begin raise exception 'caída simulada al insertar'; end; $$
+      `)
+      await db.execute(sql`
+        create trigger gc_romper_slots before insert on plan_slots
+        for each row execute function gc_romper_slots()
+      `)
+
+      try {
+        const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+        await expect(ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA)).rejects.toThrow()
+      } finally {
+        await db.execute(sql`drop trigger if exists gc_romper_slots on plan_slots`)
+        await db.execute(sql`drop function if exists gc_romper_slots()`)
+      }
+
+      // Borrar lo viejo e insertar lo nuevo es una sola unidad: el mes no puede
+      // quedarse con su content_plan y sin un solo slot.
       expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
     })
   })
