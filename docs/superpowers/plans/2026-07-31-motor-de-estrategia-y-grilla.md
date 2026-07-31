@@ -4868,11 +4868,20 @@ export interface FilaDeGrilla {
   derivado: boolean
 }
 
+const MES_VALIDO = /^\d{4}-(0[1-9]|1[0-2])$/
+
 export async function verGrilla(
   db: BaseDeDatos,
   args: { slug: string; mes: string },
 ): Promise<FilaDeGrilla[]> {
   const ref = await resolverMarca(db, args.slug)
+
+  // Sin esta validación un mes mal escrito produce fechas Invalid Date y el
+  // usuario recibe un error del driver en vez de saber qué escribió mal.
+  if (!MES_VALIDO.test(args.mes)) {
+    throw permanente(`Mes inválido "${args.mes}": se espera el formato AAAA-MM`)
+  }
+
   const [anio, mes] = args.mes.split('-').map(Number)
   const desde = new Date(Date.UTC(anio!, mes! - 1, 1))
   const hasta = new Date(Date.UTC(anio!, mes!, 1))
@@ -5062,7 +5071,14 @@ function exigir(valor: string | undefined, bandera: string): string {
   return valor
 }
 
-await principal()
+try {
+  await principal()
+} catch (error) {
+  // El CLI es superficie humana: los mensajes ya están en español y explican
+  // qué hacer, pero sin esto salen enterrados en un stack trace.
+  console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+}
 ```
 
 - [ ] **Step 7: Verificar el flujo real en seco**
