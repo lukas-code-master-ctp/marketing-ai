@@ -61,6 +61,12 @@ describe('repositorio de perfiles', () => {
     })
   })
 
+  // Verifica el comportamiento correcto bajo concurrencia, pero NO es una
+  // prueba de regresión confiable de la carrera: sin el FOR UPDATE también
+  // pasa, porque un Postgres local responde antes de que las dos operaciones
+  // alcancen a solaparse. La garantía real está en el bloqueo de
+  // repositorio.ts, no aquí. Que este test esté verde no prueba que el
+  // bloqueo siga puesto.
   it('dos guardados simultáneos producen versiones distintas', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
