@@ -437,6 +437,9 @@ Tabla por tabla:
 | `planSlots` | `contentPlanId, organizationId` | `contentPlans` | `plan_slots_plan_org_fk` |
 | `planSlots` | `sourceSlotId, organizationId` | `planSlots` (auto) | `plan_slots_source_org_fk` |
 | `pipelineSteps` | `runId, organizationId` | `pipelineRuns` | `pipeline_steps_run_org_fk` |
+| `contentPlans` | `strategyId, organizationId` | `strategies` | `content_plans_strategy_org_fk` |
+
+> `strategies` necesita entonces su propia única `(id, organization_id)`: son cinco únicas y doce compuestas, no cuatro y once. Esta última se omitió en la primera redacción del plan y la detectó la revisión: sin ella, un `content_plan` de una organización puede apuntar a la estrategia de otra, y cualquier lectura que haga join plan → estrategia sirve datos de la organización equivocada.
 
 Notas que importan:
 
