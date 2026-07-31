@@ -37,6 +37,29 @@ describe('validarGrilla', () => {
     expect(p).toContainEqual(expect.objectContaining({ regla: 'fuera_de_mes', severidad: 'bloqueante' }))
   })
 
+  it('marca como bloqueante un día que no existe en el mes', () => {
+    const p = validarGrilla([slot({ fecha: '2026-09-31' })], CTX)
+    expect(p).toContainEqual(
+      expect.objectContaining({ regla: 'fecha_invalida', severidad: 'bloqueante' }),
+    )
+    // Un solo problema por la fecha: `fuera_de_mes` confundiría al modelo,
+    // porque el prefijo AAAA-MM sí es el del mes pedido.
+    expect(p.filter((x) => x.regla === 'fuera_de_mes')).toEqual([])
+  })
+
+  it('marca como bloqueante un día imposible de interpretar', () => {
+    const p = validarGrilla([slot({ fecha: '2026-09-45' })], CTX)
+    expect(p).toContainEqual(
+      expect.objectContaining({ regla: 'fecha_invalida', severidad: 'bloqueante' }),
+    )
+  })
+
+  it('acepta un 29 de febrero bisiesto', () => {
+    const ctxBisiesto = { ...CTX, mes: '2028-02' }
+    const p = validarGrilla([slot({ fecha: '2028-02-29' })], ctxBisiesto)
+    expect(p.filter((x) => x.regla === 'fecha_invalida')).toEqual([])
+  })
+
   it('marca como bloqueante un canal ausente del mix', () => {
     const p = validarGrilla([slot({ canal: 'tiktok' })], CTX)
     expect(p).toContainEqual(expect.objectContaining({ regla: 'canal_fuera_de_mix' }))
