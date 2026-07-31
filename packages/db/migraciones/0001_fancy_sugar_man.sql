@@ -33,8 +33,15 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
+-- EDITADO A MANO: drizzle-kit 0.28 no sabe expresar la lista de columnas del
+-- `SET NULL`, y emitía `ON DELETE set null` a secas. Sobre una compuesta eso
+-- anula TODAS sus columnas, y `organization_id` es NOT NULL: borrar un
+-- `pipeline_run` con `ai_calls` colgando fallaba con 23502 en vez de conservar
+-- el registro de costo. Con la forma `SET NULL ("run_id")` (Postgres 15+) solo
+-- se anula `run_id` y el gasto histórico sobrevive, que es lo que suma el
+-- guardián de presupuesto. Ver el comentario en `src/esquema.ts`.
 DO $$ BEGIN
- ALTER TABLE "ai_calls" ADD CONSTRAINT "ai_calls_run_org_fk" FOREIGN KEY ("run_id","organization_id") REFERENCES "public"."pipeline_runs"("id","organization_id") ON DELETE set null ON UPDATE no action;
+ ALTER TABLE "ai_calls" ADD CONSTRAINT "ai_calls_run_org_fk" FOREIGN KEY ("run_id","organization_id") REFERENCES "public"."pipeline_runs"("id","organization_id") ON DELETE SET NULL ("run_id") ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;

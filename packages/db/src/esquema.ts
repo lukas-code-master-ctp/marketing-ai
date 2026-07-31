@@ -262,12 +262,31 @@ export const aiCalls = pgTable('ai_calls', {
     foreignColumns: [brands.id, brands.organizationId],
     name: 'ai_calls_brand_org_fk',
   }).onDelete('cascade'),
-  // OJO: `set null` sobre una compuesta anula TODAS sus columnas, y
-  // `organization_id` es NOT NULL. Borrar un `pipeline_run` que tenga
-  // `ai_calls` colgando falla con violación de not-null en vez de dejar el
-  // registro de costo huérfano. Hoy nada borra `pipeline_runs` de forma
-  // directa (solo en cascada desde `organizations`, donde la cascada de
-  // `organization_id` gana), pero el riesgo queda anotado.
+  // ⚠️ AQUÍ EL SQL NO COINCIDE CON ESTE ESQUEMA. LEER ANTES DE REGENERAR. ⚠️
+  //
+  // Lo que dice esta declaración:  ON DELETE SET NULL
+  // Lo que hay en la base de datos: ON DELETE SET NULL ("run_id")
+  //
+  // Por qué: `SET NULL` sobre una clave foránea COMPUESTA anula TODAS sus
+  // columnas, y `ai_calls.organization_id` es NOT NULL. Con la forma simple,
+  // borrar un `pipeline_run` que tenga `ai_calls` colgando revienta con
+  // 23502 (not-null violation) en lugar de conservar la fila. Y esa fila
+  // tiene que sobrevivir: `cost_usd` es lo que suma el guardián de
+  // presupuesto, así que perder el gasto histórico al borrar una corrida
+  // debilitaría en silencio la única barrera del sistema con plata detrás.
+  //
+  // La forma con lista de columnas (Postgres 15+, acá corremos 16) anula
+  // solo `run_id` y deja intacta `organization_id`. drizzle-kit 0.28 NO sabe
+  // expresarla: por eso la declaración de abajo dice `set null` a secas y la
+  // sentencia real se editó a mano en
+  // `migraciones/0001_fancy_sugar_man.sql`.
+  //
+  // CONSECUENCIA: si algún día se regenera esta restricción con
+  // `drizzle-kit generate`, la migración nueva volverá a emitir el `SET NULL`
+  // sin lista de columnas y reintroducirá el bug. Hay que reaplicar la misma
+  // edición a mano. La prueba
+  // «conserva la llamada de IA al borrar su corrida, anulando solo run_id»
+  // en `esquema.test.ts` es la red que lo detecta.
   corridaPorOrg: foreignKey({
     columns: [t.runId, t.organizationId],
     foreignColumns: [pipelineRuns.id, pipelineRuns.organizationId],

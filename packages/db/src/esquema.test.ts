@@ -237,6 +237,41 @@ describe('integridad multi-tenant', () => {
     })
   })
 
+  // El registro de costo tiene que sobrevivir a su corrida: es lo que suma el
+  // guardián de presupuesto. Si al borrar un `pipeline_run` se perdiera el
+  // gasto histórico, se debilitaría en silencio la única barrera del sistema
+  // con dinero detrás.
+  it('conserva la llamada de IA al borrar su corrida, anulando solo run_id', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'a', name: 'A' })
+        .returning()
+      const [corrida] = await db
+        .insert(esquema.pipelineRuns)
+        .values({ organizationId: org!.id, brandId: marca!.id, flow: 'demo' })
+        .returning()
+      await db.insert(esquema.aiCalls).values({
+        organizationId: org!.id,
+        brandId: marca!.id,
+        runId: corrida!.id,
+        task: 'redaccion',
+        model: 'proveedor/modelo',
+        costUsd: '1.500000',
+        promptHash: 'hash-de-prueba',
+      })
+
+      await db.delete(esquema.pipelineRuns).where(eq(esquema.pipelineRuns.id, corrida!.id))
+
+      const llamadas = await db.select().from(esquema.aiCalls)
+      expect(llamadas).toHaveLength(1)
+      expect(llamadas[0]!.runId).toBeNull()
+      expect(llamadas[0]!.organizationId).toBe(org!.id)
+      expect(llamadas[0]!.costUsd).toBe('1.500000')
+    })
+  })
+
   it('acepta las filas cuya organización sí coincide', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
