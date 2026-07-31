@@ -24,7 +24,7 @@
 - **Todas las marcas de tiempo son `timestamptz`** y se guardan en UTC.
 - **TDD estricto:** ningún paso de implementación se escribe antes de tener su prueba fallando.
 - **Commits frecuentes:** un commit por tarea como mínimo, en español, con prefijo convencional (`feat:`, `test:`, `chore:`).
-- Ejecutar pruebas con `pnpm -r test`. Ejecutar las de un paquete con `pnpm --filter @gc/<nombre> test`.
+- **Ejecutar la suite completa con `pnpm test` desde la raíz**, nunca con `pnpm -r test` directo. Todos los paquetes comparten la misma base de datos de pruebas y cada prueba la vacía al empezar, así que corriéndolos en paralelo se pisan entre sí. El script de la raíz serializa los paquetes con `--workspace-concurrency=1`. Las de un paquete suelto: `pnpm --filter @gc/<nombre> test`.
 
 ---
 
@@ -60,7 +60,7 @@
   "packageManager": "pnpm@9.15.9",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
@@ -313,7 +313,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm -r test
+      - run: pnpm test
 ```
 
 - [ ] **Step 8: Commit**
@@ -4788,7 +4788,7 @@ Esperado: una tabla de 12 filas ordenada por fecha, con 8 marcadas como `derivad
 - [ ] **Step 8: Ejecutar la suite completa**
 
 ```bash
-pnpm -r test && pnpm typecheck
+pnpm test && pnpm typecheck
 ```
 
 Esperado: PASA todo — 7 paquetes, 74 pruebas.
