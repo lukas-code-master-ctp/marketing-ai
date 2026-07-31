@@ -6,7 +6,8 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "pnpm -r --workspace-concurrency=1 test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "cli": "pnpm --filter @gc/cli start"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
