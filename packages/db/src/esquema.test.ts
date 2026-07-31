@@ -137,6 +137,148 @@ describe('organization_id obligatorio', () => {
   })
 })
 
+describe('integridad multi-tenant', () => {
+  it('rechaza una hija de marca cuya organización no coincide', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
+        .returning()
+
+      // La marca es de orgA; el perfil dice ser de orgB.
+      await expect(
+        db.insert(esquema.brandProfiles).values({
+          organizationId: orgB!.id,
+          brandId: marca!.id,
+          version: 1,
+          data: {},
+        }),
+      ).rejects.toThrow()
+    })
+  })
+
+  it('rechaza un slot cuya organización no coincide con la de su plan', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
+        .returning()
+      const [plan] = await db
+        .insert(esquema.contentPlans)
+        .values({ organizationId: orgA!.id, brandId: marca!.id, month: '2026-09-01' })
+        .returning()
+
+      await expect(
+        db.insert(esquema.planSlots).values({
+          organizationId: orgB!.id,
+          contentPlanId: plan!.id,
+          scheduledFor: new Date('2026-09-03T13:00:00Z'),
+          channel: 'blog',
+          format: 'articulo',
+          pillar: 'educacion',
+          angle: 'x',
+          brief: 'Un brief suficientemente largo para pasar la validación.',
+        }),
+      ).rejects.toThrow()
+    })
+  })
+
+  it('rechaza un derivado que apunta a un slot de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+
+      const crearSlot = async (orgId: string, slug: string) => {
+        const [marca] = await db
+          .insert(esquema.brands)
+          .values({ organizationId: orgId, slug, name: slug })
+          .returning()
+        const [plan] = await db
+          .insert(esquema.contentPlans)
+          .values({ organizationId: orgId, brandId: marca!.id, month: '2026-09-01' })
+          .returning()
+        const [slot] = await db
+          .insert(esquema.planSlots)
+          .values({
+            organizationId: orgId,
+            contentPlanId: plan!.id,
+            scheduledFor: new Date('2026-09-03T13:00:00Z'),
+            channel: 'blog',
+            format: 'articulo',
+            pillar: 'educacion',
+            angle: 'x',
+            brief: 'Un brief suficientemente largo para pasar la validación.',
+          })
+          .returning()
+        return { planId: plan!.id, slotId: slot!.id }
+      }
+
+      const a = await crearSlot(orgA!.id, 'a')
+      const b = await crearSlot(orgB!.id, 'b')
+
+      // Un slot de orgB no puede colgar de un padre de orgA.
+      await expect(
+        db.insert(esquema.planSlots).values({
+          organizationId: orgB!.id,
+          contentPlanId: b.planId,
+          sourceSlotId: a.slotId,
+          scheduledFor: new Date('2026-09-05T13:00:00Z'),
+          channel: 'linkedin',
+          format: 'derivado',
+          pillar: 'educacion',
+          angle: 'x',
+          brief: 'Un brief suficientemente largo para pasar la validación.',
+        }),
+      ).rejects.toThrow()
+    })
+  })
+
+  it('acepta las filas cuya organización sí coincide', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'a', name: 'A' })
+        .returning()
+      const [plan] = await db
+        .insert(esquema.contentPlans)
+        .values({ organizationId: org!.id, brandId: marca!.id, month: '2026-09-01' })
+        .returning()
+      const [padre] = await db
+        .insert(esquema.planSlots)
+        .values({
+          organizationId: org!.id,
+          contentPlanId: plan!.id,
+          scheduledFor: new Date('2026-09-03T13:00:00Z'),
+          channel: 'blog',
+          format: 'articulo',
+          pillar: 'educacion',
+          angle: 'x',
+          brief: 'Un brief suficientemente largo para pasar la validación.',
+        })
+        .returning()
+
+      await db.insert(esquema.planSlots).values({
+        organizationId: org!.id,
+        contentPlanId: plan!.id,
+        sourceSlotId: padre!.id,
+        scheduledFor: new Date('2026-09-05T13:00:00Z'),
+        channel: 'linkedin',
+        format: 'derivado',
+        pillar: 'educacion',
+        angle: 'x',
+        brief: 'Un brief suficientemente largo para pasar la validación.',
+      })
+
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(2)
+    })
+  })
+})
+
 describe('restricciones CHECK de enums', () => {
   const casos: Array<[string, (db: BaseDeDatos, org: { id: string }) => Promise<unknown>]> = [
     [

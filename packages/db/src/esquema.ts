@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  check, date, index, integer, jsonb, numeric, pgTable, text,
+  check, date, foreignKey, index, integer, jsonb, numeric, pgTable, text,
   timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -25,6 +25,15 @@ const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull()
 const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readonly string[]) =>
   check(nombreRestriccion, sql.raw(`${columna} in (${valores.map((v) => `'${v}'`).join(', ')})`))
 
+// Multi-tenencia exigible: cada tabla lleva `organization_id`, pero una clave
+// foránea simple hacia el padre no impide que la fila declare una organización
+// distinta a la de ese padre. Por eso las tablas padre (`brands`,
+// `content_plans`, `pipeline_runs`, `plan_slots`) llevan una única sobre
+// (id, organization_id) y cada hija apunta con una clave foránea COMPUESTA
+// (<padre>_id, organization_id). Así es Postgres —y no la capa de
+// aplicación— quien rechaza una fila cuya organización no coincida con la de
+// su padre. Al declarar la compuesta hay que quitar el `.references()` de la
+// columna, o quedarían las dos restricciones sobre lo mismo.
 const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
 const ESTADOS_CONTENT_PLAN = ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'] as const
 const ESTADOS_PLAN_SLOT = ['planificado', 'descartado'] as const
@@ -45,25 +54,35 @@ export const brands = pgTable('brands', {
   monthlyBudgetUsd: numeric('monthly_budget_usd', { precision: 10, scale: 2 })
     .notNull().default('25.00'),
   createdAt: creadoEn(),
-}, (t) => ({ slugPorOrg: unique().on(t.organizationId, t.slug) }))
+}, (t) => ({
+  slugPorOrg: unique().on(t.organizationId, t.slug),
+  // Destino de las claves foráneas compuestas de las tablas hijas: sin esta
+  // única, Postgres no aceptaría referenciar (id, organization_id).
+  idPorOrg: unique('brands_id_organization_id_unique').on(t.id, t.organizationId),
+}))
 
 export const brandProfiles = pgTable('brand_profiles', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
   version: integer('version').notNull(),
   data: jsonb('data').notNull(),
   createdAt: creadoEn(),
-}, (t) => ({ versionPorMarca: unique().on(t.brandId, t.version) }))
+}, (t) => ({
+  versionPorMarca: unique().on(t.brandId, t.version),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'brand_profiles_brand_org_fk',
+  }).onDelete('cascade'),
+}))
 
 export const channelAccounts = pgTable('channel_accounts', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
   channel: text('channel', { enum: CANALES }).notNull(),
   mode: text('mode').notNull().default('blog_api'),
   secretRef: text('secret_ref'),
@@ -73,28 +92,36 @@ export const channelAccounts = pgTable('channel_accounts', {
 }, (t) => ({
   canalPorMarca: unique().on(t.brandId, t.channel),
   canalValido: chequeoEnum('channel_accounts_channel_check', 'channel', CANALES),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'channel_accounts_brand_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const approvalPolicies = pgTable('approval_policies', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
   channel: text('channel', { enum: CANALES }).notNull(),
   policy: text('policy', { enum: POLITICAS }).notNull(),
 }, (t) => ({
   politicaPorCanal: unique().on(t.brandId, t.channel),
   canalValido: chequeoEnum('approval_policies_channel_check', 'channel', CANALES),
   politicaValida: chequeoEnum('approval_policies_policy_check', 'policy', POLITICAS),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'approval_policies_brand_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const strategies = pgTable('strategies', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
   period: text('period').notNull(),
   status: text('status', { enum: ESTADOS_STRATEGY })
     .notNull().default('borrador'),
@@ -104,14 +131,18 @@ export const strategies = pgTable('strategies', {
 }, (t) => ({
   periodoPorMarca: unique().on(t.brandId, t.period),
   estadoValido: chequeoEnum('strategies_status_check', 'status', ESTADOS_STRATEGY),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'strategies_brand_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const contentPlans = pgTable('content_plans', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
   strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
   month: date('month').notNull(),
   status: text('status', {
@@ -121,14 +152,19 @@ export const contentPlans = pgTable('content_plans', {
 }, (t) => ({
   mesPorMarca: unique().on(t.brandId, t.month),
   estadoValido: chequeoEnum('content_plans_status_check', 'status', ESTADOS_CONTENT_PLAN),
+  idPorOrg: unique('content_plans_id_organization_id_unique').on(t.id, t.organizationId),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'content_plans_brand_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const planSlots = pgTable('plan_slots', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  contentPlanId: uuid('content_plan_id').notNull()
-    .references(() => contentPlans.id, { onDelete: 'cascade' }),
+  contentPlanId: uuid('content_plan_id').notNull(),
   sourceSlotId: uuid('source_slot_id'),
   scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull(),
   channel: text('channel', { enum: CANALES }).notNull(),
@@ -143,13 +179,26 @@ export const planSlots = pgTable('plan_slots', {
   porPlan: index('plan_slots_por_plan').on(t.contentPlanId, t.scheduledFor),
   canalValido: chequeoEnum('plan_slots_channel_check', 'channel', CANALES),
   estadoValido: chequeoEnum('plan_slots_status_check', 'status', ESTADOS_PLAN_SLOT),
+  idPorOrg: unique('plan_slots_id_organization_id_unique').on(t.id, t.organizationId),
+  planPorOrg: foreignKey({
+    columns: [t.contentPlanId, t.organizationId],
+    foreignColumns: [contentPlans.id, contentPlans.organizationId],
+    name: 'plan_slots_plan_org_fk',
+  }).onDelete('cascade'),
+  // Autorreferencia: un derivado cuelga de otro slot de la MISMA organización.
+  // Antes `source_slot_id` era un uuid suelto, sin clave foránea alguna.
+  origenPorOrg: foreignKey({
+    columns: [t.sourceSlotId, t.organizationId],
+    foreignColumns: [t.id, t.organizationId],
+    name: 'plan_slots_source_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const pipelineRuns = pgTable('pipeline_runs', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').references(() => brands.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id'),
   flow: text('flow').notNull(),
   status: text('status', { enum: ESTADOS_PIPELINE })
     .notNull().default('en_curso'),
@@ -159,14 +208,19 @@ export const pipelineRuns = pgTable('pipeline_runs', {
   finishedAt: timestamp('finished_at', { withTimezone: true }),
 }, (t) => ({
   estadoValido: chequeoEnum('pipeline_runs_status_check', 'status', ESTADOS_PIPELINE),
+  idPorOrg: unique('pipeline_runs_id_organization_id_unique').on(t.id, t.organizationId),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'pipeline_runs_brand_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  runId: uuid('run_id').notNull()
-    .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+  runId: uuid('run_id').notNull(),
   name: text('name').notNull(),
   status: text('status', { enum: ESTADOS_PIPELINE }).notNull(),
   attempt: integer('attempt').notNull().default(1),
@@ -179,14 +233,19 @@ export const pipelineSteps = pgTable('pipeline_steps', {
 }, (t) => ({
   claveUnica: unique().on(t.idempotencyKey),
   estadoValido: chequeoEnum('pipeline_steps_status_check', 'status', ESTADOS_PIPELINE),
+  corridaPorOrg: foreignKey({
+    columns: [t.runId, t.organizationId],
+    foreignColumns: [pipelineRuns.id, pipelineRuns.organizationId],
+    name: 'pipeline_steps_run_org_fk',
+  }).onDelete('cascade'),
 }))
 
 export const aiCalls = pgTable('ai_calls', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
     .references(() => organizations.id, { onDelete: 'cascade' }),
-  brandId: uuid('brand_id').references(() => brands.id, { onDelete: 'cascade' }),
-  runId: uuid('run_id').references(() => pipelineRuns.id, { onDelete: 'set null' }),
+  brandId: uuid('brand_id'),
+  runId: uuid('run_id'),
   task: text('task').notNull(),
   model: text('model').notNull(),
   tokensIn: integer('tokens_in').notNull().default(0),
@@ -196,7 +255,25 @@ export const aiCalls = pgTable('ai_calls', {
   promptHash: text('prompt_hash').notNull(),
   brandProfileVersion: integer('brand_profile_version'),
   createdAt: creadoEn(),
-}, (t) => ({ porMarcaYFecha: index('ai_calls_por_marca_fecha').on(t.brandId, t.createdAt) }))
+}, (t) => ({
+  porMarcaYFecha: index('ai_calls_por_marca_fecha').on(t.brandId, t.createdAt),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'ai_calls_brand_org_fk',
+  }).onDelete('cascade'),
+  // OJO: `set null` sobre una compuesta anula TODAS sus columnas, y
+  // `organization_id` es NOT NULL. Borrar un `pipeline_run` que tenga
+  // `ai_calls` colgando falla con violación de not-null en vez de dejar el
+  // registro de costo huérfano. Hoy nada borra `pipeline_runs` de forma
+  // directa (solo en cascada desde `organizations`, donde la cascada de
+  // `organization_id` gana), pero el riesgo queda anotado.
+  corridaPorOrg: foreignKey({
+    columns: [t.runId, t.organizationId],
+    foreignColumns: [pipelineRuns.id, pipelineRuns.organizationId],
+    name: 'ai_calls_run_org_fk',
+  }).onDelete('set null'),
+}))
 
 export const esquema = {
   organizations, brands, brandProfiles, channelAccounts, approvalPolicies,
