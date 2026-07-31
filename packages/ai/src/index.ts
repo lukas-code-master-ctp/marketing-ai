@@ -1,2 +1,6 @@
+export * from './cliente.js'
+export * from './ejecutar.js'
+export * from './falso.js'
 export * from './niveles.js'
+export * from './openrouter.js'
 export * from './tarea.js'
