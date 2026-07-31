@@ -158,13 +158,27 @@ async function persistir(
     })
     .onConflictDoUpdate({
       target: [esquema.contentPlans.brandId, esquema.contentPlans.month],
-      set: { strategyId, status: 'borrador' },
+      // `status` queda fuera del set: un borrador sigue siendo borrador, y el
+      // setWhere impide tocar una grilla aprobada, en ejecución o cerrada.
+      set: { strategyId },
+      setWhere: eq(esquema.contentPlans.status, 'borrador'),
     })
     .returning()
 
-  const contentPlanId = plan!.id
+  // Sin fila devuelta, la grilla existente ya salió de borrador. Se escala
+  // antes de borrar nada: regenerar destruiría planificación ya revisada y,
+  // desde la Fase 2, las piezas de contenido colgadas de esos slots.
+  if (!plan) {
+    throw permanente(
+      `La grilla de ${entrada.mes} para la marca ${entrada.brandId} ya no está en ` +
+        `borrador. Archívala antes de regenerarla.`,
+    )
+  }
 
-  // Regenerar reemplaza la grilla anterior por completo.
+  const contentPlanId = plan.id
+
+  // Solo se llega aquí con un borrador: regenerar lo reemplaza por completo,
+  // para que un mes nunca mezcle planificación vieja con nueva.
   await ctx.db
     .delete(esquema.planSlots)
     .where(eq(esquema.planSlots.contentPlanId, contentPlanId))

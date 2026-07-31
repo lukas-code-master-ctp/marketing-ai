@@ -158,4 +158,26 @@ describe('flujo P2 · grilla', () => {
       ).rejects.toMatchObject({ clase: 'permanente' })
     })
   })
+
+  it('no regenera una grilla que ya salió de borrador', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db.update(esquema.contentPlans).set({ status: 'aprobada' })
+
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      // Ni el estado ni los slots se tocan: el throw ocurre antes del delete.
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.status).toBe('aprobada')
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+    })
+  })
 })
