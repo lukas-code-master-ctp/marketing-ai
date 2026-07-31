@@ -730,6 +730,8 @@ export const pipelineRuns = pgTable('pipeline_runs', {
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
   runId: uuid('run_id').notNull()
     .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
@@ -2445,6 +2447,7 @@ async function ejecutarPaso(
   const [fila] = await db
     .insert(esquema.pipelineSteps)
     .values({
+      organizationId: ctx.organizationId,
       runId: ctx.runId,
       name: paso.nombre,
       status: 'en_curso',
