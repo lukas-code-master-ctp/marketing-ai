@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import type { BaseDeDatos } from './cliente.js'
 import { esquema } from './esquema.js'
 import { conBaseDeDatosDePrueba } from './pruebas/entorno.js'
 
@@ -108,6 +109,91 @@ describe('esquema', () => {
       await db.delete(esquema.brands).where(eq(esquema.brands.id, marca!.id))
 
       expect(await db.select().from(esquema.planSlots)).toHaveLength(0)
+    })
+  })
+})
+
+describe('organization_id obligatorio', () => {
+  it('rechaza un pipeline_step sin organization_id', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X' })
+        .returning()
+      const [run] = await db
+        .insert(esquema.pipelineRuns)
+        .values({ organizationId: org!.id, flow: 'demo' })
+        .returning()
+
+      await expect(
+        db.insert(esquema.pipelineSteps).values({
+          runId: run!.id,
+          name: 'paso-1',
+          status: 'en_curso',
+          idempotencyKey: 'clave-sin-organizacion',
+        } as never),
+      ).rejects.toThrow()
+    })
+  })
+})
+
+describe('restricciones CHECK de enums', () => {
+  const casos: Array<[string, (db: BaseDeDatos, org: { id: string }) => Promise<unknown>]> = [
+    [
+      'channel_accounts.channel',
+      async (db, org) => {
+        const [marca] = await db
+          .insert(esquema.brands)
+          .values({ organizationId: org.id, slug: 'a', name: 'A' })
+          .returning()
+        return db.insert(esquema.channelAccounts).values({
+          organizationId: org.id,
+          brandId: marca!.id,
+          channel: 'canal_inexistente' as never,
+        })
+      },
+    ],
+    [
+      'content_plans.status',
+      async (db, org) => {
+        const [marca] = await db
+          .insert(esquema.brands)
+          .values({ organizationId: org.id, slug: 'a', name: 'A' })
+          .returning()
+        return db.insert(esquema.contentPlans).values({
+          organizationId: org.id,
+          brandId: marca!.id,
+          month: '2026-09-01',
+          status: 'estado_inexistente' as never,
+        })
+      },
+    ],
+    [
+      'pipeline_steps.status',
+      async (db, org) => {
+        const [run] = await db
+          .insert(esquema.pipelineRuns)
+          .values({ organizationId: org.id, flow: 'demo' })
+          .returning()
+        return db.insert(esquema.pipelineSteps).values({
+          organizationId: org.id,
+          runId: run!.id,
+          name: 'paso-1',
+          status: 'estado_inexistente' as never,
+          idempotencyKey: 'clave-check-pipeline-steps',
+        })
+      },
+    ],
+  ]
+
+  it.each(casos)('rechaza un valor inválido en %s', async (_nombre, intentarInsertar) => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X' })
+        .returning()
+
+      await expect(intentarInsertar(db, org!)).rejects.toThrow()
     })
   })
 })

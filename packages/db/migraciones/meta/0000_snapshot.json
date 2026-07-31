@@ -1,5 +1,5 @@
 {
-  "id": "2daba54d-a62d-4393-9661-71ae96b8b224",
+  "id": "997cedf2-f272-4c72-957f-1db1f216e7d6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -785,6 +785,12 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "run_id": {
           "name": "run_id",
           "type": "uuid",
@@ -850,6 +856,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "pipeline_steps_organization_id_organizations_id_fk": {
+          "name": "pipeline_steps_organization_id_organizations_id_fk",
+          "tableFrom": "pipeline_steps",
+          "tableTo": "organizations",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "pipeline_steps_run_id_pipeline_runs_id_fk": {
           "name": "pipeline_steps_run_id_pipeline_runs_id_fk",
           "tableFrom": "pipeline_steps",

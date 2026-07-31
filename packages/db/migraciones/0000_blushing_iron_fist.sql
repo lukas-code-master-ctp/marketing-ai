@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS "pipeline_runs" (
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "pipeline_steps" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"organization_id" uuid NOT NULL,
 	"run_id" uuid NOT NULL,
 	"name" text NOT NULL,
 	"status" text NOT NULL,
@@ -222,6 +223,12 @@ END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "pipeline_runs" ADD CONSTRAINT "pipeline_runs_brand_id_brands_id_fk" FOREIGN KEY ("brand_id") REFERENCES "public"."brands"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "pipeline_steps" ADD CONSTRAINT "pipeline_steps_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;

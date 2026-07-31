@@ -18,6 +18,10 @@ const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull()
 // (ver esquema.test.ts) cada columna `text(..., { enum })` lleva su propio
 // CHECK explícito, generado con este helper para mantener el mismo criterio
 // y la misma convención de nombre en todas.
+// El nombre de columna se interpola directo en el SQL vía `sql.raw`, así que
+// este helper solo debe recibir constantes literales definidas en este
+// archivo (como CANALES o los ESTADOS_*), nunca valores dinámicos o provistos
+// por el usuario.
 const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readonly string[]) =>
   check(nombreRestriccion, sql.raw(`${columna} in (${valores.map((v) => `'${v}'`).join(', ')})`))
 
@@ -159,6 +163,8 @@ export const pipelineRuns = pgTable('pipeline_runs', {
 
 export const pipelineSteps = pgTable('pipeline_steps', {
   id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
   runId: uuid('run_id').notNull()
     .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
