@@ -3308,6 +3308,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoEstrategia } from './p1.js'
 
@@ -3410,6 +3411,30 @@ describe('flujo P1 · estrategia', () => {
       }
 
       expect(await db.select().from(esquema.strategies)).toHaveLength(1)
+    })
+  })
+
+  it('no pisa una estrategia ya aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, period: '2026-Q4' }
+
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'aprobada', data: { marca: 'revisada a mano' } })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const otro = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      await expect(
+        ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      const [fila] = await db.select().from(esquema.strategies)
+      expect(fila!.status).toBe('aprobada')
+      expect(fila!.data).toEqual({ marca: 'revisada a mano' })
     })
   })
 })
@@ -3539,6 +3564,8 @@ import {
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
+import { permanente } from '@gc/shared'
+import { eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Estrategia, type TipoEstrategia } from './esquemas.js'
@@ -3608,11 +3635,24 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         })
         .onConflictDoUpdate({
           target: [esquema.strategies.brandId, esquema.strategies.period],
-          set: { data: datos, brandProfileVersion: version, status: 'borrador' },
+          // `status` queda fuera del set a propósito: un borrador sigue siendo
+          // borrador, y el setWhere impide tocar una estrategia ya aprobada.
+          set: { data: datos, brandProfileVersion: version },
+          setWhere: eq(esquema.strategies.status, 'borrador'),
         })
         .returning()
 
-      return { strategyId: fila!.id, estrategia: datos }
+      // Sin fila devuelta, el setWhere descartó la actualización: ya hay una
+      // estrategia aprobada o archivada para ese periodo. Se escala en vez de
+      // descartar en silencio el trabajo de revisión humana.
+      if (!fila) {
+        throw permanente(
+          `Ya existe una estrategia aprobada para ${entrada.period} en la marca ` +
+            `${entrada.brandId}. Archívala antes de regenerarla.`,
+        )
+      }
+
+      return { strategyId: fila.id, estrategia: datos }
     },
   })
 
