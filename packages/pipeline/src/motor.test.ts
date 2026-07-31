@@ -325,4 +325,35 @@ describe('ejecutarFlujo', () => {
       expect(trazas[0]).toContain('caída simulada al marcar')
     })
   })
+
+  it('reintenta un fallo de serialización de Postgres y no una violación de única', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const contar = async (codigo: string, maxIntentos: number) => {
+        let llamadas = 0
+        const flujo = {
+          nombre: 'prueba',
+          pasos: [
+            definirPaso<unknown, unknown>({
+              nombre: `falla_${codigo}`,
+              ejecutar: async () => {
+                llamadas++
+                throw Object.assign(new Error(`error ${codigo}`), { code: codigo })
+              },
+            }),
+          ],
+        }
+        await ejecutarFlujo(db, flujo, {}, { organizationId }, {
+          ...SIN_ESPERA, maxIntentos,
+        }).catch(() => {})
+        return llamadas
+      }
+
+      // 40001 es transitorio: se agota el presupuesto de intentos.
+      expect(await contar('40001', 3)).toBe(3)
+      // 23505 es una violación de única: no tiene sentido reintentarla.
+      expect(await contar('23505', 3)).toBe(1)
+    })
+  })
 })
