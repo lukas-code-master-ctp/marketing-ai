@@ -8,6 +8,7 @@ import { and, asc, eq, gte, lt } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 
 const ORGANIZACION_POR_DEFECTO = 'Principal'
+const SLUG_ORGANIZACION_POR_DEFECTO = 'principal'
 
 export interface ReferenciaResuelta {
   organizationId: string
@@ -20,7 +21,7 @@ async function asegurarOrganizacion(db: BaseDeDatos): Promise<string> {
 
   const [nueva] = await db
     .insert(esquema.organizations)
-    .values({ name: ORGANIZACION_POR_DEFECTO })
+    .values({ name: ORGANIZACION_POR_DEFECTO, slug: SLUG_ORGANIZACION_POR_DEFECTO })
     .returning()
   return nueva!.id
 }

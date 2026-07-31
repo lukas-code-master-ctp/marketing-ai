@@ -33,6 +33,7 @@ const ESTADOS_PIPELINE = ['en_curso', 'completado', 'fallido'] as const
 export const organizations = pgTable('organizations', {
   id: id(),
   name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
   createdAt: creadoEn(),
 })
 

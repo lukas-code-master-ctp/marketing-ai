@@ -9,7 +9,7 @@ describe('esquema', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'Mis Startups' })
+        .values({ name: 'Mis Startups', slug: 'a' })
         .returning()
 
       const [marca] = await db
@@ -40,7 +40,7 @@ describe('esquema', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'X' })
+        .values({ name: 'X', slug: 'a' })
         .returning()
       const [marca] = await db
         .insert(esquema.brands)
@@ -63,7 +63,7 @@ describe('esquema', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'X' })
+        .values({ name: 'X', slug: 'a' })
         .returning()
       const [marca] = await db
         .insert(esquema.brands)
@@ -85,7 +85,7 @@ describe('esquema', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'X' })
+        .values({ name: 'X', slug: 'a' })
         .returning()
       const [marca] = await db
         .insert(esquema.brands)
@@ -118,7 +118,7 @@ describe('organization_id obligatorio', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'X' })
+        .values({ name: 'X', slug: 'a' })
         .returning()
       const [run] = await db
         .insert(esquema.pipelineRuns)
@@ -140,8 +140,14 @@ describe('organization_id obligatorio', () => {
 describe('integridad multi-tenant', () => {
   it('rechaza una hija de marca cuya organización no coincide', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
-      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [orgA] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
+      const [orgB] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' })
+        .returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
@@ -161,8 +167,14 @@ describe('integridad multi-tenant', () => {
 
   it('rechaza un plan que apunta a una estrategia de otra organización', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
-      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [orgA] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
+      const [orgB] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' })
+        .returning()
       const [marcaA] = await db
         .insert(esquema.brands)
         .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
@@ -200,7 +212,10 @@ describe('integridad multi-tenant', () => {
   // llevarse por delante los planes que la referencian.
   it('conserva los planes al borrar su estrategia, anulando solo strategy_id', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: org!.id, slug: 'a', name: 'A' })
@@ -234,8 +249,14 @@ describe('integridad multi-tenant', () => {
 
   it('rechaza un slot cuya organización no coincide con la de su plan', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
-      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [orgA] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
+      const [orgB] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' })
+        .returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: orgA!.id, slug: 'a', name: 'A' })
@@ -262,8 +283,14 @@ describe('integridad multi-tenant', () => {
 
   it('rechaza un derivado que apunta a un slot de otra organización', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [orgA] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
-      const [orgB] = await db.insert(esquema.organizations).values({ name: 'B' }).returning()
+      const [orgA] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
+      const [orgB] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' })
+        .returning()
 
       const crearSlot = async (orgId: string, slug: string) => {
         const [marca] = await db
@@ -316,7 +343,10 @@ describe('integridad multi-tenant', () => {
   // con dinero detrás.
   it('conserva la llamada de IA al borrar su corrida, anulando solo run_id', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: org!.id, slug: 'a', name: 'A' })
@@ -347,7 +377,10 @@ describe('integridad multi-tenant', () => {
 
   it('acepta las filas cuya organización sí coincide', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [org] = await db.insert(esquema.organizations).values({ name: 'A' }).returning()
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' })
+        .returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: org!.id, slug: 'a', name: 'A' })
@@ -440,10 +473,30 @@ describe('restricciones CHECK de enums', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
         .insert(esquema.organizations)
-        .values({ name: 'X' })
+        .values({ name: 'X', slug: 'a' })
         .returning()
 
       await expect(intentarInsertar(db, org!)).rejects.toThrow()
+    })
+  })
+})
+
+describe('slug en organizations', () => {
+  it('exige slug único en organizations', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await db.insert(esquema.organizations).values({ name: 'A', slug: 'a' })
+
+      await expect(
+        db.insert(esquema.organizations).values({ name: 'Otra', slug: 'a' }),
+      ).rejects.toThrow()
+    })
+  })
+
+  it('no acepta una organización sin slug', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(
+        db.insert(esquema.organizations).values({ name: 'Sin slug' } as never),
+      ).rejects.toThrow()
     })
   })
 })

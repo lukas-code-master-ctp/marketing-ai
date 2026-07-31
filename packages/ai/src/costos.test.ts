@@ -17,7 +17,7 @@ const USO = (costoUsd: number): UsoDeLlamada => ({
 const MES = new Date('2026-09-15T00:00:00Z')
 
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0], presupuesto = '10.00') {
-  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
     .values({ organizationId: org!.id, slug: 'a', name: 'A', monthlyBudgetUsd: presupuesto })

@@ -8,7 +8,7 @@ import { definirPaso, ejecutarFlujo } from './motor.js'
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 async function sembrarOrg(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
-  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   return org!.id
 }
 
@@ -257,7 +257,7 @@ describe('ejecutarFlujo', () => {
       const organizationId = await sembrarOrg(db)
       const [otra] = await db
         .insert(esquema.organizations)
-        .values({ name: 'Otra' })
+        .values({ name: 'Otra', slug: 'otra' })
         .returning()
 
       const flujo = {

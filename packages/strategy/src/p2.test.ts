@@ -41,7 +41,7 @@ const GRILLA_VALIDA = grilla([
 ])
 
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
-  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
     .values({ organizationId: org!.id, slug: 'parcelas', name: 'CTP' })
@@ -241,7 +241,7 @@ describe('flujo P2 · grilla', () => {
 
   it('falla si la marca no tiene estrategia', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+      const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: org!.id, slug: 'sin', name: 'Sin' })
