@@ -35,3 +35,20 @@ export const Estrategia = z.object({
 })
 
 export type TipoEstrategia = z.infer<typeof Estrategia>
+
+export const SlotPropuesto = z.object({
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'formato esperado AAAA-MM-DD'),
+  hora: z.string().regex(/^\d{2}:\d{2}$/, 'formato esperado HH:MM (UTC)'),
+  canal: Canal,
+  formato: z.string().min(2),
+  pilar: z.string().min(2),
+  angulo: z.string().min(5),
+  brief: z.string().min(20),
+})
+
+export const GrillaPropuesta = z.object({
+  slots: z.array(SlotPropuesto).min(1).max(120),
+})
+
+export type TipoSlotPropuesto = z.infer<typeof SlotPropuesto>
+export type TipoGrillaPropuesta = z.infer<typeof GrillaPropuesta>
