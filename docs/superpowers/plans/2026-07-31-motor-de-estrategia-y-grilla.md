@@ -4076,7 +4076,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { eq, isNotNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoGrilla } from './p2.js'
 
@@ -4145,12 +4145,22 @@ describe('flujo P2 · grilla', () => {
       const slots = await db.select().from(esquema.planSlots)
       expect(slots).toHaveLength(8)
 
-      const derivados = await db
-        .select()
-        .from(esquema.planSlots)
-        .where(isNotNull(esquema.planSlots.sourceSlotId))
+      // No basta con que cada derivado cuelgue de algún padre: los cuatro
+      // artículos son idénticos salvo la fecha, así que un mapeo barajado
+      // pasaría igual. La fecha del hijo debe ser la del padre + diasDespues.
+      const porId = new Map(slots.map((s) => [s.id, s]))
+      const derivados = slots.filter((s) => s.sourceSlotId !== null)
       expect(derivados).toHaveLength(4)
-      expect(derivados.every((d) => d.channel === 'linkedin')).toBe(true)
+
+      for (const d of derivados) {
+        expect(d.channel).toBe('linkedin')
+        const padre = porId.get(d.sourceSlotId!)
+        expect(padre).toBeDefined()
+        expect(padre!.channel).toBe('blog')
+        const dias =
+          (d.scheduledFor.getTime() - padre!.scheduledFor.getTime()) / 86_400_000
+        expect(dias).toBe(2)
+      }
     })
   })
 
@@ -4223,7 +4233,10 @@ describe('flujo P2 · grilla', () => {
       const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
 
-      await db.update(esquema.contentPlans).set({ status: 'aprobada' })
+      await db
+        .update(esquema.contentPlans)
+        .set({ status: 'aprobada' })
+        .where(eq(esquema.contentPlans.brandId, ref.brandId))
 
       const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
       await expect(
