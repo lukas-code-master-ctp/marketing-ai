@@ -35,8 +35,11 @@ describe('ejecutarFlujo', () => {
       expect(r.estado).toBe('completado')
       expect(r.salida).toEqual({ n: 11 })
 
+      // Postgres no garantiza el orden de filas sin ORDER BY, así que aquí se
+      // comparan como conjunto. El encadenamiento ya quedó probado por
+      // `salida`: 5*2+1 = 11, mientras que invertir los pasos daría 12.
       const pasos = await db.select().from(esquema.pipelineSteps)
-      expect(pasos.map((p) => p.name)).toEqual(['doblar', 'sumar_uno'])
+      expect(pasos.map((p) => p.name).sort()).toEqual(['doblar', 'sumar_uno'])
       expect(pasos.every((p) => p.status === 'completado')).toBe(true)
     })
   })
