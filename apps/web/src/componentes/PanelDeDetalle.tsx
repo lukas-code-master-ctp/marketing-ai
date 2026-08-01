@@ -102,8 +102,15 @@ export function PanelDeDetalle({
     setConfirmandoDescarte(false)
   }
 
+  // Único punto de entrada al descarte desde el botón simple. Mientras la
+  // confirmación de derivados está abierta, este botón queda oculto (ver más
+  // abajo): la única forma de disparar un descarte en ese estado es a través
+  // de los botones de la propia confirmación o de "Reintentar", que ya sabe
+  // qué pidió el intento anterior. Así el estado no tiene una segunda puerta
+  // que pueda tirar por la borda el "también los derivados" que el usuario
+  // ya pidió.
   function alPulsarDescartar() {
-    if (!slot.esDerivado && derivadosVigentes.length > 0 && !confirmandoDescarte) {
+    if (!slot.esDerivado && derivadosVigentes.length > 0) {
       setConfirmandoDescarte(true)
       return
     }
@@ -277,7 +284,7 @@ export function PanelDeDetalle({
               >
                 Editar
               </button>
-              {!slot.descartado && (
+              {!slot.descartado && !confirmandoDescarte && (
                 <button
                   type="button"
                   disabled={ocupado}

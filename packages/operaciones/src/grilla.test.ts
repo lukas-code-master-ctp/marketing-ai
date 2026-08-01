@@ -194,6 +194,11 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
         descartarSlot(db, otra!.id, g.slots[0]!.id),
       ).rejects.toMatchObject({ clase: 'permanente' })
       await expect(
+        editarSlot(db, otra!.id, g.slots[0]!.id, {
+          angulo: 'Ángulo ajeno', brief: 'Un brief que no debería aplicarse jamás.',
+        }),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+      await expect(
         aprobarGrilla(db, otra!.id, g.contentPlanId!),
       ).rejects.toMatchObject({ clase: 'permanente' })
     })
