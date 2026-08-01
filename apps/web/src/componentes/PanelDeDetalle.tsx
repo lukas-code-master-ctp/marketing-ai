@@ -48,6 +48,10 @@ export function PanelDeDetalle({
   const [confirmandoDescarte, setConfirmandoDescarte] = useState(false)
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
+  // Qué se pidió en el intento que falló, para que "Reintentar" repita
+  // exactamente eso — incluidos los derivados si el usuario los había pedido —
+  // en vez de degradar silenciosamente a "descartar solo este".
+  const [ultimoIntentoIncluyoDerivados, setUltimoIntentoIncluyoDerivados] = useState(false)
 
   useEffect(() => {
     contenedorRef.current?.focus()
@@ -74,6 +78,7 @@ export function PanelDeDetalle({
   async function descartar(incluirDerivados: boolean) {
     setOcupado(true)
     setError(null)
+    setUltimoIntentoIncluyoDerivados(incluirDerivados)
 
     const resultado = await descartarSlotAccion(marca, mes, slot.id)
     if (!resultado.ok) {
@@ -213,7 +218,11 @@ export function PanelDeDetalle({
             {error.reintentable && (
               <button
                 type="button"
-                onClick={() => (modo === 'editar' ? void guardarEdicion() : void descartar(false))}
+                onClick={() =>
+                  modo === 'editar'
+                    ? void guardarEdicion()
+                    : void descartar(ultimoIntentoIncluyoDerivados)
+                }
                 className="mt-1 font-medium underline"
               >
                 Reintentar
