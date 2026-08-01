@@ -1,12 +1,19 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SlotDeLaGrilla } from '@gc/operaciones'
+import { descartarSlotAccion, editarSlotAccion } from '../acciones.js'
 
 /**
- * Panel de solo lectura con el detalle completo de un slot. La Task 5 le
- * agrega botones de acción (aprobar, descartar, etc.); acá solo muestra
- * información.
+ * Panel de solo lectura con el detalle completo de un slot, más los botones
+ * de acción de la Task 5: editar (ángulo y brief) y descartar.
+ *
+ * `derivadosVigentes` llega ya calculado por `RejillaDelMes` — un filtro
+ * sobre `idDelPadre` de los slots que ya están cargados en la página, sin
+ * consulta extra — y solo importa cuando el slot mostrado es un padre no
+ * derivado. Si tiene alguno, descartar pide confirmación explícita: dice
+ * cuántos quedarán activos y ofrece descartarlos también, lo que dispara una
+ * acción por slot en vez de una cascada implícita.
  *
  * Es un diálogo modal de verdad, no solo visualmente: `role="dialog"` +
  * `aria-modal` para que un lector de pantalla lo anuncie como tal, foco
@@ -19,19 +26,42 @@ import type { SlotDeLaGrilla } from '@gc/operaciones'
 export function PanelDeDetalle({
   slot,
   padre,
+  marca,
+  mes,
+  derivadosVigentes,
   onCerrar,
   onVerPadre,
 }: {
   slot: SlotDeLaGrilla
   padre?: SlotDeLaGrilla | undefined
+  marca: string
+  mes: string
+  derivadosVigentes: SlotDeLaGrilla[]
   onCerrar: () => void
   onVerPadre: (id: string) => void
 }) {
   const contenedorRef = useRef<HTMLDivElement>(null)
 
+  const [modo, setModo] = useState<'ver' | 'editar'>('ver')
+  const [angulo, setAngulo] = useState(slot.angulo)
+  const [brief, setBrief] = useState(slot.brief)
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false)
+  const [ocupado, setOcupado] = useState(false)
+  const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
+
   useEffect(() => {
     contenedorRef.current?.focus()
   }, [slot.id])
+
+  // Cambiar de slot (p. ej. al navegar al padre) descarta cualquier edición
+  // o confirmación pendiente del anterior.
+  useEffect(() => {
+    setModo('ver')
+    setAngulo(slot.angulo)
+    setBrief(slot.brief)
+    setConfirmandoDescarte(false)
+    setError(null)
+  }, [slot.id, slot.angulo, slot.brief])
 
   useEffect(() => {
     function alTecla(e: KeyboardEvent) {
@@ -40,6 +70,55 @@ export function PanelDeDetalle({
     document.addEventListener('keydown', alTecla)
     return () => document.removeEventListener('keydown', alTecla)
   }, [onCerrar])
+
+  async function descartar(incluirDerivados: boolean) {
+    setOcupado(true)
+    setError(null)
+
+    const resultado = await descartarSlotAccion(marca, mes, slot.id)
+    if (!resultado.ok) {
+      setError({ mensaje: resultado.mensaje, reintentable: resultado.reintentable })
+      setOcupado(false)
+      return
+    }
+
+    if (incluirDerivados) {
+      for (const derivado of derivadosVigentes) {
+        const r = await descartarSlotAccion(marca, mes, derivado.id)
+        if (!r.ok) {
+          setError({ mensaje: r.mensaje, reintentable: r.reintentable })
+          setOcupado(false)
+          return
+        }
+      }
+    }
+
+    setOcupado(false)
+    setConfirmandoDescarte(false)
+  }
+
+  function alPulsarDescartar() {
+    if (!slot.esDerivado && derivadosVigentes.length > 0 && !confirmandoDescarte) {
+      setConfirmandoDescarte(true)
+      return
+    }
+    void descartar(false)
+  }
+
+  async function guardarEdicion() {
+    setOcupado(true)
+    setError(null)
+
+    const resultado = await editarSlotAccion(marca, mes, slot.id, { angulo, brief })
+    if (!resultado.ok) {
+      setError({ mensaje: resultado.mensaje, reintentable: resultado.reintentable })
+      setOcupado(false)
+      return
+    }
+
+    setOcupado(false)
+    setModo('ver')
+  }
 
   return (
     <div
@@ -81,21 +160,151 @@ export function PanelDeDetalle({
           </p>
         )}
 
-        <p className="mb-1 text-sm font-medium text-gray-700">Ángulo</p>
-        <p className="mb-4 text-sm text-gray-800">{slot.angulo}</p>
+        {modo === 'ver' ? (
+          <>
+            <p className="mb-1 text-sm font-medium text-gray-700">Ángulo</p>
+            <p className="mb-4 text-sm text-gray-800">{slot.angulo}</p>
 
-        <p className="mb-1 text-sm font-medium text-gray-700">Brief</p>
-        <p className="whitespace-pre-wrap text-sm text-gray-800">{slot.brief}</p>
+            <p className="mb-1 text-sm font-medium text-gray-700">Brief</p>
+            <p className="whitespace-pre-wrap text-sm text-gray-800">{slot.brief}</p>
+          </>
+        ) : (
+          <div className="mb-4 space-y-3">
+            <div>
+              <label htmlFor="campo-angulo" className="mb-1 block text-sm font-medium text-gray-700">
+                Ángulo
+              </label>
+              <input
+                id="campo-angulo"
+                type="text"
+                value={angulo}
+                onChange={(e) => setAngulo(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+              />
+            </div>
+            <div>
+              <label htmlFor="campo-brief" className="mb-1 block text-sm font-medium text-gray-700">
+                Brief
+              </label>
+              <textarea
+                id="campo-brief"
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                rows={4}
+                className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
+              />
+            </div>
+          </div>
+        )}
 
         {slot.esDerivado && padre && (
           <button
             type="button"
             onClick={() => onVerPadre(padre.id)}
-            className="mt-4 text-sm text-indigo-600 underline hover:text-indigo-800"
+            className="mb-4 block text-sm text-indigo-600 underline hover:text-indigo-800"
           >
             Ver publicación original ({padre.canal} · {padre.fecha})
           </button>
         )}
+
+        {error && (
+          <div className="mb-4 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
+            <p>{error.mensaje}</p>
+            {error.reintentable && (
+              <button
+                type="button"
+                onClick={() => (modo === 'editar' ? void guardarEdicion() : void descartar(false))}
+                className="mt-1 font-medium underline"
+              >
+                Reintentar
+              </button>
+            )}
+          </div>
+        )}
+
+        {confirmandoDescarte && (
+          <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="mb-2">
+              Esta publicación tiene {derivadosVigentes.length}{' '}
+              {derivadosVigentes.length === 1 ? 'derivado activo' : 'derivados activos'}.
+              Descartarla no los descarta a ellos: quedarán activos salvo que los descartes también.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => void descartar(false)}
+                className="rounded border border-amber-400 px-2 py-1 text-xs font-medium hover:bg-amber-100 disabled:opacity-50"
+              >
+                Descartar solo esta
+              </button>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => void descartar(true)}
+                className="rounded border border-amber-400 px-2 py-1 text-xs font-medium hover:bg-amber-100 disabled:opacity-50"
+              >
+                Descartar también los {derivadosVigentes.length}
+              </button>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => setConfirmandoDescarte(false)}
+                className="rounded px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 border-t border-gray-100 pt-4">
+          {modo === 'ver' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setModo('editar')}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Editar
+              </button>
+              {!slot.descartado && (
+                <button
+                  type="button"
+                  disabled={ocupado}
+                  onClick={alPulsarDescartar}
+                  className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  Descartar
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => void guardarEdicion()}
+                className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Guardar
+              </button>
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => {
+                  setModo('ver')
+                  setAngulo(slot.angulo)
+                  setBrief(slot.brief)
+                  setError(null)
+                }}
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

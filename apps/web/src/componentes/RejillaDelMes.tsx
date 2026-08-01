@@ -14,10 +14,12 @@ const DIAS_DE_LA_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
  * `PanelDeDetalle`, incluida la navegación al padre de un derivado.
  */
 export function RejillaDelMes({
+  marca,
   mes,
   semanas,
   slots,
 }: {
+  marca: string
   mes: string
   semanas: string[][]
   slots: SlotDeLaGrilla[]
@@ -51,6 +53,11 @@ export function RejillaDelMes({
   const padreDelSeleccionado = seleccionado?.idDelPadre
     ? porId.get(seleccionado.idDelPadre)
     : undefined
+  // Filtro sobre `idDelPadre` de los slots que ya están cargados: sin
+  // consulta extra. Solo importa cuando el seleccionado es un padre.
+  const derivadosVigentesDelSeleccionado = seleccionado
+    ? slots.filter((s) => s.idDelPadre === seleccionado.id && !s.descartado)
+    : []
 
   return (
     <div>
@@ -82,6 +89,9 @@ export function RejillaDelMes({
         <PanelDeDetalle
           slot={seleccionado}
           padre={padreDelSeleccionado}
+          marca={marca}
+          mes={mes}
+          derivadosVigentes={derivadosVigentesDelSeleccionado}
           onCerrar={cerrar}
           onVerPadre={setSeleccionadoId}
         />

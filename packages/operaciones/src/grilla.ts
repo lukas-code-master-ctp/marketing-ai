@@ -135,6 +135,94 @@ async function recalcularAvisos(
   }
 }
 
+/**
+ * Cambia el estado del slot a `descartado`. No toca a sus derivados: la
+ * cascada de la base gobierna el borrado, no el cambio de estado, y eso es
+ * deliberado — la interfaz lo advierte y ofrece descartarlos aparte, nunca
+ * como una cascada implícita.
+ */
+export async function descartarSlot(
+  db: BaseDeDatos,
+  organizationId: string,
+  slotId: string,
+): Promise<void> {
+  const [fila] = await db
+    .update(esquema.planSlots)
+    .set({ status: 'descartado' })
+    .where(
+      and(
+        eq(esquema.planSlots.id, slotId),
+        eq(esquema.planSlots.organizationId, organizationId),
+      ),
+    )
+    .returning({ id: esquema.planSlots.id })
+
+  if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
+}
+
+/** Cambia ángulo y brief de un slot. El resto de sus campos queda intacto. */
+export async function editarSlot(
+  db: BaseDeDatos,
+  organizationId: string,
+  slotId: string,
+  campos: { angulo: string; brief: string },
+): Promise<void> {
+  const [fila] = await db
+    .update(esquema.planSlots)
+    .set({ angle: campos.angulo, brief: campos.brief })
+    .where(
+      and(
+        eq(esquema.planSlots.id, slotId),
+        eq(esquema.planSlots.organizationId, organizationId),
+      ),
+    )
+    .returning({ id: esquema.planSlots.id })
+
+  if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
+}
+
+/**
+ * Solo es válido aprobar una grilla que está en `borrador`. Si no vuelve
+ * fila, se relee el estado actual para que el mensaje diga en cuál está de
+ * verdad, en vez de repetir siempre el mismo genérico.
+ */
+export async function aprobarGrilla(
+  db: BaseDeDatos,
+  organizationId: string,
+  contentPlanId: string,
+): Promise<void> {
+  const [fila] = await db
+    .update(esquema.contentPlans)
+    .set({ status: 'aprobada' })
+    .where(
+      and(
+        eq(esquema.contentPlans.id, contentPlanId),
+        eq(esquema.contentPlans.organizationId, organizationId),
+        eq(esquema.contentPlans.status, 'borrador'),
+      ),
+    )
+    .returning({ id: esquema.contentPlans.id })
+
+  if (!fila) {
+    const [actual] = await db
+      .select({ status: esquema.contentPlans.status })
+      .from(esquema.contentPlans)
+      .where(
+        and(
+          eq(esquema.contentPlans.id, contentPlanId),
+          eq(esquema.contentPlans.organizationId, organizationId),
+        ),
+      )
+
+    if (!actual) {
+      throw permanente(`No existe el plan ${contentPlanId} en esta organización`)
+    }
+    throw permanente(
+      `El plan ${contentPlanId} está en estado "${actual.status}" y solo se aprueba uno en borrador`,
+    )
+  }
+}
+
 async function cargarEstrategiaDelTrimestre(
   db: BaseDeDatos,
   brandId: string,

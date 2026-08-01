@@ -2,7 +2,7 @@ import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { grillaDelMes } from './grilla.js'
+import { aprobarGrilla, descartarSlot, editarSlot, grillaDelMes } from './grilla.js'
 import { sembrarConEstrategia, sembrarConGrilla } from './pruebas/siembra.js'
 
 describe('grillaDelMes', () => {
@@ -101,6 +101,101 @@ describe('grillaDelMes', () => {
         (a) => a.regla === 'cadencia' && a.detalle.includes('blog'),
       )
       expect(cadenciaBlogDespues.length).toBeGreaterThan(cadenciaBlogAntes.length)
+    })
+  })
+})
+
+describe('descartarSlot, editarSlot y aprobarGrilla', () => {
+  it('descartar deja el slot pero lo saca de los vigentes', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const slot = g.slots.find((s) => !s.esDerivado)!
+
+      await descartarSlot(db, ref.organizationId, slot.id)
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(despues.slots).toHaveLength(12)
+      expect(despues.slots.find((s) => s.id === slot.id)!.descartado).toBe(true)
+    })
+  })
+
+  it('descartar un padre NO descarta sus derivados', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const padre = g.slots.find((s) => !s.esDerivado)!
+
+      await descartarSlot(db, ref.organizationId, padre.id)
+
+      // La cascada de la base gobierna el borrado, no el cambio de estado.
+      // Es deliberado: la interfaz lo advierte y ofrece descartarlos aparte.
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const hijos = despues.slots.filter((s) => s.idDelPadre === padre.id)
+      expect(hijos.length).toBeGreaterThan(0)
+      expect(hijos.every((h) => !h.descartado)).toBe(true)
+    })
+  })
+
+  it('editar cambia ángulo y brief y nada más', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const slot = g.slots[0]!
+
+      await editarSlot(db, ref.organizationId, slot.id, {
+        angulo: 'Otro ángulo',
+        brief: 'Un brief nuevo, suficientemente largo para ser creíble.',
+      })
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const actualizado = despues.slots.find((s) => s.id === slot.id)!
+      expect(actualizado.angulo).toBe('Otro ángulo')
+      expect(actualizado.brief).toContain('suficientemente largo')
+      expect(actualizado.canal).toBe(slot.canal)
+      expect(actualizado.fecha).toBe(slot.fecha)
+    })
+  })
+
+  it('aprobar mueve el plan a aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+
+      await aprobarGrilla(db, ref.organizationId, g.contentPlanId!)
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(despues.estado).toBe('aprobada')
+    })
+  })
+
+  it('aprobar una grilla que ya no está en borrador falla', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      await aprobarGrilla(db, ref.organizationId, g.contentPlanId!)
+
+      await expect(
+        aprobarGrilla(db, ref.organizationId, g.contentPlanId!),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  it('las tres operaciones ignoran filas de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Ajena', slug: 'ajena' })
+        .returning()
+
+      await expect(
+        descartarSlot(db, otra!.id, g.slots[0]!.id),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+      await expect(
+        aprobarGrilla(db, otra!.id, g.contentPlanId!),
+      ).rejects.toMatchObject({ clase: 'permanente' })
     })
   })
 })

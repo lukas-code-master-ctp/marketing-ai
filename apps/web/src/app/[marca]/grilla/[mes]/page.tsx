@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { grillaDelMes } from '@gc/operaciones'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
+import { BotonAprobarGrilla } from '../../../../componentes/BotonAprobarGrilla.js'
 import { RejillaDelMes } from '../../../../componentes/RejillaDelMes.js'
 
 // `[marca]/grilla/[mes]` es un árbol de rutas propio: el `force-dynamic` de
@@ -64,15 +65,21 @@ export default async function PaginaDeGrilla({
           </p>
         </div>
 
-        {grilla.estado !== null && Object.keys(grilla.porCanal).length > 0 && (
-          <div className="text-sm text-gray-600">
-            {Object.entries(grilla.porCanal).map(([canal, cantidad]) => (
-              <span key={canal} className="mr-3">
-                {canal}: {cantidad}
-              </span>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-col items-end gap-3">
+          {grilla.estado !== null && Object.keys(grilla.porCanal).length > 0 && (
+            <div className="text-sm text-gray-600">
+              {Object.entries(grilla.porCanal).map(([canal, cantidad]) => (
+                <span key={canal} className="mr-3">
+                  {canal}: {cantidad}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {grilla.estado === 'borrador' && grilla.contentPlanId && (
+            <BotonAprobarGrilla marca={marca} mes={mes} contentPlanId={grilla.contentPlanId} />
+          )}
+        </div>
       </header>
 
       {grilla.avisos.length > 0 && (
@@ -94,7 +101,7 @@ export default async function PaginaDeGrilla({
           </p>
         </div>
       ) : (
-        <RejillaDelMes mes={mes} semanas={semanas} slots={grilla.slots} />
+        <RejillaDelMes marca={marca} mes={mes} semanas={semanas} slots={grilla.slots} />
       )}
     </div>
   )
