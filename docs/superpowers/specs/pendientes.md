@@ -17,29 +17,43 @@ Resueltos en `feat/integridad-prioridad-1` ([diseño](2026-07-31-prioridad-1-int
 
 ---
 
-## Prioridad 1 — decidir antes de que la UI de Fase 1 exista
+## Prioridad 1 — decidido, listo para implementar
 
-### 1. La semántica de la cascada en la autorreferencia de `plan_slots`
+Las tres decisiones se cerraron el 2026-07-31. Lo que sigue es el enfoque acordado, con el detalle técnico que la implementación necesita.
 
-`plan_slots.source_slot_id` tiene `ON DELETE CASCADE`. Hoy no muerde porque nadie borra un slot suelto — `persistir` borra el plan entero. El día que la UI ofrezca "eliminar este slot", borrar un artículo de blog se lleva sus cuatro adaptaciones sin avisar.
+### 1. Borrar un slot no se lleva sus derivados
 
-`plan_slots.status` ya tiene el valor `'descartado'`, o sea que el diseño ya prefiere descartar sobre borrar. Si esa es la respuesta, `ON DELETE RESTRICT` es más honesto que `CASCADE`. **Es una decisión de producto, y cambiarla después de que la UI exista cuesta migración más cambio de interfaz.**
+**Decisión:** `ON DELETE NO ACTION` en la autorreferencia de `plan_slots`, y la UI nunca borra — marca `status = 'descartado'`, valor que la tabla ya tiene.
 
-### 2. Los mensajes al usuario imprimen UUID de marca, no el slug
+**Por qué `NO ACTION` y no `RESTRICT`:** `persistir` borra padres e hijos en una sola sentencia al regenerar un mes. `RESTRICT` se verifica de inmediato y rompería ese camino; `NO ACTION` se verifica al final de la sentencia, cuando los hijos ya se fueron, así que permite el borrado masivo y bloquea el borrado de un padre suelto. La diferencia decide si esto funciona.
 
-Cinco mensajes en tres paquetes: `p2.ts`, `p1.ts`, `brand/repositorio.ts` y dos en `ai/costos.ts`. Todos en español, todos explican el remedio, y todos terminan mostrando algo que el usuario nunca escribió:
+Migración de una línea. La garantía queda en la base y no en la convención, así que un endpoint de borrado escrito sin cuidado falla fuerte en vez de llevarse cuatro piezas de contenido en silencio.
+
+### 2. Los mensajes nombran la marca por su slug
+
+**Decisión:** propagar el slug junto al `brandId`.
+
+Cinco mensajes en tres paquetes muestran hoy el UUID: `p2.ts`, `p1.ts`, `brand/repositorio.ts` y dos en `ai/costos.ts`. Todos en español, todos explican el remedio, y todos terminan mostrando algo que el usuario nunca escribió:
 
 > `Error: La marca 099bfa3c-b27d-4f93-8d24-fe822defdfa1 no tiene estrategia vigente para 2026-Q4.`
 
-No es un defecto de P2 sino una consecuencia sistemática de que `brandId` sea lo único que cruza la frontera `apps/cli` → `@gc/*`. Arreglar solo uno deja los otros cuatro y crea una inconsistencia nueva. La solución coherente es propagar el slug junto al `brandId`: `ContextoDePaso` ya lleva `brandId?`, agregar `brandSlug?` lo pone al alcance de P1, P2 y todo lo que reciba el contexto. **La UI de Fase 1 hereda estos mensajes tal cual si no se decide ahora.**
+`ContextoDePaso` ya lleva `brandId?`; se le agrega `brandSlug?`, lo que lo pone al alcance de P1, P2 y de todo lo que reciba el contexto. `verificarPresupuesto`, `exigirPresupuesto` y `cargarPerfilVigente` reciben `brandId` suelto y necesitan un parámetro más para mostrar. El campo va **opcional**, de modo que nada se rompe si falta.
 
-### 3. El motor reintenta el paso completo — recalibrado, ya es un problema de dinero
+No es un defecto de P2 sino una consecuencia de que `brandId` sea lo único que cruza la frontera `apps/cli` → `@gc/*`. Arreglar uno solo deja los otros cuatro y crea una inconsistencia nueva.
 
-El paso `proponer_grilla` es una sola unidad de reintento que contiene cuatro consultas, **una o dos llamadas pagadas al modelo de razonamiento**, y una transacción de escritura al final. Antes de que los errores de Postgres entraran a la taxonomía, un `53300` o un `08006` al persistir era permanente: una falla, un gasto. Ahora se reintenta el paso entero, incluidas las llamadas al modelo ya pagadas y ya registradas.
+### 3. La llamada al modelo y la persistencia son pasos distintos
 
-Con `maxIntentos` en 5, un solo `grilla:generar` puede cobrar cinco veces el ciclo de razonamiento por un fallo que no tuvo nada que ver con el modelo. Lo que contiene el daño es que `exigirPresupuesto` se reejecuta al inicio de cada intento, así que el gasto sigue acotado por el presupuesto mensual — pero un fallo transitorio de base puede consumir el presupuesto restante de una marca en un comando.
+**Decisión:** partir el paso en dos, tanto en P1 como en P2.
 
-Este pendiente venía archivado bajo "importa para la Fase 3". Ya no: importa hoy.
+El paso `proponer_grilla` es hoy una sola unidad de reintento que contiene cuatro consultas, **una o dos llamadas pagadas al modelo de razonamiento**, y una transacción de escritura al final. Antes de que los errores de Postgres entraran a la taxonomía, un `53300` o un `08006` al persistir era permanente: una falla, un gasto. Ahora se reintenta el paso entero, incluidas las llamadas ya pagadas y ya registradas en `ai_calls`. Con `maxIntentos` en 5, un solo `grilla:generar` puede cobrar cinco ciclos de razonamiento por un fallo que no tuvo nada que ver con el modelo.
+
+El corte:
+
+- **P2 paso 1** — comprobar estado, presupuesto, cargar perfil y estrategia, proponer, validar y reparar. Su salida es la grilla validada, que ya es JSON serializable.
+- **P2 paso 2** — expandir derivados, revalidar el conjunto expandido y persistir en transacción. Determinístico salvo por la base.
+- **P1** se parte igual: generar contra el modelo, y persistir aparte.
+
+El motor ya guarda la salida de cada paso y salta los completados, así que al reintentar solo se reejecuta la persistencia. No hace falta maquinaria nueva: es exactamente para lo que existe la clave de idempotencia. Efecto secundario deseable: el sistema queda reanudable con más finura.
 
 ---
 
