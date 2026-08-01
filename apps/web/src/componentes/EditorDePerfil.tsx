@@ -26,7 +26,7 @@ export function EditorDePerfil({
 }) {
   const [texto, setTexto] = useState(() => JSON.stringify(perfil, null, 2))
   const [ocupado, setOcupado] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
   const [guardadoOk, setGuardadoOk] = useState(false)
 
   async function guardar() {
@@ -36,7 +36,7 @@ export function EditorDePerfil({
 
     const resultado = await guardarPerfilAction(marca, texto)
     if (!resultado.ok) {
-      setError(resultado.mensaje)
+      setError({ mensaje: resultado.mensaje, reintentable: resultado.reintentable })
       setOcupado(false)
       return
     }
@@ -81,7 +81,12 @@ export function EditorDePerfil({
             role="alert"
             className="mt-3 whitespace-pre-wrap rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"
           >
-            {error}
+            <p>{error.mensaje}</p>
+            {error.reintentable && (
+              <button type="button" onClick={() => void guardar()} className="mt-1 font-medium underline">
+                Reintentar
+              </button>
+            )}
           </div>
         )}
       </div>
