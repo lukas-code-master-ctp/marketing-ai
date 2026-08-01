@@ -437,10 +437,23 @@ Tabla por tabla:
 | `planSlots` | `contentPlanId, organizationId` | `contentPlans` | `plan_slots_plan_org_fk` |
 | `planSlots` | `sourceSlotId, organizationId` | `planSlots` (auto) | `plan_slots_source_org_fk` |
 | `pipelineSteps` | `runId, organizationId` | `pipelineRuns` | `pipeline_steps_run_org_fk` |
+| `contentPlans` | `strategyId, organizationId` | `strategies` | `content_plans_strategy_org_fk` |
+
+> `strategies` necesita entonces su propia única `(id, organization_id)`: son cinco únicas y doce compuestas, no cuatro y once. Esta última se omitió en la primera redacción del plan y la detectó la revisión: sin ella, un `content_plan` de una organización puede apuntar a la estrategia de otra, y cualquier lectura que haga join plan → estrategia sirve datos de la organización equivocada.
 
 Notas que importan:
 
 - Las que hoy usan `onDelete: 'set null'` (`contentPlans.strategyId`, `aiCalls.runId`) conservan esa semántica; las demás, `cascade`.
+- **`ai_calls_run_org_fk` es la excepción y necesita edición manual.** Postgres anula *todas* las columnas de una clave compuesta con `SET NULL`, incluida `organization_id`, que es `NOT NULL`: borrar una corrida con llamadas asociadas fallaría con `23502` en vez de conservar el registro de gasto. El registro de costos debe sobrevivir a la corrida — es lo que suma la guardia de presupuesto. Se usa la sintaxis de Postgres 15+ que anula una sola columna, que drizzle-kit 0.28 no sabe generar:
+
+  ```sql
+  ALTER TABLE "ai_calls" ADD CONSTRAINT "ai_calls_run_org_fk"
+    FOREIGN KEY ("run_id","organization_id") REFERENCES "pipeline_runs"("id","organization_id")
+    ON DELETE SET NULL ("run_id");
+  ```
+
+  El esquema de Drizzle declara `.onDelete('set null')` a secas, así que el SQL diverge del esquema en este único punto. Va comentado en `esquema.ts` para que la próxima migración generada no lo revierta por descuido.
+- **El orden de los statements importa:** drizzle-kit emite las claves foráneas antes que las restricciones únicas a las que apuntan, y la migración aborta con `there is no unique constraint matching given keys`. Mover las cuatro `UNIQUE` arriba del bloque de claves foráneas, sin cambiar ningún statement.
 - `planSlots.sourceSlotId` **hoy no tiene clave foránea alguna** — se declaró como un `uuid` suelto. Esta compuesta le da integridad referencial que nunca tuvo. Usa `onDelete('cascade')`.
 - La autorreferencia de `planSlots` se declara dentro de su propio callback de configuración usando `[t.id, t.organizationId]` como `foreignColumns`. Si drizzle-kit no la genera correctamente, **detente y repórtalo** en vez de improvisar un rodeo.
 - Las columnas nullable (`brandId` en `pipelineRuns` y `aiCalls`, `runId` en `aiCalls`, `sourceSlotId` en `planSlots`) no requieren nada especial: Postgres no exige la clave cuando hay `NULL`.
@@ -1294,7 +1307,7 @@ git add -A && git commit -m "feat: P2 exige la estrategia del trimestre y P1 val
 | §5 Validación del formato de periodo | 5 | Cubierto |
 | §6 Pruebas enumeradas | 1–5 | Cubiertas todas |
 
-**Fuera de alcance, sigue registrado en [pendientes](../specs/2026-07-31-pendientes-tras-fase-0.md):** la tabla de precios de respaldo, los descartes silenciosos de `expandirDerivados`, las dos listas que se sincronizan a mano entre `validacion.ts` y `derivados.ts`, la validación de `--mes` en `grilla:generar`, y el `hashDePrompt` que no distingue los dos intentos de un ciclo de reparación.
+**Fuera de alcance, sigue registrado en [pendientes](../specs/pendientes.md):** la tabla de precios de respaldo, los descartes silenciosos de `expandirDerivados`, las dos listas que se sincronizan a mano entre `validacion.ts` y `derivados.ts`, la validación de `--mes` en `grilla:generar`, y el `hashDePrompt` que no distingue los dos intentos de un ciclo de reparación.
 
 ## Siguiente plan
 

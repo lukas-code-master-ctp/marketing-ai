@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-07-31
 **Estado:** Aprobado para planificación
-**Origen:** los tres puntos de Prioridad 1 de [pendientes tras la Fase 0](2026-07-31-pendientes-tras-fase-0.md)
+**Origen:** los tres puntos de Prioridad 1 de [pendientes tras la Fase 0](pendientes.md)
 **Alcance:** `@gc/shared`, `@gc/db`, `@gc/strategy` y `apps/cli`. Una migración.
 
 ---

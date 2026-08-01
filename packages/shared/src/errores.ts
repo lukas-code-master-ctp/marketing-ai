@@ -29,6 +29,63 @@ export function clasificarHttp(status: number): ClaseDeError {
   return 'permanente'
 }
 
+/**
+ * Códigos SQLSTATE que ameritan reintento. La lista es explícita a propósito:
+ * clasificar por familia (`08*`) arrastraría códigos futuros por accidente.
+ */
+const CODIGOS_TRANSITORIOS = new Set([
+  '40001', // fallo de serialización
+  '40P01', // deadlock detectado
+  '08000', // excepción de conexión
+  '08003', // conexión inexistente
+  '08006', // fallo de conexión
+  '08001', // el cliente no pudo establecer la conexión
+  '08004', // el servidor rechazó la conexión
+  '53300', // demasiadas conexiones
+  '55P03', // lock no disponible
+  '57P01', // apagado administrativo
+  '57014', // consulta cancelada
+])
+
+export function clasificarPostgres(codigo: string): ClaseDeError {
+  return CODIGOS_TRANSITORIOS.has(codigo) ? 'transitorio' : 'permanente'
+}
+
+const VIOLACION_DE_UNICA = '23505'
+
+/**
+ * Vive junto a `clasificarPostgres` porque es el mismo trabajo: mirar el
+ * `code` de un error del driver. Tenerlo aquí evita que quien necesite el
+ * 23503 mañana encuentre dos precedentes que se contradicen y agregue un
+ * tercer literal en otro archivo.
+ */
+export function esViolacionDeUnica(e: unknown): boolean {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    (e as { code?: unknown }).code === VIOLACION_DE_UNICA
+  )
+}
+
+/**
+ * Único punto de clasificación del sistema. El motor de pipeline decide aquí
+ * si reintentar, así que cubrir este camino cubre toda llamada a la base del
+ * repositorio, incluidas las que se escriban después.
+ *
+ * Lo desconocido se trata como permanente a propósito: un TypeError es un bug,
+ * y reintentar un bug solo lo repite.
+ */
+export function clasificarError(e: unknown): ClaseDeError {
+  if (e instanceof ErrorDeDominio) return e.clase
+
+  if (typeof e === 'object' && e !== null && 'code' in e) {
+    const codigo = (e as { code: unknown }).code
+    if (typeof codigo === 'string') return clasificarPostgres(codigo)
+  }
+
+  return 'permanente'
+}
+
 export function esTransitorio(e: unknown): boolean {
-  return e instanceof ErrorDeDominio && e.clase === 'transitorio'
+  return clasificarError(e) === 'transitorio'
 }

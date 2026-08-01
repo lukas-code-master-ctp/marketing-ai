@@ -6,11 +6,12 @@ import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expandirDerivados } from './derivados.js'
 import { Estrategia, GrillaPropuesta, type TipoEstrategia, type TipoSlotPropuesto } from './esquemas.js'
+import { trimestreDe } from './periodos.js'
 import type { Dependencias } from './tipos.js'
 import { hayBloqueantes, validarGrilla, type Problema } from './validacion.js'
 
@@ -50,7 +51,9 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
 
       const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
-      const { id: strategyId, estrategia } = await cargarEstrategiaVigente(ctx.db, entrada.brandId)
+      const { id: strategyId, estrategia } = await cargarEstrategiaVigente(
+        ctx.db, entrada.brandId, entrada.mes,
+      )
       const instrucciones = await readFile(RUTA_PROMPT, 'utf8')
 
       const registrarUso = crearRegistrador(ctx.db, {
@@ -154,15 +157,29 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
 async function cargarEstrategiaVigente(
   db: BaseDeDatos,
   brandId: string,
+  mes: string,
 ): Promise<{ id: string; estrategia: TipoEstrategia }> {
+  const periodo = trimestreDe(mes)
+
+  // `(brand_id, period)` es único, así que hay a lo más una fila: no hace
+  // falta ordenar, y "la más reciente" deja de ser un criterio.
   const [fila] = await db
     .select()
     .from(esquema.strategies)
-    .where(eq(esquema.strategies.brandId, brandId))
-    .orderBy(desc(esquema.strategies.createdAt))
-    .limit(1)
+    .where(
+      and(
+        eq(esquema.strategies.brandId, brandId),
+        eq(esquema.strategies.period, periodo),
+        ne(esquema.strategies.status, 'archivada'),
+      ),
+    )
 
-  if (!fila) throw permanente(`La marca ${brandId} no tiene estrategia generada`)
+  if (!fila) {
+    throw permanente(
+      `La marca ${brandId} no tiene estrategia vigente para ${periodo}. ` +
+        `Genérala antes de la grilla de ${mes}.`,
+    )
+  }
 
   const r = Estrategia.safeParse(fila.data)
   if (!r.success) throw permanente(`La estrategia guardada de ${brandId} no valida`)

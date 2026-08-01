@@ -3,7 +3,7 @@ import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
 import {
-  cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, verGrilla,
+  cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, resolverOrganizacion, verGrilla,
 } from './comandos.js'
 
 const AYUDA = `
@@ -16,9 +16,14 @@ Comandos:
   grilla:generar      --marca <slug> --mes <2026-09>
   grilla:ver          --marca <slug> --mes <2026-09>
 
-Opción global:
+Opciones globales:
   --seco              usa las muestras locales y no gasta tokens
+  --org <slug>        elige la organización cuando hay más de una
 `
+
+const COMANDOS = new Set([
+  'marca:crear', 'perfil:cargar', 'estrategia:generar', 'grilla:generar', 'grilla:ver',
+])
 
 async function principal(): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -32,11 +37,12 @@ async function principal(): Promise<void> {
       periodo: { type: 'string' },
       mes: { type: 'string' },
       seco: { type: 'boolean', default: false },
+      org: { type: 'string' },
     },
   })
 
   const comando = positionals[0]
-  if (!comando) {
+  if (!comando || !COMANDOS.has(comando)) {
     console.log(AYUDA)
     return
   }
@@ -56,9 +62,14 @@ async function principal(): Promise<void> {
   const { db, cerrar } = crearConexion(url)
 
   try {
+    const organizationId = await resolverOrganizacion(db, {
+      ...(values.org !== undefined ? { org: values.org } : {}),
+      env,
+    })
+
     switch (comando) {
       case 'marca:crear': {
-        const ref = await crearMarca(db, {
+        const ref = await crearMarca(db, organizationId, {
           slug: exigir(values.slug, '--slug'),
           nombre: exigir(values.nombre, '--nombre'),
           ...(values.presupuesto !== undefined ? { presupuesto: values.presupuesto } : {}),
@@ -67,7 +78,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'perfil:cargar': {
-        const version = await cargarPerfilDeArchivo(db, {
+        const version = await cargarPerfilDeArchivo(db, organizationId, {
           slug: exigir(values.marca, '--marca'),
           archivo: resolverDesdeInvocacion(exigir(values.archivo, '--archivo')),
         })
@@ -75,7 +86,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'estrategia:generar': {
-        const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), {
+        const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), organizationId, {
           slug: exigir(values.marca, '--marca'),
           periodo: exigir(values.periodo, '--periodo'),
           env,
@@ -84,7 +95,7 @@ async function principal(): Promise<void> {
         break
       }
       case 'grilla:generar': {
-        const r = await generarGrilla(db, crearCliente(opcionesDeCliente), {
+        const r = await generarGrilla(db, crearCliente(opcionesDeCliente), organizationId, {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
           env,
@@ -94,15 +105,13 @@ async function principal(): Promise<void> {
         break
       }
       case 'grilla:ver': {
-        const filas = await verGrilla(db, {
+        const filas = await verGrilla(db, organizationId, {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
         })
         console.table(filas)
         break
       }
-      default:
-        console.log(AYUDA)
     }
   } finally {
     await cerrar()

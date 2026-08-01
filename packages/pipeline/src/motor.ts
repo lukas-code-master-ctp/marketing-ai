@@ -239,15 +239,31 @@ async function ejecutarPaso(
     } catch (error) {
       ultimoError = error
       const puedeReintentar = esTransitorio(error) && intento < o.maxIntentos
-      await db
-        .update(esquema.pipelineSteps)
-        .set({
-          status: puedeReintentar ? 'en_curso' : 'fallido',
-          attempt: intento,
-          error: mensaje(error),
-          ...(puedeReintentar ? {} : { finishedAt: new Date() }),
-        })
-        .where(eq(esquema.pipelineSteps.id, idPaso))
+
+      // Misma decisión que en `marcarCorridaFallida`, y por el mismo motivo:
+      // esta escritura es contabilidad y no puede reemplazar al error del paso.
+      // Aquí además decide el reintento. Si el paso falló con un 08006 porque
+      // Postgres se reinició, este UPDATE va contra la misma base caída; sin la
+      // guarda su error escapa, el motor lo lee como permanente y el reintento
+      // que 08006 existe para provocar no ocurre. El console.error tiene la
+      // misma justificación que allá: sin él el paso queda 'en_curso' con
+      // `error` NULL y la pérdida es invisible por construcción.
+      try {
+        await db
+          .update(esquema.pipelineSteps)
+          .set({
+            status: puedeReintentar ? 'en_curso' : 'fallido',
+            attempt: intento,
+            error: mensaje(error),
+            ...(puedeReintentar ? {} : { finishedAt: new Date() }),
+          })
+          .where(eq(esquema.pipelineSteps.id, idPaso))
+      } catch (fallaSecundaria) {
+        console.error(
+          `[pipeline] no se pudo anotar el intento ${intento} del paso ${idPaso}:`,
+          fallaSecundaria,
+        )
+      }
 
       if (!puedeReintentar) throw error
       await o.dormir(calcularEspera(intento, o.aleatorio))

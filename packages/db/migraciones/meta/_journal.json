@@ -8,6 +8,27 @@
       "when": 1785522917296,
       "tag": "0000_blushing_iron_fist",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785536952442,
+      "tag": "0001_fancy_sugar_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785538210136,
+      "tag": "0002_empty_kulan_gath",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785538953081,
+      "tag": "0003_tiny_bushwacker",
+      "breakpoints": true
     }
   ]
 }

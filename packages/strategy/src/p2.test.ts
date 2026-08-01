@@ -41,7 +41,7 @@ const GRILLA_VALIDA = grilla([
 ])
 
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
-  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
     .values({ organizationId: org!.id, slug: 'parcelas', name: 'CTP' })
@@ -241,7 +241,7 @@ describe('flujo P2 · grilla', () => {
 
   it('falla si la marca no tiene estrategia', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+      const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
       const [marca] = await db
         .insert(esquema.brands)
         .values({ organizationId: org!.id, slug: 'sin', name: 'Sin' })
@@ -339,6 +339,76 @@ describe('flujo P2 · grilla', () => {
 
       expect(cliente.peticiones).toHaveLength(0)
       expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
+    })
+  })
+
+  it('exige la estrategia del trimestre que corresponde al mes', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      // sembrar() crea la estrategia de 2026-Q3. Septiembre calza; diciembre no.
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const error = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-12' }, ref, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toContain('2026-Q4')
+      expect((error as Error).message).toContain('2026-12')
+    })
+  })
+
+  it('no usa una estrategia archivada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'archivada' })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const fallo = ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+
+      // El periodo va en la aserción porque la clase sola se cumple con
+      // cualquier otro fallo permanente: un `trimestreDe` roto que buscara
+      // 2026-Q4 tampoco encontraría fila y dejaría la prueba en verde.
+      await expect(fallo).rejects.toMatchObject({ clase: 'permanente' })
+      await expect(fallo).rejects.toThrow(/2026-Q3/)
+    })
+  })
+
+  it('ignora una estrategia más reciente de otro trimestre', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const [q3] = await db
+        .select()
+        .from(esquema.strategies)
+        .where(eq(esquema.strategies.period, '2026-Q3'))
+
+      // Estrategia de Q4, creada después, con un mix que excluye blog.
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q4',
+        data: { ...ESTRATEGIA, mixDeCanales: [{ canal: 'tiktok', publicacionesPorSemana: 1 }] },
+        brandProfileVersion: 1,
+      })
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const r = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+
+      // Si hubiera tomado la de Q4, los slots de blog serían canal_fuera_de_mix.
+      expect(r.estado).toBe('completado')
+
+      // Pero eso solo se nota mientras canal_fuera_de_mix sea bloqueante: si
+      // alguien lo degradara a aviso, la corrida completaría con la estrategia
+      // equivocada. `persistir` deja el vínculo escrito, así que se lee.
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.strategyId).toBe(q3!.id)
     })
   })
 })

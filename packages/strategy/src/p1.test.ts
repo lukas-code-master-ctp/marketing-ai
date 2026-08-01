@@ -22,7 +22,7 @@ const ESTRATEGIA_JSON = JSON.stringify({
 })
 
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
-  const [org] = await db.insert(esquema.organizations).values({ name: 'X' }).returning()
+  const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
     .values({ organizationId: org!.id, slug: 'parcelas', name: 'CTP' })
@@ -174,6 +174,21 @@ describe('flujo P1 · estrategia', () => {
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
       ).rejects.toThrow(/"archivada".*borrador/s)
+    })
+  })
+
+  it('rechaza un periodo con formato inválido antes de gastar', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([ESTRATEGIA_JSON])
+      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-3' }, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect(cliente.peticiones).toHaveLength(0)
+      expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
     })
   })
 })
