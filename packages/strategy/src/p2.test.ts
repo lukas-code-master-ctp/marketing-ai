@@ -367,15 +367,25 @@ describe('flujo P2 · grilla', () => {
         .where(eq(esquema.strategies.brandId, ref.brandId))
 
       const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
-      await expect(
-        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
-      ).rejects.toMatchObject({ clase: 'permanente' })
+      const fallo = ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+
+      // El periodo va en la aserción porque la clase sola se cumple con
+      // cualquier otro fallo permanente: un `trimestreDe` roto que buscara
+      // 2026-Q4 tampoco encontraría fila y dejaría la prueba en verde.
+      await expect(fallo).rejects.toMatchObject({ clase: 'permanente' })
+      await expect(fallo).rejects.toThrow(/2026-Q3/)
     })
   })
 
   it('ignora una estrategia más reciente de otro trimestre', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
+      const [q3] = await db
+        .select()
+        .from(esquema.strategies)
+        .where(eq(esquema.strategies.period, '2026-Q3'))
 
       // Estrategia de Q4, creada después, con un mix que excluye blog.
       await db.insert(esquema.strategies).values({
@@ -393,6 +403,12 @@ describe('flujo P2 · grilla', () => {
 
       // Si hubiera tomado la de Q4, los slots de blog serían canal_fuera_de_mix.
       expect(r.estado).toBe('completado')
+
+      // Pero eso solo se nota mientras canal_fuera_de_mix sea bloqueante: si
+      // alguien lo degradara a aviso, la corrida completaría con la estrategia
+      // equivocada. `persistir` deja el vínculo escrito, así que se lee.
+      const [plan] = await db.select().from(esquema.contentPlans)
+      expect(plan!.strategyId).toBe(q3!.id)
     })
   })
 })
