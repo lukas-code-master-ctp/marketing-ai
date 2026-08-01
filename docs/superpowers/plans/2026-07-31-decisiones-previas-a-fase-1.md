@@ -320,14 +320,16 @@ Agregar a `packages/strategy/src/p1.test.ts`, con el mismo trigger de un solo fa
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
       const flujo = crearFlujoEstrategia({ cliente, env: ENV })
 
+      // Una secuencia y no una tabla de bandera: el UPDATE de una tabla se
+      // revertiría junto con la transacción cuyo fallo provoca, y el trigger
+      // dispararía para siempre. `nextval` no es transaccional, así que sí
+      // sobrevive al rollback y el reintento pasa.
       await db.execute(sql`
-        create table if not exists fallo_una_vez (usado boolean not null default false);
-        delete from fallo_una_vez;
-        insert into fallo_una_vez values (false);
+        drop sequence if exists fallo_una_vez_seq;
+        create sequence fallo_una_vez_seq;
         create or replace function romper_una_vez() returns trigger as $$
         begin
-          if (select not usado from fallo_una_vez limit 1) then
-            update fallo_una_vez set usado = true;
+          if nextval('fallo_una_vez_seq') = 1 then
             raise exception 'conexión perdida' using errcode = '08006';
           end if;
           return new;
@@ -349,7 +351,7 @@ Agregar a `packages/strategy/src/p1.test.ts`, con el mismo trigger de un solo fa
         await db.execute(sql`
           drop trigger if exists t_romper on strategies;
           drop function if exists romper_una_vez();
-          drop table if exists fallo_una_vez;
+          drop sequence if exists fallo_una_vez_seq;
         `)
       }
     })
