@@ -35,6 +35,32 @@ describe('grillaDelMes', () => {
     })
   })
 
+  it('ordena los slots por fecha y hora ascendente, padres y derivados entreverados', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+
+      expect(g.slots).toHaveLength(12)
+
+      // Los 4 artículos se insertan primero (un solo insert) y los 8
+      // derivados después (otro insert), agrupados por padre. Esa es la
+      // fecha en que Postgres los guarda, pero NO es el orden cronológico:
+      // los derivados del primer artículo (2 días después) caen antes que
+      // el segundo artículo. Si `grillaDelMes` no ordenara explícitamente,
+      // el resultado más probable sería el de inserción —padres, luego
+      // derivados— y esta comparación lo detectaría.
+      const claves = g.slots.map((s) => `${s.fecha}T${s.hora}`)
+      const ordenadas = [...claves].sort()
+      expect(claves).toEqual(ordenadas)
+
+      // Y no es una comparación vacía: hay al menos un derivado intercalado
+      // entre dos padres, exactamente lo que el calendario necesita ver.
+      const primerIndiceDeDerivado = g.slots.findIndex((s) => s.esDerivado)
+      const ultimoIndiceDePadre = g.slots.map((s) => s.esDerivado).lastIndexOf(false)
+      expect(primerIndiceDeDerivado).toBeLessThan(ultimoIndiceDePadre)
+    })
+  })
+
   it('no cuenta los descartados en el resumen por canal', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)
