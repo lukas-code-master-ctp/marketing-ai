@@ -1,11 +1,20 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import type { SlotDeLaGrilla } from '@gc/operaciones'
 
 /**
  * Panel de solo lectura con el detalle completo de un slot. La Task 5 le
  * agrega botones de acción (aprobar, descartar, etc.); acá solo muestra
  * información.
+ *
+ * Es un diálogo modal de verdad, no solo visualmente: `role="dialog"` +
+ * `aria-modal` para que un lector de pantalla lo anuncie como tal, foco
+ * movido adentro al abrirse (y de nuevo cada vez que cambia el slot
+ * mostrado, p. ej. al navegar al padre), y Escape para cerrarlo. Devolver
+ * el foco a la ficha que lo abrió es responsabilidad de quien controla
+ * `onCerrar` (`RejillaDelMes`), porque este componente no sabe qué elemento
+ * lo disparó.
  */
 export function PanelDeDetalle({
   slot,
@@ -18,13 +27,32 @@ export function PanelDeDetalle({
   onCerrar: () => void
   onVerPadre: (id: string) => void
 }) {
+  const contenedorRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    contenedorRef.current?.focus()
+  }, [slot.id])
+
+  useEffect(() => {
+    function alTecla(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCerrar()
+    }
+    document.addEventListener('keydown', alTecla)
+    return () => document.removeEventListener('keydown', alTecla)
+  }, [onCerrar])
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onCerrar}
     >
       <div
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
+        ref={contenedorRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${slot.canal}: ${slot.pilar}`}
+        tabIndex={-1}
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-4">

@@ -13,7 +13,7 @@ export function FichaDeSlot({
   onSeleccionar,
 }: {
   slot: SlotDeLaGrilla
-  onSeleccionar: (id: string) => void
+  onSeleccionar: (id: string, elemento: HTMLButtonElement) => void
 }) {
   const base = 'w-full rounded border px-1.5 py-1 text-left text-xs leading-tight transition-colors'
   const estilo = slot.descartado
@@ -23,12 +23,17 @@ export function FichaDeSlot({
       : `${base} border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100`
 
   return (
-    <button type="button" onClick={() => onSeleccionar(slot.id)} className={estilo}>
+    <button
+      type="button"
+      onClick={(e) => onSeleccionar(slot.id, e.currentTarget)}
+      className={estilo}
+    >
       <span className="block truncate font-semibold">
         {slot.esDerivado ? '↳ ' : ''}
         {slot.canal}
       </span>
       <span className="block truncate opacity-80">{slot.pilar}</span>
+      <span className="block truncate opacity-70">{slot.angulo}</span>
     </button>
   )
 }

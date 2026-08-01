@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { SlotDeLaGrilla } from '@gc/operaciones'
 import { FichaDeSlot } from './FichaDeSlot.js'
 import { PanelDeDetalle } from './PanelDeDetalle.js'
@@ -23,6 +23,21 @@ export function RejillaDelMes({
   slots: SlotDeLaGrilla[]
 }) {
   const [seleccionadoId, setSeleccionadoId] = useState<string | null>(null)
+  // La ficha que abrió el panel, para devolverle el foco al cerrarlo. Navegar
+  // al padre desde dentro del panel no la cambia: el disparador sigue siendo
+  // la ficha original que el usuario pulsó.
+  const disparadorRef = useRef<HTMLButtonElement | null>(null)
+
+  function abrir(id: string, elemento: HTMLButtonElement) {
+    disparadorRef.current = elemento
+    setSeleccionadoId(id)
+  }
+
+  function cerrar() {
+    setSeleccionadoId(null)
+    disparadorRef.current?.focus()
+    disparadorRef.current = null
+  }
 
   const porId = new Map(slots.map((s) => [s.id, s]))
   const porFecha = new Map<string, SlotDeLaGrilla[]>()
@@ -55,7 +70,7 @@ export function RejillaDelMes({
               </div>
               <div className="flex flex-col gap-1">
                 {slotsDelDia.map((slot) => (
-                  <FichaDeSlot key={slot.id} slot={slot} onSeleccionar={setSeleccionadoId} />
+                  <FichaDeSlot key={slot.id} slot={slot} onSeleccionar={abrir} />
                 ))}
               </div>
             </div>
@@ -67,7 +82,7 @@ export function RejillaDelMes({
         <PanelDeDetalle
           slot={seleccionado}
           padre={padreDelSeleccionado}
-          onCerrar={() => setSeleccionadoId(null)}
+          onCerrar={cerrar}
           onVerPadre={setSeleccionadoId}
         />
       )}
