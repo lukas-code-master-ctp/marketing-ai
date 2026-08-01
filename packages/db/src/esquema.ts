@@ -216,11 +216,16 @@ export const planSlots = pgTable('plan_slots', {
   // Autorreferencia: un derivado cuelga de otro slot de la MISMA organización.
   // Antes `source_slot_id` era un uuid suelto, sin clave foránea alguna.
   //
-  // NO ACTION, no CASCADE ni RESTRICT. La regeneración borra padres y
-  // derivados en una sola sentencia y NO ACTION se verifica al final de
-  // ella, así que ese camino sigue funcionando; RESTRICT lo rompería por
-  // verificarse de inmediato. Borrar un padre suelto sí falla: la UI
-  // descarta con status = 'descartado' en vez de borrar.
+  // NO ACTION en vez de CASCADE: borrar un artículo ya no se lleva sus
+  // adaptaciones en silencio. La UI descarta con status = 'descartado'.
+  //
+  // Frente a RESTRICT la diferencia es sutil y conviene no confundirla: con la
+  // restricción NOT DEFERRABLE, como está aquí, ambos se verifican al final de
+  // la sentencia, así que el borrado masivo de la regeneración funciona igual
+  // con los dos. Se elige NO ACTION porque es el único que se puede diferir de
+  // verdad si alguna vez hace falta reordenar derivados dentro de una
+  // transacción: RESTRICT acepta la palabra DEFERRABLE, pero su verificación
+  // se sigue haciendo al final de cada sentencia.
   origenPorOrg: foreignKey({
     columns: [t.sourceSlotId, t.organizationId],
     foreignColumns: [t.id, t.organizationId],

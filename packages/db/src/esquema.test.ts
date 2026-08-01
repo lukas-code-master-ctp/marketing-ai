@@ -453,9 +453,13 @@ async function sembrarPadreConDerivado(db: BaseDeDatos) {
 }
 
 describe('borrado de plan_slots con derivados', () => {
+  // Esta es la prueba que fija la decisión: es la única que falla si alguien
+  // devuelve la clave a CASCADE, porque entonces el borrado del padre pasa y
+  // se lleva al derivado. La de abajo pasa con CASCADE, RESTRICT y NO ACTION
+  // por igual, así que no sirve de guardia: solo documenta el camino feliz.
   it('impide borrar un slot que todavía tiene derivados', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const { planId, padreId } = await sembrarPadreConDerivado(db)
+      const { padreId } = await sembrarPadreConDerivado(db)
 
       await expect(
         db.delete(esquema.planSlots).where(eq(esquema.planSlots.id, padreId)),
@@ -463,7 +467,6 @@ describe('borrado de plan_slots con derivados', () => {
 
       // El derivado sigue vivo: nada se perdió en silencio.
       expect(await db.select().from(esquema.planSlots)).toHaveLength(2)
-      expect(planId).toBeTruthy()
     })
   })
 
@@ -471,8 +474,9 @@ describe('borrado de plan_slots con derivados', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const { planId } = await sembrarPadreConDerivado(db)
 
-      // Es el camino que usa la regeneración de grilla: NO ACTION se verifica
-      // al final de la sentencia, cuando los hijos ya se fueron.
+      // Es el camino que usa la regeneración de grilla. Funciona porque la
+      // restricción es NOT DEFERRABLE y se verifica al final de la sentencia,
+      // cuando los hijos ya se fueron —con NO ACTION y con RESTRICT por igual.
       await db.delete(esquema.planSlots).where(eq(esquema.planSlots.contentPlanId, planId))
 
       expect(await db.select().from(esquema.planSlots)).toHaveLength(0)
