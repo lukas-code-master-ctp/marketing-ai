@@ -1,0 +1,31 @@
+{
+  "name": "@gc/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gc/brand": "workspace:*",
+    "@gc/db": "workspace:*",
+    "@gc/operaciones": "workspace:*",
+    "@gc/shared": "workspace:*",
+    "@gc/strategy": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.0.0"
+  }
+}
