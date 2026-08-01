@@ -17,7 +17,39 @@ Resueltos en `feat/integridad-prioridad-1` ([diseño](2026-07-31-prioridad-1-int
 
 ---
 
-## Prioridad 1 — decidido, listo para implementar
+## Prioridad 1 — insumos para el diseño de la Fase 1
+
+Cuatro cosas que la revisión de rama destapó y que la UI tiene que resolver desde su diseño, no después.
+
+### 1. El CLI no sabe reanudar una corrida
+
+Partir P1 y P2 en dos pasos evita recobrar el modelo **dentro de una misma invocación**. Pero `apps/cli/src/comandos.ts` nunca pasa `runId` y el CLI no expone bandera de reanudación, así que si la persistencia agota sus cinco reintentos —Postgres caído más de medio minuto— el proceso termina, el usuario vuelve a correr el comando, nace una corrida nueva y **el modelo se cobra otra vez**. La grilla ya pagada queda en `pipeline_steps.output` de la corrida fallida, inalcanzable.
+
+El motor ya soporta reanudar (`ejecutarFlujo` acepta `ctx.runId`, `reanudarCorrida` está probado). Falta exponerlo. La UI de Fase 1 lo va a necesitar de todos modos: una bandeja que muestre corridas fallidas con un botón de reintentar es exactamente esto.
+
+### 2. Nada filtra por `status = 'descartado'`
+
+La decisión de la cascada convierte `descartado` en el mecanismo normal de la UI para quitar un slot. Pero `verGrilla` selecciona sin filtrar por estado y `FilaDeGrilla` ni expone el campo; `SalidaP2.totalSlots` los cuenta; y `expandirDerivados` y `validarGrilla` tampoco los miran, así que una regeneración los recontaría en las reglas de cadencia y de distribución de pilares.
+
+Hoy no está roto porque no existe la ruta de descarte. La Fase 1 es su primer consumidor.
+
+### 3. La salida entre pasos no está versionada
+
+`SalidaDeLaPropuesta` viaja como jsonb entre los dos pasos de P2, y ahora carga el perfil de marca y la estrategia completos. Ninguna prueba la hace cruzar una reanudación real: el reintento intra-invocación devuelve el objeto en memoria. Todo el contenido es JSON puro, así que hoy el viaje es inofensivo.
+
+El problema aparece junto con el punto 1: una corrida vieja cuyo primer paso se completó con una versión anterior del código tiene una salida de forma incompatible, y el segundo paso la desestructura a `undefined`. Falla ruidosamente, no en silencio — pero conviene versionar la salida **antes** de exponer el botón de reanudar.
+
+### 4. Tres nombres para el mismo concepto
+
+`brandSlug` en las interfaces y el contexto, `nombreVisible` en los parámetros de `costos.ts`, `repositorio.ts` y `p2.ts`, y `slug` en los argumentos del CLI. Además `ReferenciaResuelta` y `ReferenciaDeMarca` son hoy estructuras idénticas declaradas por separado, que coinciden por accidente. Unificar antes de que la web sume un cuarto nombre.
+
+---
+
+## Cerrado: las tres decisiones previas a la Fase 1
+
+Resueltas en `feat/decisiones-previas-fase-1`. El detalle de cada una queda abajo como registro de por qué se eligió lo que se eligió.
+
+## Prioridad 1 — decidido, implementado
 
 Las tres decisiones se cerraron el 2026-07-31. Lo que sigue es el enfoque acordado, con el detalle técnico que la implementación necesita.
 

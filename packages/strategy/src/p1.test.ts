@@ -3,7 +3,7 @@ import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoEstrategia } from './p1.js'
 
@@ -92,6 +92,25 @@ describe('flujo P1 · estrategia', () => {
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
       ).rejects.toMatchObject({ clase: 'permanente' })
+    })
+  })
+
+  it('nombra la marca por su slug al detenerse por presupuesto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db.insert(esquema.aiCalls).values({
+        organizationId: ref.organizationId, brandId: ref.brandId,
+        task: 't', model: 'm', costUsd: '999.00', promptHash: 'h',
+      })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+
+      const error = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, period: '2026-Q4' },
+        { ...ref, brandSlug: 'parcelas' }, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(ref.brandId)
     })
   })
 
@@ -189,6 +208,53 @@ describe('flujo P1 · estrategia', () => {
 
       expect(cliente.peticiones).toHaveLength(0)
       expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
+    })
+  })
+
+  it('reintentar tras un fallo al persistir no vuelve a llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([ESTRATEGIA_JSON])
+      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+
+      // Una secuencia y no una tabla de bandera: el UPDATE de una tabla se
+      // revertiría junto con la transacción cuyo fallo provoca, y el trigger
+      // dispararía para siempre. `nextval` no es transaccional, así que sí
+      // sobrevive al rollback y el reintento pasa.
+      //
+      // Se borra y se vuelve a crear en vez de reutilizarla: una secuencia
+      // recién creada arranca en 1 y no hay que razonar sobre en qué valor
+      // pudo dejarla una corrida anterior.
+      await db.execute(sql`
+        drop sequence if exists fallo_una_vez_seq;
+        create sequence fallo_una_vez_seq;
+        create or replace function romper_una_vez() returns trigger as $$
+        begin
+          if nextval('fallo_una_vez_seq') = 1 then
+            raise exception 'conexión perdida' using errcode = '08006';
+          end if;
+          return new;
+        end $$ language plpgsql;
+        create trigger t_romper before insert on strategies
+          for each row execute function romper_una_vez();
+      `)
+
+      try {
+        const r = await ejecutarFlujo(
+          db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref,
+          { dormir: async () => {}, aleatorio: () => 0 },
+        )
+
+        expect(r.estado).toBe('completado')
+        expect(cliente.peticiones).toHaveLength(1)
+        expect(await db.select().from(esquema.aiCalls)).toHaveLength(1)
+      } finally {
+        await db.execute(sql`
+          drop trigger if exists t_romper on strategies;
+          drop function if exists romper_una_vez();
+          drop sequence if exists fallo_una_vez_seq;
+        `)
+      }
     })
   })
 })

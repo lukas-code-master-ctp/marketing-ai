@@ -90,6 +90,38 @@ describe('costos y presupuesto', () => {
     })
   })
 
+  it('nombra la marca por su slug al cortar por presupuesto agotado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { orgId, marcaId } = await sembrar(db, '5.00')
+      await db.insert(esquema.aiCalls).values({
+        organizationId: orgId, brandId: marcaId, task: 't', model: 'm',
+        costUsd: '5.00', promptHash: 'h', createdAt: MES,
+      })
+
+      const error = await exigirPresupuesto(db, marcaId, MES, 'parcelas').catch(
+        (e: unknown) => e as Error,
+      )
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(marcaId)
+    })
+  })
+
+  it('nombra la marca por su slug cuando la marca ni siquiera existe', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await sembrar(db)
+      const fantasma = '00000000-0000-4000-8000-000000000000'
+
+      const error = await exigirPresupuesto(db, fantasma, MES, 'parcelas').catch(
+        (e: unknown) => e as Error,
+      )
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(fantasma)
+    })
+  })
+
   it('crearRegistrador produce una función compatible con ejecutarTarea', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const { orgId, marcaId } = await sembrar(db)

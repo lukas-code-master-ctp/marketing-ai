@@ -73,12 +73,13 @@ export async function verificarPresupuesto(
   db: BaseDeDatos,
   brandId: string,
   mes: Date,
+  nombreVisible?: string,
 ): Promise<EstadoDePresupuesto> {
   const [marca] = await db
     .select({ presupuesto: esquema.brands.monthlyBudgetUsd })
     .from(esquema.brands)
     .where(eq(esquema.brands.id, brandId))
-  if (!marca) throw permanente(`No existe la marca ${brandId}`)
+  if (!marca) throw permanente(`No existe la marca ${nombreVisible ?? brandId}`)
 
   const presupuestoUsd = Number(marca.presupuesto)
   const gastadoUsd = await gastoDelMes(db, brandId, mes)
@@ -98,11 +99,12 @@ export async function exigirPresupuesto(
   db: BaseDeDatos,
   brandId: string,
   mes: Date,
+  nombreVisible?: string,
 ): Promise<EstadoDePresupuesto> {
-  const estado = await verificarPresupuesto(db, brandId, mes)
+  const estado = await verificarPresupuesto(db, brandId, mes, nombreVisible)
   if (estado.estado === 'agotado') {
     throw permanente(
-      `Presupuesto mensual agotado para la marca ${brandId}: ` +
+      `Presupuesto mensual agotado para la marca ${nombreVisible ?? brandId}: ` +
         `${estado.gastadoUsd.toFixed(2)} de ${estado.presupuestoUsd.toFixed(2)} USD`,
     )
   }

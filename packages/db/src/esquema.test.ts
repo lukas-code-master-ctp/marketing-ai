@@ -420,6 +420,70 @@ describe('integridad multi-tenant', () => {
   })
 })
 
+async function sembrarPadreConDerivado(db: BaseDeDatos) {
+  const [org] = await db
+    .insert(esquema.organizations)
+    .values({ name: 'Cascada', slug: 'cascada' })
+    .returning()
+  const [marca] = await db
+    .insert(esquema.brands)
+    .values({ organizationId: org!.id, slug: 'c', name: 'C' })
+    .returning()
+  const [plan] = await db
+    .insert(esquema.contentPlans)
+    .values({ organizationId: org!.id, brandId: marca!.id, month: '2026-09-01' })
+    .returning()
+
+  const fila = (sourceSlotId: string | null, canal: 'blog' | 'linkedin', dia: string) => ({
+    organizationId: org!.id,
+    contentPlanId: plan!.id,
+    sourceSlotId,
+    scheduledFor: new Date(`2026-09-${dia}T13:00:00Z`),
+    channel: canal,
+    format: sourceSlotId ? 'derivado' : 'articulo',
+    pillar: 'educacion',
+    angle: 'x',
+    brief: 'Un brief suficientemente largo para pasar la validación.',
+  })
+
+  const [padre] = await db.insert(esquema.planSlots).values(fila(null, 'blog', '03')).returning()
+  await db.insert(esquema.planSlots).values(fila(padre!.id, 'linkedin', '05'))
+
+  return { planId: plan!.id, padreId: padre!.id }
+}
+
+describe('borrado de plan_slots con derivados', () => {
+  // Esta es la prueba que fija la decisión: es la única que falla si alguien
+  // devuelve la clave a CASCADE, porque entonces el borrado del padre pasa y
+  // se lleva al derivado. La de abajo pasa con CASCADE, RESTRICT y NO ACTION
+  // por igual, así que no sirve de guardia: solo documenta el camino feliz.
+  it('impide borrar un slot que todavía tiene derivados', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { padreId } = await sembrarPadreConDerivado(db)
+
+      await expect(
+        db.delete(esquema.planSlots).where(eq(esquema.planSlots.id, padreId)),
+      ).rejects.toThrow(/plan_slots_source_org_fk/)
+
+      // El derivado sigue vivo: nada se perdió en silencio.
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(2)
+    })
+  })
+
+  it('permite borrar el plan entero, padres y derivados en una sola sentencia', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { planId } = await sembrarPadreConDerivado(db)
+
+      // Es el camino que usa la regeneración de grilla. Funciona porque la
+      // restricción es NOT DEFERRABLE y se verifica al final de la sentencia,
+      // cuando los hijos ya se fueron —con NO ACTION y con RESTRICT por igual.
+      await db.delete(esquema.planSlots).where(eq(esquema.planSlots.contentPlanId, planId))
+
+      expect(await db.select().from(esquema.planSlots)).toHaveLength(0)
+    })
+  })
+})
+
 describe('restricciones CHECK de enums', () => {
   const casos: Array<[string, (db: BaseDeDatos, org: { id: string }) => Promise<unknown>]> = [
     [
@@ -565,7 +629,7 @@ describe('catálogo de restricciones compuestas', () => {
       tabla: 'plan_slots',
       conname: 'plan_slots_source_org_fk',
       definicion:
-        'FOREIGN KEY (source_slot_id, organization_id) REFERENCES plan_slots(id, organization_id) ON DELETE CASCADE',
+        'FOREIGN KEY (source_slot_id, organization_id) REFERENCES plan_slots(id, organization_id)',
     },
     {
       tabla: 'strategies',

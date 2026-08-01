@@ -15,6 +15,7 @@ const SLUG_POR_DEFECTO = 'principal'
 export interface ReferenciaResuelta {
   organizationId: string
   brandId: string
+  brandSlug?: string
 }
 
 export interface OpcionesDeOrganizacion {
@@ -79,7 +80,7 @@ async function resolverMarca(
       ),
     )
   if (!marca) throw permanente(`No existe la marca "${slug}" en esta organización`)
-  return { organizationId: marca.organizationId, brandId: marca.id }
+  return { organizationId: marca.organizationId, brandId: marca.id, brandSlug: slug }
 }
 
 export async function crearMarca(
@@ -97,7 +98,7 @@ export async function crearMarca(
         ...(args.presupuesto !== undefined ? { monthlyBudgetUsd: args.presupuesto } : {}),
       })
       .returning()
-    return { organizationId, brandId: marca!.id }
+    return { organizationId, brandId: marca!.id, brandSlug: args.slug }
   } catch (error) {
     if (esViolacionDeUnica(error)) {
       throw permanente(

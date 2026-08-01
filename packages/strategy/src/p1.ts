@@ -33,8 +33,16 @@ export interface SalidaP1 {
   estrategia: TipoEstrategia
 }
 
+/** Lo que el paso del modelo le entrega al de persistencia. */
+interface SalidaDeLaGeneracion {
+  brandId: string
+  period: string
+  datos: TipoEstrategia
+  version: number
+}
+
 export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
-  const paso = definirPaso<EntradaP1, SalidaP1>({
+  const pasoGenerar = definirPaso<EntradaP1, SalidaDeLaGeneracion>({
     nombre: 'generar_estrategia',
     ejecutar: async (entrada, ctx) => {
       // Un periodo con formato inválido no cuesta nada: se valida antes de
@@ -46,12 +54,12 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
       // rechazar igual, y hoy eso se pagaba con una o dos llamadas primero.
       const estadoPrevio = await estadoDeLaEstrategia(ctx.db, entrada.brandId, entrada.period)
       if (estadoPrevio !== null && estadoPrevio !== 'borrador') {
-        throw estrategiaNoRegenerable(entrada, estadoPrevio)
+        throw estrategiaNoRegenerable(entrada, estadoPrevio, ctx.brandSlug)
       }
 
-      await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
+      await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
-      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
+      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId, ctx.brandSlug)
       const instrucciones = await readFile(RUTA_PROMPT, 'utf8')
 
       const mensajes: MensajeLlm[] = [
@@ -78,12 +86,21 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         }),
       })
 
+      return { brandId: entrada.brandId, period: entrada.period, datos, version }
+    },
+  })
+
+  const pasoPersistir = definirPaso<SalidaDeLaGeneracion, SalidaP1>({
+    nombre: 'persistir_estrategia',
+    ejecutar: async (entrada, ctx) => {
+      const { brandId, period, datos, version } = entrada
+
       const [fila] = await ctx.db
         .insert(esquema.strategies)
         .values({
           organizationId: ctx.organizationId,
-          brandId: entrada.brandId,
-          period: entrada.period,
+          brandId,
+          period,
           data: datos,
           brandProfileVersion: version,
         })
@@ -100,15 +117,15 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
       // dejó de estar en borrador entre la comprobación previa y este upsert.
       // Se escala en vez de descartar en silencio el trabajo de revisión humana.
       if (!fila) {
-        const estado = await estadoDeLaEstrategia(ctx.db, entrada.brandId, entrada.period)
-        throw estrategiaNoRegenerable(entrada, estado ?? 'desconocido')
+        const estado = await estadoDeLaEstrategia(ctx.db, brandId, period)
+        throw estrategiaNoRegenerable({ brandId, period }, estado ?? 'desconocido', ctx.brandSlug)
       }
 
       return { strategyId: fila.id, estrategia: datos }
     },
   })
 
-  return { nombre: 'p1_estrategia', pasos: [paso] }
+  return { nombre: 'p1_estrategia', pasos: [pasoGenerar, pasoPersistir] }
 }
 
 async function estadoDeLaEstrategia(
@@ -130,9 +147,9 @@ async function estadoDeLaEstrategia(
  * `status = 'borrador'`, así que archivar no destraba nada —una estrategia
  * archivada queda tan irregenerable como una aprobada.
  */
-function estrategiaNoRegenerable(entrada: EntradaP1, estado: string) {
+function estrategiaNoRegenerable(entrada: EntradaP1, estado: string, nombreVisible?: string) {
   return permanente(
-    `La estrategia de ${entrada.period} para la marca ${entrada.brandId} está en ` +
+    `La estrategia de ${entrada.period} para la marca ${nombreVisible ?? entrada.brandId} está en ` +
       `estado "${estado}" y solo se regenera una que esté en borrador. ` +
       `Devuélvela a "borrador" para regenerarla.`,
   )

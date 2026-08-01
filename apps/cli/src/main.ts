@@ -74,7 +74,7 @@ async function principal(): Promise<void> {
           nombre: exigir(values.nombre, '--nombre'),
           ...(values.presupuesto !== undefined ? { presupuesto: values.presupuesto } : {}),
         })
-        console.log(`Marca creada: ${ref.brandId}`)
+        console.log(`Marca creada: ${ref.brandSlug ?? ref.brandId}`)
         break
       }
       case 'perfil:cargar': {

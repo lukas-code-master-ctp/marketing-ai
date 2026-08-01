@@ -2,7 +2,7 @@ import {
   crearRegistrador, definirTarea, ejecutarTarea, exigirPresupuesto,
   type MensajeLlm,
 } from '@gc/ai'
-import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
+import { cargarPerfilVigente, contextoDeMarca, type TipoPerfilDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
@@ -36,8 +36,20 @@ export interface SalidaP2 {
   avisos: Problema[]
 }
 
+/** Lo que el paso del modelo le entrega al de persistencia. El perfil y la
+ *  estrategia viajan inline: son JSON de todos modos, y así el segundo paso
+ *  no vuelve a consultarlos ni puede leer una versión distinta. */
+interface SalidaDeLaPropuesta {
+  brandId: string
+  mes: string
+  strategyId: string
+  slots: TipoSlotPropuesto[]
+  estrategia: TipoEstrategia
+  perfil: TipoPerfilDeMarca
+}
+
 export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
-  const paso = definirPaso<EntradaP2, SalidaP2>({
+  const pasoProponer = definirPaso<EntradaP2, SalidaDeLaPropuesta>({
     nombre: 'proponer_grilla',
     ejecutar: async (entrada, ctx) => {
       // Se consulta el estado antes del presupuesto y de cualquier llamada al
@@ -45,14 +57,14 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
       // igual, y hoy eso se pagaba con hasta cuatro llamadas primero.
       const estadoPrevio = await estadoDeLaGrilla(ctx.db, entrada.brandId, entrada.mes)
       if (estadoPrevio !== null && estadoPrevio !== 'borrador') {
-        throw grillaNoRegenerable(entrada, estadoPrevio)
+        throw grillaNoRegenerable(entrada, estadoPrevio, ctx.brandSlug)
       }
 
-      await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
+      await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
-      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
+      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId, ctx.brandSlug)
       const { id: strategyId, estrategia } = await cargarEstrategiaVigente(
-        ctx.db, entrada.brandId, entrada.mes,
+        ctx.db, entrada.brandId, entrada.mes, ctx.brandSlug,
       )
       const instrucciones = await readFile(RUTA_PROMPT, 'utf8')
 
@@ -117,13 +129,29 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
         ]
       }
 
-      const derivados = expandirDerivados(slots, estrategia, entrada.mes)
+      return {
+        brandId: entrada.brandId,
+        mes: entrada.mes,
+        strategyId,
+        slots,
+        estrategia,
+        perfil,
+      }
+    },
+  })
+
+  const pasoPersistir = definirPaso<SalidaDeLaPropuesta, SalidaP2>({
+    nombre: 'persistir_grilla',
+    ejecutar: async (entrada, ctx) => {
+      const { mes, estrategia, perfil, slots, strategyId } = entrada
+
+      const derivados = expandirDerivados(slots, estrategia, mes)
 
       // La grilla que se guarda es la expandida, no la que propuso el modelo:
       // se vuelve a validar sobre ella para que los avisos de cadencia y de
       // pilares describan lo que de verdad queda en la base.
       const problemasFinales = validarGrilla([...slots, ...derivados], {
-        mes: entrada.mes,
+        mes,
         perfil,
         estrategia,
       })
@@ -151,13 +179,14 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
     },
   })
 
-  return { nombre: 'p2_grilla', pasos: [paso] }
+  return { nombre: 'p2_grilla', pasos: [pasoProponer, pasoPersistir] }
 }
 
 async function cargarEstrategiaVigente(
   db: BaseDeDatos,
   brandId: string,
   mes: string,
+  nombreVisible?: string,
 ): Promise<{ id: string; estrategia: TipoEstrategia }> {
   const periodo = trimestreDe(mes)
 
@@ -176,13 +205,15 @@ async function cargarEstrategiaVigente(
 
   if (!fila) {
     throw permanente(
-      `La marca ${brandId} no tiene estrategia vigente para ${periodo}. ` +
+      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${periodo}. ` +
         `Genérala antes de la grilla de ${mes}.`,
     )
   }
 
   const r = Estrategia.safeParse(fila.data)
-  if (!r.success) throw permanente(`La estrategia guardada de ${brandId} no valida`)
+  if (!r.success) {
+    throw permanente(`La estrategia guardada de ${nombreVisible ?? brandId} no valida`)
+  }
 
   return { id: fila.id, estrategia: r.data }
 }
@@ -212,9 +243,9 @@ async function estadoDeLaGrilla(
  * estado "archivada" —sus estados son borrador, aprobada, en_ejecucion y
  * cerrada— así que pedir archivar la grilla llevaba a violar el CHECK.
  */
-function grillaNoRegenerable(entrada: EntradaP2, estado: string) {
+function grillaNoRegenerable(entrada: EntradaP2, estado: string, nombreVisible?: string) {
   return permanente(
-    `La grilla de ${entrada.mes} para la marca ${entrada.brandId} está en estado ` +
+    `La grilla de ${entrada.mes} para la marca ${nombreVisible ?? entrada.brandId} está en estado ` +
       `"${estado}" y solo se regenera una que esté en borrador. ` +
       `Devuélvela a "borrador" para regenerarla.`,
   )
@@ -259,7 +290,7 @@ async function persistir(
     // piezas de contenido colgadas de esos slots.
     if (!plan) {
       const estado = await estadoDeLaGrilla(tx, entrada.brandId, entrada.mes)
-      throw grillaNoRegenerable(entrada, estado ?? 'desconocido')
+      throw grillaNoRegenerable(entrada, estado ?? 'desconocido', ctx.brandSlug)
     }
 
     const contentPlanId = plan.id

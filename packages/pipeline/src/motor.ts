@@ -8,6 +8,7 @@ export interface ContextoDePaso {
   runId: string
   organizationId: string
   brandId?: string
+  brandSlug?: string
 }
 
 export interface DefinicionDePaso<E, S> {
@@ -28,6 +29,7 @@ export interface DefinicionDeFlujo {
 export interface ContextoDeFlujo {
   organizationId: string
   brandId?: string
+  brandSlug?: string
   /** Si se indica, se reanuda esa corrida en vez de crear una nueva. */
   runId?: string
 }
@@ -66,6 +68,7 @@ export async function ejecutarFlujo(
     runId,
     organizationId: ctx.organizationId,
     ...(ctx.brandId !== undefined ? { brandId: ctx.brandId } : {}),
+    ...(ctx.brandSlug !== undefined ? { brandSlug: ctx.brandSlug } : {}),
   }
 
   let valor: unknown = entrada
