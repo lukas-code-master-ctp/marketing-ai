@@ -215,11 +215,17 @@ export const planSlots = pgTable('plan_slots', {
   }).onDelete('cascade'),
   // Autorreferencia: un derivado cuelga de otro slot de la MISMA organización.
   // Antes `source_slot_id` era un uuid suelto, sin clave foránea alguna.
+  //
+  // NO ACTION, no CASCADE ni RESTRICT. La regeneración borra padres y
+  // derivados en una sola sentencia y NO ACTION se verifica al final de
+  // ella, así que ese camino sigue funcionando; RESTRICT lo rompería por
+  // verificarse de inmediato. Borrar un padre suelto sí falla: la UI
+  // descarta con status = 'descartado' en vez de borrar.
   origenPorOrg: foreignKey({
     columns: [t.sourceSlotId, t.organizationId],
     foreignColumns: [t.id, t.organizationId],
     name: 'plan_slots_source_org_fk',
-  }).onDelete('cascade'),
+  }),
 }))
 
 export const pipelineRuns = pgTable('pipeline_runs', {
