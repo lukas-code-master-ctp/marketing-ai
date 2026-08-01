@@ -2,6 +2,7 @@ import { ClienteDeMuestra } from '@gc/ai'
 import { PERFIL_VALIDO } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { validarMes } from '@gc/strategy'
 import { isNotNull } from 'drizzle-orm'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -68,9 +69,17 @@ describe('marcha en seco de punta a punta', () => {
       const organizationId = await resolverOrganizacion(db, { env: {} })
       await crearMarca(db, organizationId, { slug: 'parcelas', nombre: 'Compra Tu Parcela' })
 
-      await expect(
-        verGrilla(db, organizationId, { slug: 'parcelas', mes: '2026-13' }),
-      ).rejects.toMatchObject({ clase: 'permanente' })
+      const error = await verGrilla(db, organizationId, {
+        slug: 'parcelas', mes: '2026-13',
+      }).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+
+      // El mensaje es el de `validarMes`, no una copia: si `grilla:ver` se
+      // quedara con su propio formato, ampliar el aceptado en un comando haría
+      // que el otro rechazara nombrando el formato que el usuario acaba de
+      // escribir.
+      expect(() => validarMes('2026-13')).toThrow((error as Error).message)
     })
   })
 })

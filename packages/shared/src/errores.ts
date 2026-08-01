@@ -51,6 +51,22 @@ export function clasificarPostgres(codigo: string): ClaseDeError {
   return CODIGOS_TRANSITORIOS.has(codigo) ? 'transitorio' : 'permanente'
 }
 
+const VIOLACION_DE_UNICA = '23505'
+
+/**
+ * Vive junto a `clasificarPostgres` porque es el mismo trabajo: mirar el
+ * `code` de un error del driver. Tenerlo aquí evita que quien necesite el
+ * 23503 mañana encuentre dos precedentes que se contradicen y agregue un
+ * tercer literal en otro archivo.
+ */
+export function esViolacionDeUnica(e: unknown): boolean {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    (e as { code?: unknown }).code === VIOLACION_DE_UNICA
+  )
+}
+
 /**
  * Único punto de clasificación del sistema. El motor de pipeline decide aquí
  * si reintentar, así que cubrir este camino cubre toda llamada a la base del

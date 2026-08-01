@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { trimestreDe, validarPeriodo } from './periodos.js'
+import { trimestreDe, validarMes, validarPeriodo } from './periodos.js'
 
 describe('trimestreDe', () => {
   it.each([
@@ -21,6 +21,31 @@ describe('trimestreDe', () => {
       expect(() => trimestreDe(mes)).toThrow(/mes inválido/i)
     },
   )
+})
+
+describe('validarMes', () => {
+  it.each(['2026-01', '2026-09', '2026-12', '2030-06'])('acepta %s y lo devuelve', (mes) => {
+    expect(validarMes(mes)).toBe(mes)
+  })
+
+  it.each(['2026', '2026-13', '2026-00', '2026-9', '2026-1', 'septiembre', ''])(
+    'rechaza %s',
+    (mes) => {
+      expect(() => validarMes(mes)).toThrow(/mes inválido/i)
+    },
+  )
+
+  it('es la validación que usa trimestreDe, no una copia', () => {
+    const deValidarMes = (() => {
+      try {
+        validarMes('2026-13')
+      } catch (e) {
+        return (e as Error).message
+      }
+      return ''
+    })()
+    expect(() => trimestreDe('2026-13')).toThrow(deValidarMes)
+  })
 })
 
 describe('validarPeriodo', () => {

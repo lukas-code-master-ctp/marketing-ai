@@ -6,6 +6,7 @@ import {
   clasificarHttp,
   clasificarPostgres,
   esTransitorio,
+  esViolacionDeUnica,
   permanente,
   transitorio,
 } from './errores.js'
@@ -70,6 +71,22 @@ describe('clasificarPostgres', () => {
 
   it('no clasifica por familia: 08999 no es transitorio solo por empezar con 08', () => {
     expect(clasificarPostgres('08999')).toBe('permanente')
+  })
+})
+
+describe('esViolacionDeUnica', () => {
+  it('reconoce el 23505 y ningún otro código', () => {
+    expect(esViolacionDeUnica(Object.assign(new Error('duplicate key'), { code: '23505' }))).toBe(true)
+    expect(esViolacionDeUnica(Object.assign(new Error('foránea'), { code: '23503' }))).toBe(false)
+    expect(esViolacionDeUnica(Object.assign(new Error('check'), { code: '23514' }))).toBe(false)
+  })
+
+  it('no confunde con lo que no trae código de Postgres', () => {
+    expect(esViolacionDeUnica(new Error('sin código'))).toBe(false)
+    expect(esViolacionDeUnica('23505')).toBe(false)
+    expect(esViolacionDeUnica({ code: 23505 })).toBe(false)
+    expect(esViolacionDeUnica(null)).toBe(false)
+    expect(esViolacionDeUnica(undefined)).toBe(false)
   })
 })
 

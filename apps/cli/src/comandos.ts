@@ -2,14 +2,15 @@ import type { ClienteLlm } from '@gc/ai'
 import { guardarPerfil } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { permanente } from '@gc/shared'
-import { crearFlujoEstrategia, crearFlujoGrilla, type SalidaP1, type SalidaP2 } from '@gc/strategy'
+import { esViolacionDeUnica, permanente } from '@gc/shared'
+import {
+  crearFlujoEstrategia, crearFlujoGrilla, validarMes, type SalidaP1, type SalidaP2,
+} from '@gc/strategy'
 import { and, asc, eq, gte, lt } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 
 const ORGANIZACION_POR_DEFECTO = 'Principal'
 const SLUG_POR_DEFECTO = 'principal'
-const VIOLACION_DE_UNICA = '23505'
 
 export interface ReferenciaResuelta {
   organizationId: string
@@ -60,14 +61,6 @@ export async function resolverOrganizacion(
   throw permanente(
     `Hay ${todas.length} organizaciones y no indicaste cuál. Usa --org o la ` +
       `variable ORGANIZACION. Disponibles: ${todas.map((o) => o.slug).join(', ')}`,
-  )
-}
-
-function esViolacionDeUnica(e: unknown): boolean {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    (e as { code?: unknown }).code === VIOLACION_DE_UNICA
   )
 }
 
@@ -164,8 +157,6 @@ export async function generarGrilla(
   return r.salida as SalidaP2
 }
 
-const MES_VALIDO = /^\d{4}-(0[1-9]|1[0-2])$/
-
 export interface FilaDeGrilla {
   fecha: string
   canal: string
@@ -182,11 +173,10 @@ export async function verGrilla(
 ): Promise<FilaDeGrilla[]> {
   const ref = await resolverMarca(db, organizationId, args.slug)
 
-  // Sin esta validación un mes mal escrito produce fechas Invalid Date y el
-  // usuario recibe un error del driver en vez de saber qué escribió mal.
-  if (!MES_VALIDO.test(args.mes)) {
-    throw permanente(`Mes inválido "${args.mes}": se espera el formato AAAA-MM`)
-  }
+  // La misma validación que usa `trimestreDe` en `grilla:generar`: dos copias
+  // del formato eran dos maneras de que un comando aceptara lo que el otro
+  // rechaza.
+  validarMes(args.mes)
 
   const [anio, mes] = args.mes.split('-').map(Number)
   const desde = new Date(Date.UTC(anio!, mes! - 1, 1))
