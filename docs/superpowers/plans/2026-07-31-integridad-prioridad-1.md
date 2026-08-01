@@ -1307,7 +1307,7 @@ git add -A && git commit -m "feat: P2 exige la estrategia del trimestre y P1 val
 | §5 Validación del formato de periodo | 5 | Cubierto |
 | §6 Pruebas enumeradas | 1–5 | Cubiertas todas |
 
-**Fuera de alcance, sigue registrado en [pendientes](../specs/2026-07-31-pendientes-tras-fase-0.md):** la tabla de precios de respaldo, los descartes silenciosos de `expandirDerivados`, las dos listas que se sincronizan a mano entre `validacion.ts` y `derivados.ts`, la validación de `--mes` en `grilla:generar`, y el `hashDePrompt` que no distingue los dos intentos de un ciclo de reparación.
+**Fuera de alcance, sigue registrado en [pendientes](../specs/pendientes.md):** la tabla de precios de respaldo, los descartes silenciosos de `expandirDerivados`, las dos listas que se sincronizan a mano entre `validacion.ts` y `derivados.ts`, la validación de `--mes` en `grilla:generar`, y el `hashDePrompt` que no distingue los dos intentos de un ciclo de reparación.
 
 ## Siguiente plan
 
