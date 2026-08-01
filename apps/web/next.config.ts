@@ -28,14 +28,33 @@ const nextConfig: NextConfig = {
   // estándar de Node/ESM para ubicar un archivo junto al módulo. El parser
   // de webpack intercepta ese patrón `new URL()` como una importación de
   // asset y lo reemplaza por su propia clase URL, que no es la de Node:
-  // fileURLToPath la rechaza. Desactivar esa interpretación especial deja
-  // el `new URL()` como código en tiempo de ejecución, que es lo que
-  // @gc/strategy espera.
+  // fileURLToPath la rechaza.
+  //
+  // Desactivar esa interpretación deja el `new URL()` como código en tiempo
+  // de ejecución, que es lo que @gc/strategy espera — pero solo para los
+  // archivos de ese paquete. Un `parser.javascript.url = false` global
+  // apagaría el manejo de assets de webpack para cualquier `new URL()` en
+  // toda la app y en el resto de los paquetes transpilados, incluyendo usos
+  // legítimos futuros (imágenes, fuentes) que si dependieran de esa
+  // interpretación.
+  //
+  // Aviso para quien despliegue esto: dejar el `new URL()` como código
+  // significa que `fileURLToPath` corre en tiempo de ejecución con la ruta
+  // absoluta de la máquina donde vive el checkout — funciona en desarrollo
+  // local y en cualquier build hecho y ejecutado en la misma máquina/imagen,
+  // pero si el build se genera en una máquina y el resultado se copia o
+  // despliega en otra con una ruta de proyecto distinta, la ruta absoluta
+  // ya no existe y `readFile(RUTA_PROMPT)` falla con ENOENT.
   webpack: (webpackConfig) => {
-    webpackConfig.module.parser = {
-      ...webpackConfig.module.parser,
-      javascript: { ...webpackConfig.module.parser?.javascript, url: false },
-    }
+    webpackConfig.module.rules.push({
+      test: /\.ts$/,
+      include: fileURLToPath(new URL('../../packages/strategy/src', import.meta.url)),
+      // A nivel de Rule las opciones del parser van sin el envoltorio
+      // `javascript:` que sí usa `module.parser` (ese envoltorio es para
+      // configurar por tipo de módulo a nivel global); aquí el tipo ya lo
+      // decide la regla que matchea el recurso.
+      parser: { url: false },
+    })
     return webpackConfig
   },
 }

@@ -2,17 +2,24 @@ import { crearConexion, esquema, type BaseDeDatos } from '@gc/db'
 import { resolverOrganizacion } from '@gc/operaciones'
 import { asc, eq } from 'drizzle-orm'
 
-let cache: BaseDeDatos | undefined
+/**
+ * Next.js reejecuta módulos entre peticiones en desarrollo; una conexión por
+ * petición agotaría el pool en minutos. Una variable de módulo normal no
+ * alcanza: cada hot reload invalida y reejecuta el módulo, perdiendo la
+ * referencia al pool anterior sin cerrarlo — el pool viejo (`max: 5`) queda
+ * abierto y cada recarga suma otras 5 conexiones hacia el límite de
+ * Postgres. Guardar el pool en `globalThis` sobrevive a la reejecución del
+ * módulo; es el workaround estándar para este patrón en Next dev.
+ */
+const cacheGlobal = globalThis as unknown as { __gcDb__?: BaseDeDatos }
 
-/** Next.js reejecuta módulos entre peticiones en desarrollo; una conexión por
- *  petición agotaría el pool en minutos. */
 export function conexion(): BaseDeDatos {
-  if (!cache) {
+  if (!cacheGlobal.__gcDb__) {
     const url = process.env.DATABASE_URL
     if (!url) throw new Error('Falta DATABASE_URL')
-    cache = crearConexion(url).db
+    cacheGlobal.__gcDb__ = crearConexion(url).db
   }
-  return cache
+  return cacheGlobal.__gcDb__
 }
 
 export interface MarcaListada {

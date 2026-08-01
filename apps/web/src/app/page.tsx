@@ -1,6 +1,10 @@
 import { redirect } from 'next/navigation'
 import { conexion, marcasDeLaOrganizacion, organizacionPorDefecto } from '../datos.js'
 
+// Sin esto Next prerenderiza la ruta y congela el mes y la marca en el momento
+// del build: despliegas en agosto y en septiembre sigue redirigiendo a agosto.
+export const dynamic = 'force-dynamic'
+
 export default async function Inicio() {
   const db = conexion()
   const marcas = await marcasDeLaOrganizacion(db, await organizacionPorDefecto(db))
