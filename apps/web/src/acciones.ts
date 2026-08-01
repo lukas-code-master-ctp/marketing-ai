@@ -3,7 +3,7 @@
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
 import { conexion, organizacionPorDefecto } from './datos.js'
-import { aprobarGrilla, descartarSlot, editarSlot } from '@gc/operaciones'
+import { aprobarGrilla, cargarPerfilDeObjeto, descartarSlot, editarSlot } from '@gc/operaciones'
 
 export type Resultado = { ok: true } | { ok: false; mensaje: string; reintentable: boolean }
 
@@ -60,4 +60,29 @@ export async function aprobarGrillaAccion(
   return ejecutar(`/${marca}/grilla/${mes}`, (db, organizationId) =>
     aprobarGrilla(db, organizationId, contentPlanId),
   )
+}
+
+/**
+ * El JSON se parsea antes de tocar la base: un error de sintaxis nunca llega
+ * a `cargarPerfilDeObjeto`. Si parsea, esa función ya valida con
+ * `validarPerfil` y ya crea una versión nueva — un perfil que no cumple sus
+ * reglas (proporciones que no suman 1, un pilar que no es snake_case, etc.)
+ * vuelve como error `permanente` con el detalle de cuál regla falló, y ese
+ * mensaje es el que ve el usuario tal cual.
+ */
+export async function guardarPerfilAction(slug: string, textoJson: string): Promise<Resultado> {
+  let perfil: unknown
+  try {
+    perfil = JSON.parse(textoJson)
+  } catch (error) {
+    return {
+      ok: false,
+      mensaje: `El texto no es JSON válido: ${error instanceof Error ? error.message : String(error)}`,
+      reintentable: false,
+    }
+  }
+
+  return ejecutar(`/${slug}/perfil`, async (db, organizationId) => {
+    await cargarPerfilDeObjeto(db, organizationId, { slug, perfil })
+  })
 }
