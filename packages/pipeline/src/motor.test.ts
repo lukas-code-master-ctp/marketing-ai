@@ -326,6 +326,64 @@ describe('ejecutarFlujo', () => {
     })
   })
 
+  it('reintenta el error transitorio aunque no pueda anotar el intento', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let llamadas = 0
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, unknown>({
+            nombre: 'conexion_caida',
+            ejecutar: async () => {
+              llamadas++
+              // 08006: exactamente uno de los códigos que se agregaron para
+              // que un Postgres reiniciándose se reintentara.
+              throw Object.assign(new Error('connection failure'), { code: '08006' })
+            },
+          }),
+        ],
+      }
+
+      // La misma base caída que hace fallar al paso hace fallar al UPDATE que
+      // lleva la cuenta del intento.
+      await db.execute(sql`
+        create or replace function gc_romper_pasos() returns trigger
+        language plpgsql as $$ begin raise exception 'caída simulada al anotar el intento'; end; $$
+      `)
+      await db.execute(sql`
+        create trigger gc_romper_pasos before update on pipeline_steps
+        for each row execute function gc_romper_pasos()
+      `)
+
+      const trazas: string[] = []
+      const errores = vi
+        .spyOn(console, 'error')
+        .mockImplementation((...args: unknown[]) => void trazas.push(args.map(String).join(' ')))
+      let error: unknown
+      try {
+        error = await ejecutarFlujo(db, flujo, {}, { organizationId }, {
+          ...SIN_ESPERA, maxIntentos: 3,
+        }).catch((e: unknown) => e)
+      } finally {
+        await db.execute(sql`drop trigger if exists gc_romper_pasos on pipeline_steps`)
+        await db.execute(sql`drop function if exists gc_romper_pasos()`)
+        errores.mockRestore()
+      }
+
+      // Sin la guarda, el error de la contabilidad reemplaza al del paso: pierde
+      // su clasificación, el motor lo lee como permanente y los reintentos que
+      // 08006 existe para provocar nunca ocurren.
+      expect(llamadas).toBe(3)
+      expect(error).toMatchObject({ code: '08006' })
+      expect((error as Error).message).not.toContain('caída simulada')
+
+      // Un intento perdido por cada vuelta, y ninguno en silencio.
+      expect(trazas).toHaveLength(3)
+      expect(trazas[0]).toContain('caída simulada al anotar el intento')
+    })
+  })
+
   it('reintenta un fallo de serialización de Postgres y no una violación de única', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const organizationId = await sembrarOrg(db)
