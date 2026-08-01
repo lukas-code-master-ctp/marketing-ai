@@ -411,4 +411,54 @@ describe('flujo P2 · grilla', () => {
       expect(plan!.strategyId).toBe(q3!.id)
     })
   })
+
+  it('reintentar tras un fallo al persistir no vuelve a llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      // El cliente trae una sola respuesta: si el modelo se llamara dos veces,
+      // ClienteFalso lanzaría permanente por quedarse sin respuestas.
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+
+      // Un trigger que revienta el primer INSERT en plan_slots con un código
+      // transitorio, y se desactiva solo para que el reintento pase. El
+      // contador vive en una secuencia y no en una tabla: `persistir` hace
+      // todo en una transacción, así que una bandera de tabla se revertiría
+      // con el mismo rollback que provoca el fallo y jamás se desarmaría.
+      // `nextval` no es transaccional, así que sí sobrevive.
+      await db.execute(sql`
+        create sequence if not exists fallo_una_vez_seq;
+        select setval('fallo_una_vez_seq', 1, false);
+        create or replace function romper_una_vez() returns trigger as $$
+        begin
+          if nextval('fallo_una_vez_seq') = 1 then
+            raise exception 'conexión perdida' using errcode = '08006';
+          end if;
+          return new;
+        end $$ language plpgsql;
+        create trigger t_romper before insert on plan_slots
+          for each row execute function romper_una_vez();
+      `)
+
+      try {
+        const r = await ejecutarFlujo(
+          db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref,
+          { dormir: async () => {}, aleatorio: () => 0 },
+        )
+
+        expect(r.estado).toBe('completado')
+        // Lo que prueba la tarea: una sola llamada al modelo pese al reintento.
+        expect(cliente.peticiones).toHaveLength(1)
+        expect(await db.select().from(esquema.aiCalls)).toHaveLength(1)
+        expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
+      } finally {
+        await db.execute(sql`
+          drop trigger if exists t_romper on plan_slots;
+          drop function if exists romper_una_vez();
+          drop sequence if exists fallo_una_vez_seq;
+        `)
+      }
+    })
+  })
 })

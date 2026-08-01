@@ -2,7 +2,7 @@ import {
   crearRegistrador, definirTarea, ejecutarTarea, exigirPresupuesto,
   type MensajeLlm,
 } from '@gc/ai'
-import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
+import { cargarPerfilVigente, contextoDeMarca, type TipoPerfilDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
@@ -36,8 +36,20 @@ export interface SalidaP2 {
   avisos: Problema[]
 }
 
+/** Lo que el paso del modelo le entrega al de persistencia. El perfil y la
+ *  estrategia viajan inline: son JSON de todos modos, y así el segundo paso
+ *  no vuelve a consultarlos ni puede leer una versión distinta. */
+interface SalidaDeLaPropuesta {
+  brandId: string
+  mes: string
+  strategyId: string
+  slots: TipoSlotPropuesto[]
+  estrategia: TipoEstrategia
+  perfil: TipoPerfilDeMarca
+}
+
 export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
-  const paso = definirPaso<EntradaP2, SalidaP2>({
+  const pasoProponer = definirPaso<EntradaP2, SalidaDeLaPropuesta>({
     nombre: 'proponer_grilla',
     ejecutar: async (entrada, ctx) => {
       // Se consulta el estado antes del presupuesto y de cualquier llamada al
@@ -117,13 +129,29 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
         ]
       }
 
-      const derivados = expandirDerivados(slots, estrategia, entrada.mes)
+      return {
+        brandId: entrada.brandId,
+        mes: entrada.mes,
+        strategyId,
+        slots,
+        estrategia,
+        perfil,
+      }
+    },
+  })
+
+  const pasoPersistir = definirPaso<SalidaDeLaPropuesta, SalidaP2>({
+    nombre: 'persistir_grilla',
+    ejecutar: async (entrada, ctx) => {
+      const { mes, estrategia, perfil, slots, strategyId } = entrada
+
+      const derivados = expandirDerivados(slots, estrategia, mes)
 
       // La grilla que se guarda es la expandida, no la que propuso el modelo:
       // se vuelve a validar sobre ella para que los avisos de cadencia y de
       // pilares describan lo que de verdad queda en la base.
       const problemasFinales = validarGrilla([...slots, ...derivados], {
-        mes: entrada.mes,
+        mes,
         perfil,
         estrategia,
       })
@@ -151,7 +179,7 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
     },
   })
 
-  return { nombre: 'p2_grilla', pasos: [paso] }
+  return { nombre: 'p2_grilla', pasos: [pasoProponer, pasoPersistir] }
 }
 
 async function cargarEstrategiaVigente(
