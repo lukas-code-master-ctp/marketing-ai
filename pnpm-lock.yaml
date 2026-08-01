@@ -26,28 +26,25 @@ importers:
       '@gc/ai':
         specifier: workspace:*
         version: link:../../packages/ai
-      '@gc/brand':
-        specifier: workspace:*
-        version: link:../../packages/brand
       '@gc/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@gc/pipeline':
+      '@gc/operaciones':
         specifier: workspace:*
-        version: link:../../packages/pipeline
-      '@gc/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@gc/strategy':
-        specifier: workspace:*
-        version: link:../../packages/strategy
+        version: link:../../packages/operaciones
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
+    devDependencies:
+      '@gc/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
+      '@gc/strategy':
+        specifier: workspace:*
+        version: link:../../packages/strategy
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(postgres@3.4.9)
-    devDependencies:
       tsx:
         specifier: ^4.19.1
         version: 4.23.1
@@ -100,6 +97,30 @@ importers:
       drizzle-kit:
         specifier: ^0.28.0
         version: 0.28.1
+
+  packages/operaciones:
+    dependencies:
+      '@gc/ai':
+        specifier: workspace:*
+        version: link:../ai
+      '@gc/brand':
+        specifier: workspace:*
+        version: link:../brand
+      '@gc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@gc/pipeline':
+        specifier: workspace:*
+        version: link:../pipeline
+      '@gc/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@gc/strategy':
+        specifier: workspace:*
+        version: link:../strategy
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(postgres@3.4.9)
 
   packages/pipeline:
     dependencies:

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   cargarPerfilDeObjeto, crearMarca, generarEstrategia, generarGrilla, resolverOrganizacion, verGrilla,
-} from './comandos.js'
+} from '@gc/operaciones'
 
 const MUESTRAS = fileURLToPath(new URL('../../../packages/strategy/muestras', import.meta.url))
 const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }

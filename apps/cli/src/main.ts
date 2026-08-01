@@ -4,7 +4,7 @@ import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
 import {
   cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, resolverOrganizacion, verGrilla,
-} from './comandos.js'
+} from '@gc/operaciones'
 
 const AYUDA = `
 Uso: pnpm cli <comando> [opciones]
