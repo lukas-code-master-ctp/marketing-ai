@@ -60,11 +60,11 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
         throw grillaNoRegenerable(entrada, estadoPrevio)
       }
 
-      await exigirPresupuesto(ctx.db, entrada.brandId, new Date())
+      await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
-      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId)
+      const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId, ctx.brandSlug)
       const { id: strategyId, estrategia } = await cargarEstrategiaVigente(
-        ctx.db, entrada.brandId, entrada.mes,
+        ctx.db, entrada.brandId, entrada.mes, ctx.brandSlug,
       )
       const instrucciones = await readFile(RUTA_PROMPT, 'utf8')
 
@@ -186,6 +186,7 @@ async function cargarEstrategiaVigente(
   db: BaseDeDatos,
   brandId: string,
   mes: string,
+  nombreVisible?: string,
 ): Promise<{ id: string; estrategia: TipoEstrategia }> {
   const periodo = trimestreDe(mes)
 
@@ -204,7 +205,7 @@ async function cargarEstrategiaVigente(
 
   if (!fila) {
     throw permanente(
-      `La marca ${brandId} no tiene estrategia vigente para ${periodo}. ` +
+      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${periodo}. ` +
         `Genérala antes de la grilla de ${mes}.`,
     )
   }

@@ -51,6 +51,18 @@ describe('repositorio de perfiles', () => {
     })
   })
 
+  it('nombra la marca por su nombre visible cuando se le da uno', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      const error = await cargarPerfilVigente(db, ref.brandId, 'parcelas')
+        .catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(ref.brandId)
+    })
+  })
+
   it('falla de forma permanente si la marca no existe', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)

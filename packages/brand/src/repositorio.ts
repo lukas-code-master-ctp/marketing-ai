@@ -55,6 +55,7 @@ export async function guardarPerfil(
 export async function cargarPerfilVigente(
   db: BaseDeDatos,
   brandId: string,
+  nombreVisible?: string,
 ): Promise<PerfilVigente> {
   const [fila] = await db
     .select()
@@ -63,7 +64,7 @@ export async function cargarPerfilVigente(
     .orderBy(desc(esquema.brandProfiles.version))
     .limit(1)
 
-  if (!fila) throw permanente(`La marca ${brandId} no tiene perfil cargado`)
+  if (!fila) throw permanente(`La marca ${nombreVisible ?? brandId} no tiene perfil cargado`)
 
   return { version: fila.version, perfil: validarPerfil(fila.data) }
 }
