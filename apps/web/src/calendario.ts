@@ -1,0 +1,65 @@
+import { validarMes } from '@gc/strategy'
+
+const DIA_EN_MS = 24 * 60 * 60 * 1000
+
+function aFecha(anio: number, mes: number, dia: number): Date {
+  return new Date(Date.UTC(anio, mes - 1, dia))
+}
+
+function comoISO(fecha: Date): string {
+  return fecha.toISOString().slice(0, 10)
+}
+
+/**
+ * Devuelve el mes partido en semanas de siete días AAAA-MM-DD, empezando en
+ * lunes, con los días de relleno de los meses vecinos que hagan falta para
+ * completar la primera y la última semana. Todo en UTC, como el resto del
+ * sistema.
+ */
+export function semanasDelMes(mes: string): string[][] {
+  validarMes(mes)
+  const [anioStr, mesStr] = mes.split('-')
+  const anio = Number(anioStr)
+  const numeroMes = Number(mesStr)
+
+  const primerDia = aFecha(anio, numeroMes, 1)
+  const ultimoDia = aFecha(anio, numeroMes + 1, 0)
+
+  // getUTCDay(): 0 = domingo … 6 = sábado. Distancia hasta el lunes anterior
+  // o igual, tratando el domingo como 7 para que el lunes quede en 0.
+  const diaDeLaSemana = (primerDia.getUTCDay() + 6) % 7
+  const inicio = new Date(primerDia.getTime() - diaDeLaSemana * DIA_EN_MS)
+
+  const semanas: string[][] = []
+  let cursor = inicio
+  while (cursor.getTime() <= ultimoDia.getTime()) {
+    const semana: string[] = []
+    for (let i = 0; i < 7; i++) {
+      semana.push(comoISO(new Date(cursor.getTime() + i * DIA_EN_MS)))
+    }
+    semanas.push(semana)
+    cursor = new Date(cursor.getTime() + 7 * DIA_EN_MS)
+  }
+
+  return semanas
+}
+
+function desplazarMes(mes: string, delta: number): string {
+  validarMes(mes)
+  const [anioStr, mesStr] = mes.split('-')
+  const anio = Number(anioStr)
+  const numeroMes = Number(mesStr)
+
+  const fecha = new Date(Date.UTC(anio, numeroMes - 1 + delta, 1))
+  const anioResultado = fecha.getUTCFullYear()
+  const mesResultado = String(fecha.getUTCMonth() + 1).padStart(2, '0')
+  return `${anioResultado}-${mesResultado}`
+}
+
+export function mesAnterior(mes: string): string {
+  return desplazarMes(mes, -1)
+}
+
+export function mesSiguiente(mes: string): string {
+  return desplazarMes(mes, 1)
+}

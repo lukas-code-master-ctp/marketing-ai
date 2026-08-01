@@ -11,15 +11,25 @@ import type { MarcaListada } from '../datos.js'
  */
 export function SelectorDeMarca({ marcas }: { marcas: MarcaListada[] }) {
   const pathname = usePathname()
-  const resto = pathname.split('/').filter(Boolean).slice(1)
+  const partes = pathname.split('/').filter(Boolean)
+  const marcaActiva = partes[0]
+  const resto = partes.slice(1)
 
   return (
     <nav className="flex gap-4">
-      {marcas.map((marca) => (
-        <Link key={marca.id} href={`/${[marca.slug, ...resto].join('/')}`}>
-          {marca.name}
-        </Link>
-      ))}
+      {marcas.map((marca) => {
+        const activa = marca.slug === marcaActiva
+        return (
+          <Link
+            key={marca.id}
+            href={`/${[marca.slug, ...resto].join('/')}`}
+            aria-current={activa ? 'page' : undefined}
+            className={activa ? 'font-semibold text-gray-900' : 'text-gray-500 hover:text-gray-800'}
+          >
+            {marca.name}
+          </Link>
+        )
+      })}
     </nav>
   )
 }
