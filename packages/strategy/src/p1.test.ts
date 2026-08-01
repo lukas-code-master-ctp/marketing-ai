@@ -95,6 +95,25 @@ describe('flujo P1 · estrategia', () => {
     })
   })
 
+  it('nombra la marca por su slug al detenerse por presupuesto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db.insert(esquema.aiCalls).values({
+        organizationId: ref.organizationId, brandId: ref.brandId,
+        task: 't', model: 'm', costUsd: '999.00', promptHash: 'h',
+      })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+
+      const error = await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, period: '2026-Q4' },
+        { ...ref, brandSlug: 'parcelas' }, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(ref.brandId)
+    })
+  })
+
   it('reejecutar el mismo periodo reemplaza la estrategia en borrador', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
