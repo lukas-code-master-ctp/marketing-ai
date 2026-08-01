@@ -73,6 +73,21 @@ describe('repositorio de perfiles', () => {
     })
   })
 
+  it('nombra la marca por su slug cuando falla por marca inexistente', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const inexistente = {
+        ...ref, brandId: '00000000-0000-4000-8000-000000000000', brandSlug: 'parcelas',
+      }
+
+      const error = await guardarPerfil(db, inexistente, PERFIL_VALIDO)
+        .catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(inexistente.brandId)
+    })
+  })
+
   // Verifica el comportamiento correcto bajo concurrencia, pero NO es una
   // prueba de regresión confiable de la carrera: sin el FOR UPDATE también
   // pasa, porque un Postgres local responde antes de que las dos operaciones

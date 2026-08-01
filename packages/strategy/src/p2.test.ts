@@ -281,6 +281,29 @@ describe('flujo P2 · grilla', () => {
     })
   })
 
+  it('rechaza regenerar una grilla aprobada nombrando la marca por su slug', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
+
+      await db
+        .update(esquema.contentPlans)
+        .set({ status: 'aprobada' })
+        .where(eq(esquema.contentPlans.brandId, ref.brandId))
+
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const error = await ejecutarFlujo(
+        db, otro, entrada, { ...ref, brandSlug: 'parcelas' }, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('parcelas')
+      expect((error as Error).message).not.toContain(ref.brandId)
+    })
+  })
+
   it('no destruye la grilla anterior si falla la inserción de los slots', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)

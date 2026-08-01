@@ -57,7 +57,7 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
       // igual, y hoy eso se pagaba con hasta cuatro llamadas primero.
       const estadoPrevio = await estadoDeLaGrilla(ctx.db, entrada.brandId, entrada.mes)
       if (estadoPrevio !== null && estadoPrevio !== 'borrador') {
-        throw grillaNoRegenerable(entrada, estadoPrevio)
+        throw grillaNoRegenerable(entrada, estadoPrevio, ctx.brandSlug)
       }
 
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
@@ -211,7 +211,9 @@ async function cargarEstrategiaVigente(
   }
 
   const r = Estrategia.safeParse(fila.data)
-  if (!r.success) throw permanente(`La estrategia guardada de ${brandId} no valida`)
+  if (!r.success) {
+    throw permanente(`La estrategia guardada de ${nombreVisible ?? brandId} no valida`)
+  }
 
   return { id: fila.id, estrategia: r.data }
 }
@@ -241,9 +243,9 @@ async function estadoDeLaGrilla(
  * estado "archivada" —sus estados son borrador, aprobada, en_ejecucion y
  * cerrada— así que pedir archivar la grilla llevaba a violar el CHECK.
  */
-function grillaNoRegenerable(entrada: EntradaP2, estado: string) {
+function grillaNoRegenerable(entrada: EntradaP2, estado: string, nombreVisible?: string) {
   return permanente(
-    `La grilla de ${entrada.mes} para la marca ${entrada.brandId} está en estado ` +
+    `La grilla de ${entrada.mes} para la marca ${nombreVisible ?? entrada.brandId} está en estado ` +
       `"${estado}" y solo se regenera una que esté en borrador. ` +
       `Devuélvela a "borrador" para regenerarla.`,
   )
@@ -288,7 +290,7 @@ async function persistir(
     // piezas de contenido colgadas de esos slots.
     if (!plan) {
       const estado = await estadoDeLaGrilla(tx, entrada.brandId, entrada.mes)
-      throw grillaNoRegenerable(entrada, estado ?? 'desconocido')
+      throw grillaNoRegenerable(entrada, estado ?? 'desconocido', ctx.brandSlug)
     }
 
     const contentPlanId = plan.id

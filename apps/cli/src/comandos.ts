@@ -98,7 +98,7 @@ export async function crearMarca(
         ...(args.presupuesto !== undefined ? { monthlyBudgetUsd: args.presupuesto } : {}),
       })
       .returning()
-    return { organizationId, brandId: marca!.id }
+    return { organizationId, brandId: marca!.id, brandSlug: args.slug }
   } catch (error) {
     if (esViolacionDeUnica(error)) {
       throw permanente(

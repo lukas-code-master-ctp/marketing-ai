@@ -6,6 +6,7 @@ import { validarPerfil, type TipoPerfilDeMarca } from './perfil.js'
 export interface ReferenciaDeMarca {
   organizationId: string
   brandId: string
+  brandSlug?: string
 }
 
 export interface PerfilVigente {
@@ -32,7 +33,7 @@ export async function guardarPerfil(
       .where(eq(esquema.brands.id, ref.brandId))
       .for('update')
 
-    if (!marca) throw permanente(`No existe la marca ${ref.brandId}`)
+    if (!marca) throw permanente(`No existe la marca ${ref.brandSlug ?? ref.brandId}`)
 
     const [ultimo] = await tx
       .select({ maximo: sql<number | null>`max(${esquema.brandProfiles.version})` })
