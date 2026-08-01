@@ -450,9 +450,13 @@ describe('flujo P2 · grilla', () => {
       // todo en una transacción, así que una bandera de tabla se revertiría
       // con el mismo rollback que provoca el fallo y jamás se desarmaría.
       // `nextval` no es transaccional, así que sí sobrevive.
+      //
+      // Se borra y se vuelve a crear en vez de reutilizarla: una secuencia
+      // recién creada arranca en 1 y no hay que razonar sobre en qué valor
+      // pudo dejarla una corrida anterior.
       await db.execute(sql`
-        create sequence if not exists fallo_una_vez_seq;
-        select setval('fallo_una_vez_seq', 1, false);
+        drop sequence if exists fallo_una_vez_seq;
+        create sequence fallo_una_vez_seq;
         create or replace function romper_una_vez() returns trigger as $$
         begin
           if nextval('fallo_una_vez_seq') = 1 then

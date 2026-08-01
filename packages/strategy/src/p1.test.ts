@@ -221,6 +221,10 @@ describe('flujo P1 · estrategia', () => {
       // revertiría junto con la transacción cuyo fallo provoca, y el trigger
       // dispararía para siempre. `nextval` no es transaccional, así que sí
       // sobrevive al rollback y el reintento pasa.
+      //
+      // Se borra y se vuelve a crear en vez de reutilizarla: una secuencia
+      // recién creada arranca en 1 y no hay que razonar sobre en qué valor
+      // pudo dejarla una corrida anterior.
       await db.execute(sql`
         drop sequence if exists fallo_una_vez_seq;
         create sequence fallo_una_vez_seq;
