@@ -49,6 +49,36 @@ El problema aparece junto con el punto 1: una corrida vieja cuyo primer paso se 
 
 Resueltas en `feat/decisiones-previas-fase-1`. El detalle de cada una queda abajo como registro de por qué se eligió lo que se eligió.
 
+## Prioridad 1 — insumos para el diseño de los bloques 1B y 1C
+
+De la revisión de rama de `feat/app-web-1a`.
+
+### 1. La selección de "estrategia vigente" vive en tres lugares
+
+`cargarEstrategiaVigente` (`@gc/strategy/p2.ts`), `cargarEstrategiaDelTrimestre` (`@gc/operaciones/grilla.ts`) y `estrategiaDelTrimestre` (`@gc/operaciones/perfiles.ts`). Las tres leen la estrategia de un trimestre; las dos primeras excluyen archivadas y la tercera no, deliberadamente, porque muestra en vez de calcular. Los nombres no delatan la diferencia. Una cuarta copia es peor que tres: extraer una sola con la política como parámetro.
+
+### 2. La web no está aislada del modelo por código, solo por convención
+
+`@gc/operaciones` reexporta `flujos.ts` desde su barril, que arrastra `@gc/strategy` y con él `@gc/ai` al proceso del servidor web. Hoy es inofensivo —`@gc/ai` no tiene efectos de módulo— pero la regla "la web nunca llama al modelo" es una línea en un `package.json`, no una garantía.
+
+El arreglo es el patrón que ya se usó al resolver un problema de bundle en esta misma rama: subrutas de exportación. `@gc/operaciones/flujos` para el CLI, y que la web importe solo lo que consume.
+
+### 3. Falta reabrir una grilla desde la web
+
+`grilla:reabrir` existe en el CLI. La bandeja de aprobación de la Fase 1 debería ofrecerlo, porque aprobar deja el mes inmutable y hoy volver atrás exige terminal.
+
+### 4. Lo que el renderizado sin pruebas cuesta, en concreto
+
+Nada verifica, y fallaría en silencio: que las fichas descartadas se lean como descartadas; que cada slot caiga en una celda; que "Reintentar" repita la operación que falló; que el foco entre al diálogo y vuelva al disparador; que el número de versión del perfil sea el recién guardado.
+
+Lo que sí sobrevive sin pruebas de renderizado es todo lo que la capa de dominio revalida por su cuenta. Esa es la línea: las derivaciones del cliente que deciden escrituras deben vivir en funciones puras probadas — como se hizo con `derivadosVigentesDe` — y no en componentes.
+
+### 5. Deuda menor registrada
+
+`EditorDePerfil` lee la versión de props y no del retorno de la acción; `layout.tsx` y `page.tsx` resuelven la organización por separado en cada petición; un GET a `/` puede crear la organización por defecto; los slots fuera de las semanas renderizadas no se muestran pero sí cuentan; el texto editado no tiene cota de longitud; el manifiesto de dependencias de `apps/web` declara `@gc/brand` sin usarlo y omite dos que transpila.
+
+---
+
 ## Prioridad 1 — decidido, implementado
 
 Las tres decisiones se cerraron el 2026-07-31. Lo que sigue es el enfoque acordado, con el detalle técnico que la implementación necesita.

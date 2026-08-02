@@ -3,7 +3,9 @@ import { PERFIL_VALIDO } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { describe, expect, it } from 'vitest'
-import { cargarPerfilDeObjeto, crearMarca, generarGrilla, resolverOrganizacion } from './comandos.js'
+import { crearMarca, resolverOrganizacion } from './marcas.js'
+import { cargarPerfilDeObjeto } from './perfiles.js'
+import { generarGrilla } from './flujos.js'
 
 const SIN_ENV = {}
 
