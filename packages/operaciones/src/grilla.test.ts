@@ -1,7 +1,9 @@
+import { PERFIL_VALIDO } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { cargarPerfilDeObjeto } from './perfiles.js'
 import {
   aprobarGrilla, descartarSlot, editarSlot, grillaDelMes, reabrirGrilla,
 } from './grilla.js'
@@ -16,7 +18,7 @@ describe('grillaDelMes', () => {
       expect(g.contentPlanId).toBeNull()
       expect(g.estado).toBeNull()
       expect(g.slots).toEqual([])
-      expect(g.avisos).toEqual([])
+      expect(g.problemas).toEqual([])
     })
   })
 
@@ -96,13 +98,75 @@ describe('grillaDelMes', () => {
 
       const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
 
-      const cadenciaBlogAntes = antes.avisos.filter(
+      const cadenciaBlogAntes = antes.problemas.filter(
         (a) => a.regla === 'cadencia' && a.detalle.includes('blog'),
       )
-      const cadenciaBlogDespues = despues.avisos.filter(
+      const cadenciaBlogDespues = despues.problemas.filter(
         (a) => a.regla === 'cadencia' && a.detalle.includes('blog'),
       )
       expect(cadenciaBlogDespues.length).toBeGreaterThan(cadenciaBlogAntes.length)
+    })
+  })
+
+  it('devuelve los bloqueantes, no solo los avisos', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      expect(
+        (await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')).problemas
+          .some((p) => p.severidad === 'bloqueante'),
+      ).toBe(false)
+
+      // Renombrar un pilar es una edición legal y validada del perfil, y deja
+      // a todos los slots que lo usaban con `pilar_desconocido`: un problema
+      // bloqueante alcanzable desde la propia interfaz. Filtrarlo dejaba la
+      // pantalla mostrando solo el síntoma —los avisos de distribución de los
+      // pilares nuevos— y tirando el diagnóstico.
+      await cargarPerfilDeObjeto(db, ref.organizationId, {
+        slug: 'parcelas',
+        perfil: {
+          ...PERFIL_VALIDO,
+          pilares: [
+            { nombre: 'formacion', descripcion: 'Cómo evaluar una parcela', proporcion: 0.4 },
+            { nombre: 'confianza', descripcion: 'Casos y respaldo legal', proporcion: 0.35 },
+            { nombre: 'producto', descripcion: 'Proyectos disponibles', proporcion: 0.25 },
+          ],
+        },
+      })
+
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const bloqueantes = g.problemas.filter((p) => p.severidad === 'bloqueante')
+      expect(bloqueantes.length).toBeGreaterThan(0)
+      expect(bloqueantes.every((p) => p.regla === 'pilar_desconocido')).toBe(true)
+      expect(g.problemas.some((p) => p.severidad === 'aviso')).toBe(true)
+    })
+  })
+
+  it('distingue "no hay estrategia" de "la estrategia guardada no valida"', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+
+      // Sin estrategia del trimestre no hay contra qué recalcular y la grilla
+      // igual debe verse: nada que reportar.
+      await db.delete(esquema.strategies).where(eq(esquema.strategies.brandId, ref.brandId))
+      const sinEstrategia = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(sinEstrategia.slots).toHaveLength(12)
+      expect(sinEstrategia.problemas).toEqual([])
+
+      // Con una estrategia guardada que no valida, en cambio, hay corrupción
+      // de datos y la pantalla tiene que decirlo, no callar.
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q3',
+        brandProfileVersion: 1,
+        data: { objetivos: 'esto no es una estrategia' },
+      })
+
+      const corrupta = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(corrupta.slots).toHaveLength(12)
+      expect(corrupta.problemas).toHaveLength(1)
+      expect(corrupta.problemas[0]!.severidad).toBe('bloqueante')
+      expect(corrupta.problemas[0]!.detalle).toContain('2026-Q3')
     })
   })
 })

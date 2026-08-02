@@ -1,4 +1,4 @@
-import { cargarPerfilVigente } from '@gc/brand'
+import { cargarPerfilVigente, type TipoPerfilDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos, type Canal } from '@gc/db'
 import { ErrorDeDominio, permanente } from '@gc/shared'
 import {
@@ -29,19 +29,28 @@ export interface GrillaDelMes {
   estado: EstadoDeGrilla | null
   slots: SlotDeLaGrilla[]
   porCanal: Record<string, number>
-  avisos: Problema[]
+  /**
+   * Todos los problemas de `validarGrilla`, bloqueantes incluidos. Se llamaba
+   * `avisos` y filtraba `severidad === 'aviso'`: eso calzaba con el
+   * especificado original, pero desde que el perfil se edita en la web los
+   * bloqueantes son alcanzables —renombrar un pilar deja a sus slots con
+   * `pilar_desconocido`— y descartarlos dejaba la pantalla mostrando el
+   * síntoma y tirando el diagnóstico.
+   */
+  problemas: Problema[]
 }
 
 /**
- * Lee la grilla del mes tal como quedó persistida y recalcula sus avisos
- * (cadencia, distribución de pilares) sobre los slots que siguen vigentes.
+ * Lee la grilla del mes tal como quedó persistida y recalcula sus problemas
+ * (cadencia, distribución de pilares, pilares desconocidos) sobre los slots
+ * que siguen vigentes.
  *
  * Los avisos de `SalidaP2` no se guardan en ninguna tabla: son el resultado
  * de `validarGrilla` en el momento de generar. Un valor persistido quedaría
  * obsoleto en cuanto se descarta un slot, porque eso cambia tanto la cadencia
  * por canal como la distribución entre pilares. Recalcular al leer garantiza
- * que los avisos siempre describan la grilla como está hoy, no como quedó al
- * generarla.
+ * que los problemas siempre describan la grilla como está hoy, no como quedó
+ * al generarla.
  */
 export async function grillaDelMes(
   db: BaseDeDatos,
@@ -63,7 +72,7 @@ export async function grillaDelMes(
 
   // Sin plan no hay grilla ni avisos que calcular: nada que leer.
   if (!plan) {
-    return { contentPlanId: null, estado: null, slots: [], porCanal: {}, avisos: [] }
+    return { contentPlanId: null, estado: null, slots: [], porCanal: {}, problemas: [] }
   }
 
   // `ORDER BY` explícito: el calendario muestra los slots en este orden y
@@ -97,45 +106,67 @@ export async function grillaDelMes(
     porCanal[s.canal] = (porCanal[s.canal] ?? 0) + 1
   }
 
-  const avisos = await recalcularAvisos(db, ref.brandId, ref.brandSlug, mes, slots)
+  const problemas = await recalcularProblemas(db, ref.brandId, ref.brandSlug, mes, slots)
 
-  return { contentPlanId: plan.id, estado: plan.status, slots, porCanal, avisos }
+  return { contentPlanId: plan.id, estado: plan.status, slots, porCanal, problemas }
 }
 
 /**
- * Si la marca no tiene perfil, o no tiene estrategia vigente para el
- * trimestre del mes pedido, esas cargas lanzan `permanente`. Se captura
- * porque una grilla ya generada debe seguir siendo visible aunque la
- * estrategia que la originó haya sido archivada o borrada después: que
- * falte con qué recalcular los avisos no es motivo para esconder la grilla.
+ * Falta de insumos y corrupción de insumos son cosas distintas y se tratan
+ * distinto.
+ *
+ * Que no haya perfil, o que no haya estrategia para el trimestre del mes
+ * pedido, se traga en silencio: una grilla ya generada debe seguir siendo
+ * visible aunque la estrategia que la originó se archivara o se borrara
+ * después, y no tener con qué recalcular no es motivo para esconderla.
+ *
+ * Que la estrategia guardada exista pero no valide contra su esquema NO se
+ * traga: eso es corrupción de datos y antes se presentaba como "nada que
+ * reportar", indistinguible de un mes sano. Ahora sale como un problema
+ * bloqueante que dice exactamente eso.
  */
-async function recalcularAvisos(
+async function recalcularProblemas(
   db: BaseDeDatos,
   brandId: string,
   brandSlug: string | undefined,
   mes: string,
   slots: SlotDeLaGrilla[],
 ): Promise<Problema[]> {
+  let perfil: TipoPerfilDeMarca
   try {
-    const { perfil } = await cargarPerfilVigente(db, brandId, brandSlug)
-    const estrategia = await cargarEstrategiaDelTrimestre(db, brandId, brandSlug, mes)
-
-    const vigentes = slots.filter((s) => !s.descartado)
-    const problemas = validarGrilla(
-      // `canal` sale de la columna `channel` de `plan_slots`, restringida por
-      // CHECK a `Canal`: el cast solo repone en TypeScript lo que Postgres ya
-      // garantiza, porque `SlotDeLaGrilla.canal` se tipa `string` en la interfaz.
-      vigentes.map((s) => ({
-        fecha: s.fecha, hora: s.hora, canal: s.canal as Canal, formato: s.formato,
-        pilar: s.pilar, angulo: s.angulo, brief: s.brief,
-      })),
-      { mes, perfil, estrategia },
-    )
-    return problemas.filter((p) => p.severidad === 'aviso')
+    perfil = (await cargarPerfilVigente(db, brandId, brandSlug)).perfil
   } catch (error) {
     if (error instanceof ErrorDeDominio && error.clase === 'permanente') return []
     throw error
   }
+
+  const lectura = await cargarEstrategiaDelTrimestre(db, brandId, mes)
+  if (lectura.tipo === 'ausente') return []
+  if (lectura.tipo === 'invalida') {
+    return [
+      {
+        severidad: 'bloqueante',
+        regla: 'estrategia_ilegible',
+        detalle:
+          `La estrategia guardada de ${brandSlug ?? brandId} para ${lectura.periodo} no valida ` +
+          `contra su esquema, así que los problemas de esta grilla no se pueden calcular. ` +
+          `Regenérala con "pnpm cli estrategia:generar --marca ${brandSlug ?? brandId} ` +
+          `--periodo ${lectura.periodo}".`,
+      },
+    ]
+  }
+
+  const vigentes = slots.filter((s) => !s.descartado)
+  return validarGrilla(
+    // `canal` sale de la columna `channel` de `plan_slots`, restringida por
+    // CHECK a `Canal`: el cast solo repone en TypeScript lo que Postgres ya
+    // garantiza, porque `SlotDeLaGrilla.canal` se tipa `string` en la interfaz.
+    vigentes.map((s) => ({
+      fecha: s.fecha, hora: s.hora, canal: s.canal as Canal, formato: s.formato,
+      pilar: s.pilar, angulo: s.angulo, brief: s.brief,
+    })),
+    { mes, perfil, estrategia: lectura.estrategia },
+  )
 }
 
 /**
@@ -346,12 +377,27 @@ export async function reabrirGrilla(
   )
 }
 
+type LecturaDeEstrategia =
+  | { tipo: 'ok'; periodo: string; estrategia: TipoEstrategia }
+  | { tipo: 'ausente'; periodo: string }
+  | { tipo: 'invalida'; periodo: string }
+
+/**
+ * ⚠️ No confundir con `estrategiaDelTrimestre` de `perfiles.ts`: mismo
+ * paquete, nombre casi igual, filtrado opuesto. Aquella SÍ devuelve las
+ * archivadas porque alimenta una vista de solo lectura donde el estado se
+ * muestra tal cual; esta las excluye porque alimenta `validarGrilla`, que
+ * debe medir contra la estrategia que rige hoy.
+ *
+ * Devuelve un resultado en vez de lanzar: quien llama necesita distinguir
+ * "no hay" de "hay pero no valida", y con dos `permanente` indistinguibles
+ * no podía.
+ */
 async function cargarEstrategiaDelTrimestre(
   db: BaseDeDatos,
   brandId: string,
-  brandSlug: string | undefined,
   mes: string,
-): Promise<TipoEstrategia> {
+): Promise<LecturaDeEstrategia> {
   const periodo = trimestreDe(mes)
 
   const [fila] = await db
@@ -365,15 +411,9 @@ async function cargarEstrategiaDelTrimestre(
       ),
     )
 
-  if (!fila) {
-    throw permanente(
-      `La marca ${brandSlug ?? brandId} no tiene estrategia vigente para ${periodo}`,
-    )
-  }
+  if (!fila) return { tipo: 'ausente', periodo }
 
   const r = Estrategia.safeParse(fila.data)
-  if (!r.success) {
-    throw permanente(`La estrategia guardada de ${brandSlug ?? brandId} no valida`)
-  }
-  return r.data
+  if (!r.success) return { tipo: 'invalida', periodo }
+  return { tipo: 'ok', periodo, estrategia: r.data }
 }

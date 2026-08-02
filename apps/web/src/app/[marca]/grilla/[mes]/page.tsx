@@ -38,6 +38,9 @@ export default async function PaginaDeGrilla({
   const organizationId = await organizacionPorDefecto(db)
   const grilla = await grillaDelMes(db, organizationId, marca, mes)
 
+  const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
+  const avisos = grilla.problemas.filter((p) => p.severidad === 'aviso')
+
   return (
     <div className="p-6">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -82,9 +85,28 @@ export default async function PaginaDeGrilla({
         </div>
       </header>
 
-      {grilla.avisos.length > 0 && (
+      {/* Bloqueantes y avisos son dos clases distintas de problema y se
+          muestran distinto: un pilar que ya no existe en el perfil rompe la
+          grilla, un desvío de cadencia solo la desafina. Antes los
+          bloqueantes se filtraban antes de llegar aquí. */}
+      {bloqueantes.length > 0 && (
+        <div className="mb-4 rounded border-2 border-red-400 bg-red-50 p-3 text-sm text-red-900">
+          <p className="mb-1 font-semibold">
+            {bloqueantes.length === 1
+              ? 'Esta grilla tiene un problema que hay que resolver'
+              : `Esta grilla tiene ${bloqueantes.length} problemas que hay que resolver`}
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            {bloqueantes.map((p, i) => (
+              <li key={i}>{p.detalle}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {avisos.length > 0 && (
         <ul className="mb-6 space-y-1 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          {grilla.avisos.map((aviso, i) => (
+          {avisos.map((aviso, i) => (
             <li key={i}>{aviso.detalle}</li>
           ))}
         </ul>
