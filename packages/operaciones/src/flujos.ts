@@ -44,6 +44,13 @@ export interface FilaDeGrilla {
   pilar: string
   angulo: string
   derivado: boolean
+  /**
+   * `grilla:ver` listaba los descartados igual que los vigentes porque ni
+   * siquiera seleccionaba la columna, mientras la cabecera de la web sí los
+   * excluía de sus conteos. Dos lectores de `plan_slots` en el mismo paquete
+   * con nociones distintas de lo que hay en la grilla.
+   */
+  descartado: boolean
 }
 
 export async function verGrilla(
@@ -70,6 +77,7 @@ export async function verGrilla(
       pillar: esquema.planSlots.pillar,
       angle: esquema.planSlots.angle,
       sourceSlotId: esquema.planSlots.sourceSlotId,
+      status: esquema.planSlots.status,
     })
     .from(esquema.planSlots)
     .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
@@ -89,5 +97,6 @@ export async function verGrilla(
     pilar: f.pillar,
     angulo: f.angle,
     derivado: f.sourceSlotId !== null,
+    descartado: f.status === 'descartado',
   }))
 }
