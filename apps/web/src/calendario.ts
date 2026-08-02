@@ -1,5 +1,12 @@
 import type { SlotDeLaGrilla } from '@gc/operaciones'
-import { validarMes } from '@gc/strategy'
+// `@gc/strategy/periodos` y no `@gc/strategy`: desde que `derivadosVigentesDe`
+// vive acá, este módulo lo importa `RejillaDelMes`, que es un componente de
+// cliente. El barril del paquete reexporta `p1`/`p2`, que arrastran @gc/ai y
+// @gc/db al bundle del navegador — y ahí `node:crypto` y `net` no existen: el
+// build de Next falla. La subruta trae solo las funciones de periodo, que no
+// dependen de nada de eso. El tipo de `@gc/operaciones` es `import type` y se
+// borra al compilar, así que no arrastra nada.
+import { validarMes } from '@gc/strategy/periodos'
 
 const DIA_EN_MS = 24 * 60 * 60 * 1000
 
