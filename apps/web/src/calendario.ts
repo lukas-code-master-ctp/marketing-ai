@@ -1,3 +1,4 @@
+import type { SlotDeLaGrilla } from '@gc/operaciones'
 import { validarMes } from '@gc/strategy'
 
 const DIA_EN_MS = 24 * 60 * 60 * 1000
@@ -62,4 +63,22 @@ export function mesAnterior(mes: string): string {
 
 export function mesSiguiente(mes: string): string {
   return desplazarMes(mes, 1)
+}
+
+/**
+ * Los derivados vigentes de un slot: los que cuelgan de `idDelPadre` y no
+ * están descartados. Un filtro sobre los slots que la página ya tiene
+ * cargados, sin consulta extra.
+ *
+ * Vive aquí y no dentro de `RejillaDelMes` porque de esta derivación depende
+ * qué filas escribe el flujo de "descartar también los N derivados": con la
+ * comparación invertida, la confirmación cuenta unos slots y descarta otros,
+ * en silencio y sin vuelta atrás. El renderizado sigue sin pruebas por
+ * decisión de diseño; esto no puede seguir ahí adentro.
+ */
+export function derivadosVigentesDe(
+  slots: SlotDeLaGrilla[],
+  idDelPadre: string,
+): SlotDeLaGrilla[] {
+  return slots.filter((s) => s.idDelPadre === idDelPadre && !s.descartado)
 }

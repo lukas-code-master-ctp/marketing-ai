@@ -1,5 +1,6 @@
+import type { SlotDeLaGrilla } from '@gc/operaciones'
 import { describe, expect, it } from 'vitest'
-import { mesAnterior, mesSiguiente, semanasDelMes } from './calendario.js'
+import { derivadosVigentesDe, mesAnterior, mesSiguiente, semanasDelMes } from './calendario.js'
 
 describe('semanasDelMes', () => {
   it('siempre devuelve semanas completas de siete días', () => {
@@ -30,6 +31,52 @@ describe('semanasDelMes', () => {
 
   it('rechaza un mes mal formado', () => {
     expect(() => semanasDelMes('2026-13')).toThrow(/mes inválido/i)
+  })
+})
+
+describe('derivadosVigentesDe', () => {
+  function slot(id: string, idDelPadre: string | null, descartado = false): SlotDeLaGrilla {
+    return {
+      id,
+      fecha: '2026-09-02',
+      hora: '13:00',
+      canal: 'blog',
+      formato: 'articulo',
+      pilar: 'educacion',
+      angulo: 'guía práctica',
+      brief: 'Explicar paso a paso cómo verificar la factibilidad antes de comprar.',
+      descartado,
+      esDerivado: idDelPadre !== null,
+      idDelPadre,
+    }
+  }
+
+  const padre = slot('padre', null)
+  const otroPadre = slot('otro-padre', null)
+  const hijoA = slot('hijo-a', 'padre')
+  const hijoB = slot('hijo-b', 'padre')
+  const hijoDeOtro = slot('hijo-de-otro', 'otro-padre')
+
+  it('devuelve los derivados que cuelgan del padre pedido', () => {
+    const todos = [padre, hijoA, otroPadre, hijoB, hijoDeOtro]
+    expect(derivadosVigentesDe(todos, padre.id).map((s) => s.id)).toEqual(['hijo-a', 'hijo-b'])
+  })
+
+  it('un padre sin derivados no devuelve ninguno', () => {
+    expect(derivadosVigentesDe([padre, otroPadre, hijoDeOtro], padre.id)).toEqual([])
+  })
+
+  // La comparación es `idDelPadre === id`, no `id === idDelPadre`: invertirla
+  // haría que un derivado devolviera a su propio padre y la confirmación
+  // ofreciera descartar la publicación original. Esta prueba es la que
+  // distingue una dirección de la otra.
+  it('un derivado pasado por error no arrastra a su padre', () => {
+    expect(derivadosVigentesDe([padre, hijoA, hijoB], hijoA.id)).toEqual([])
+  })
+
+  it('no cuenta los derivados ya descartados', () => {
+    const todos = [padre, hijoA, slot('hijo-b', 'padre', true)]
+    expect(derivadosVigentesDe(todos, padre.id).map((s) => s.id)).toEqual(['hijo-a'])
   })
 })
 

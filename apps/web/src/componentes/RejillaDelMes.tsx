@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
+import { derivadosVigentesDe } from '../calendario.js'
 import { FichaDeSlot } from './FichaDeSlot.js'
 import { PanelDeDetalle } from './PanelDeDetalle.js'
 
@@ -55,10 +56,11 @@ export function RejillaDelMes({
   const padreDelSeleccionado = seleccionado?.idDelPadre
     ? porId.get(seleccionado.idDelPadre)
     : undefined
-  // Filtro sobre `idDelPadre` de los slots que ya están cargados: sin
-  // consulta extra. Solo importa cuando el seleccionado es un padre.
+  // La derivación vive en `calendario.ts` y tiene pruebas propias: de ella
+  // depende qué filas escribe el "descartar también los derivados", y el
+  // renderizado no se prueba.
   const derivadosVigentesDelSeleccionado = seleccionado
-    ? slots.filter((s) => s.idDelPadre === seleccionado.id && !s.descartado)
+    ? derivadosVigentesDe(slots, seleccionado.id)
     : []
 
   return (
