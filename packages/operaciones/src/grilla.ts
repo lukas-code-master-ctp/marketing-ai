@@ -2,7 +2,7 @@ import { cargarPerfilVigente } from '@gc/brand'
 import { esquema, type BaseDeDatos, type Canal } from '@gc/db'
 import { ErrorDeDominio, permanente } from '@gc/shared'
 import {
-  Estrategia, trimestreDe, validarGrilla, type Problema, type TipoEstrategia,
+  Estrategia, SlotPropuesto, trimestreDe, validarGrilla, type Problema, type TipoEstrategia,
 } from '@gc/strategy'
 import { and, asc, eq, ne } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
@@ -160,6 +160,28 @@ export async function descartarSlot(
   if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
 }
 
+/**
+ * Las mismas reglas que `SlotPropuesto` le impone a la grilla que genera el
+ * modelo. `angle` y `brief` son NOT NULL sin CHECK, así que sin esto la
+ * cadena vacía persiste y queda un slot que la generación jamás habría
+ * podido producir — y que la Fase 2 leería para escribir la pieza. Se valida
+ * contra el esquema, no contra una copia de sus números: si el mínimo cambia
+ * ahí, cambia aquí.
+ *
+ * Vive en la operación y no en la Server Action para que el CLI lo herede,
+ * igual que `validarPerfil` cubre a los dos caminos de carga de perfil.
+ */
+function exigirCamposEditables(campos: { angulo: string; brief: string }): void {
+  const detalles = (['angulo', 'brief'] as const).flatMap((campo) => {
+    const r = SlotPropuesto.shape[campo].safeParse(campos[campo])
+    return r.success ? [] : r.error.issues.map((i) => `- ${campo}: ${i.message}`)
+  })
+
+  if (detalles.length > 0) {
+    throw permanente(`Edición de slot inválida:\n${detalles.join('\n')}`)
+  }
+}
+
 /** Cambia ángulo y brief de un slot. El resto de sus campos queda intacto. */
 export async function editarSlot(
   db: BaseDeDatos,
@@ -167,6 +189,8 @@ export async function editarSlot(
   slotId: string,
   campos: { angulo: string; brief: string },
 ): Promise<void> {
+  exigirCamposEditables(campos)
+
   const [fila] = await db
     .update(esquema.planSlots)
     .set({ angle: campos.angulo, brief: campos.brief })

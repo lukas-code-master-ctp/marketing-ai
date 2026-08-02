@@ -157,6 +157,35 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
+  it('editar rechaza lo que el esquema de dominio nunca habría generado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const slot = g.slots[0]!
+
+      // Las columnas son NOT NULL sin CHECK: sin validación en `editarSlot`,
+      // la cadena vacía persiste y queda un slot que la generación jamás
+      // habría podido producir.
+      await expect(
+        editarSlot(db, ref.organizationId, slot.id, { angulo: '', brief: '' }),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      // Ángulo suficiente, brief por debajo del mínimo: la regla que falla se
+      // nombra, no se devuelve un genérico.
+      const error = await editarSlot(db, ref.organizationId, slot.id, {
+        angulo: 'un ángulo creíble',
+        brief: 'muy corto',
+      }).catch((e: unknown) => e)
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toContain('brief')
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const intacto = despues.slots.find((s) => s.id === slot.id)!
+      expect(intacto.angulo).toBe(slot.angulo)
+      expect(intacto.brief).toBe(slot.brief)
+    })
+  })
+
   it('aprobar mueve el plan a aprobada', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)

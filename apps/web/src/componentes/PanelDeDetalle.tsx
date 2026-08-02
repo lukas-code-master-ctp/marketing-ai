@@ -186,13 +186,18 @@ export function PanelDeDetalle({
               <label htmlFor="campo-angulo" className="mb-1 block text-sm font-medium text-gray-700">
                 Ángulo
               </label>
+              {/* `minLength` es cortesía del navegador: la garantía es la
+                  validación de `editarSlot` contra `SlotPropuesto`, que
+                  también cubre al CLI. */}
               <input
                 id="campo-angulo"
                 type="text"
+                minLength={5}
                 value={angulo}
                 onChange={(e) => setAngulo(e.target.value)}
                 className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
               />
+              <p className="mt-1 text-xs text-gray-500">Mínimo 5 caracteres.</p>
             </div>
             <div>
               <label htmlFor="campo-brief" className="mb-1 block text-sm font-medium text-gray-700">
@@ -200,11 +205,13 @@ export function PanelDeDetalle({
               </label>
               <textarea
                 id="campo-brief"
+                minLength={20}
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
                 rows={4}
                 className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
               />
+              <p className="mt-1 text-xs text-gray-500">Mínimo 20 caracteres.</p>
             </div>
           </div>
         )}

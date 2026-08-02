@@ -50,8 +50,11 @@ export const SlotPropuesto = z.object({
   canal: Canal,
   formato: z.string().min(2),
   pilar: z.string().min(2),
-  angulo: z.string().min(5),
-  brief: z.string().min(20),
+  // Los mensajes van en español porque estos dos campos son los únicos que la
+  // interfaz web deja editar a mano (`editarSlot`), y ahí el texto del rechazo
+  // se muestra tal cual al usuario.
+  angulo: z.string().min(5, 'debe tener al menos 5 caracteres'),
+  brief: z.string().min(20, 'debe tener al menos 20 caracteres'),
 })
 
 export const GrillaPropuesta = z.object({
