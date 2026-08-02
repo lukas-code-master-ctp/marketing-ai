@@ -3,7 +3,8 @@ import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
 import {
-  cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, resolverOrganizacion, verGrilla,
+  cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, reabrirGrilla,
+  resolverOrganizacion, verGrilla,
 } from '@gc/operaciones'
 
 const AYUDA = `
@@ -15,6 +16,7 @@ Comandos:
   estrategia:generar  --marca <slug> --periodo <2026-Q4>
   grilla:generar      --marca <slug> --mes <2026-09>
   grilla:ver          --marca <slug> --mes <2026-09>
+  grilla:reabrir      --marca <slug> --mes <2026-09>
 
 Opciones globales:
   --seco              usa las muestras locales y no gasta tokens
@@ -23,6 +25,7 @@ Opciones globales:
 
 const COMANDOS = new Set([
   'marca:crear', 'perfil:cargar', 'estrategia:generar', 'grilla:generar', 'grilla:ver',
+  'grilla:reabrir',
 ])
 
 async function principal(): Promise<void> {
@@ -110,6 +113,13 @@ async function principal(): Promise<void> {
           mes: exigir(values.mes, '--mes'),
         })
         console.table(filas)
+        break
+      }
+      case 'grilla:reabrir': {
+        const mes = exigir(values.mes, '--mes')
+        const marca = exigir(values.marca, '--marca')
+        await reabrirGrilla(db, organizationId, { slug: marca, mes })
+        console.log(`Grilla de ${mes} para ${marca} devuelta a borrador`)
         break
       }
     }

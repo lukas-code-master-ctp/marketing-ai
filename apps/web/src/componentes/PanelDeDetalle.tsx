@@ -301,6 +301,15 @@ export function PanelDeDetalle({
           <p className="border-t border-gray-100 pt-4 text-sm text-gray-500">
             La grilla de {mes} está {ESTADO_EN_PROSA[estado]} y sus publicaciones ya no se editan
             ni se descartan.
+            {estado === 'aprobada' && (
+              <>
+                {' '}
+                Para volver a editarla, reábrela con{' '}
+                <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
+                  pnpm cli grilla:reabrir --marca {marca} --mes {mes}
+                </code>
+              </>
+            )}
           </p>
         ) : (
           <div className="flex gap-2 border-t border-gray-100 pt-4">

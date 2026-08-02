@@ -2,7 +2,9 @@ import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { aprobarGrilla, descartarSlot, editarSlot, grillaDelMes } from './grilla.js'
+import {
+  aprobarGrilla, descartarSlot, editarSlot, grillaDelMes, reabrirGrilla,
+} from './grilla.js'
 import { sembrarConEstrategia, sembrarConGrilla } from './pruebas/siembra.js'
 
 describe('grillaDelMes', () => {
@@ -240,6 +242,69 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
       expect(intacto.descartado).toBe(false)
       expect(intacto.angulo).toBe(slot.angulo)
       expect(intacto.brief).toBe(slot.brief)
+    })
+  })
+
+  it('reabrir devuelve una grilla aprobada a borrador y la vuelve editable', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      await aprobarGrilla(db, ref.organizationId, g.contentPlanId!)
+
+      await reabrirGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-09' })
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(despues.estado).toBe('borrador')
+
+      // Y no es solo la etiqueta: el remedio que `p2.ts` viene indicando
+      // desde siempre ahora existe de verdad y devuelve la edición.
+      await descartarSlot(db, ref.organizationId, g.slots[0]!.id)
+    })
+  })
+
+  it('reabrir solo acepta una grilla aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+
+      const enBorrador = await reabrirGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-09',
+      }).catch((e: unknown) => e)
+      expect(enBorrador).toMatchObject({ clase: 'permanente' })
+      expect((enBorrador as Error).message).toContain('borrador')
+
+      await db
+        .update(esquema.contentPlans)
+        .set({ status: 'cerrada' })
+        .where(eq(esquema.contentPlans.brandId, ref.brandId))
+
+      const cerrada = await reabrirGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-09',
+      }).catch((e: unknown) => e)
+      expect(cerrada).toMatchObject({ clase: 'permanente' })
+      expect((cerrada as Error).message).toContain('cerrada')
+    })
+  })
+
+  it('reabrir un mes sin grilla lo dice, y no toca las de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      await aprobarGrilla(db, ref.organizationId, g.contentPlanId!)
+
+      await expect(
+        reabrirGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' }),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Ajena', slug: 'ajena' })
+        .returning()
+      await expect(
+        reabrirGrilla(db, otra!.id, { slug: 'parcelas', mes: '2026-09' }),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect((await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')).estado)
+        .toBe('aprobada')
     })
   })
 

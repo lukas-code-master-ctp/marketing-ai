@@ -2,7 +2,8 @@ import { cargarPerfilVigente } from '@gc/brand'
 import { esquema, type BaseDeDatos, type Canal } from '@gc/db'
 import { ErrorDeDominio, permanente } from '@gc/shared'
 import {
-  Estrategia, SlotPropuesto, trimestreDe, validarGrilla, type Problema, type TipoEstrategia,
+  Estrategia, SlotPropuesto, trimestreDe, validarGrilla, validarMes,
+  type Problema, type TipoEstrategia,
 } from '@gc/strategy'
 import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
@@ -294,6 +295,55 @@ export async function aprobarGrilla(
       `El plan ${contentPlanId} está en estado "${actual.status}" y solo se aprueba uno en borrador`,
     )
   }
+}
+
+/**
+ * Devuelve una grilla aprobada a `borrador`. Es la puerta de vuelta que
+ * faltaba: `p2.ts` viene diciendo «Devuélvela a "borrador" para regenerarla»
+ * y hasta ahora ningún comando ni pantalla podía hacerlo, así que aprobar era
+ * definitivo salvo por SQL a mano.
+ *
+ * Solo desde `aprobada`. Desde `en_ejecucion` o `cerrada` no, porque ahí ya
+ * hay publicaciones en vuelo o cerradas y reabrir no las deshace; y desde
+ * `borrador` tampoco, para que el comando nunca dé por hecho un cambio que
+ * no ocurrió. Se identifica por marca y mes, no por id, porque es la clave
+ * con la que trabaja la línea de comandos.
+ */
+export async function reabrirGrilla(
+  db: BaseDeDatos,
+  organizationId: string,
+  args: { slug: string; mes: string },
+): Promise<void> {
+  const ref = await resolverMarca(db, organizationId, args.slug)
+  validarMes(args.mes)
+
+  const delMes = and(
+    eq(esquema.contentPlans.organizationId, organizationId),
+    eq(esquema.contentPlans.brandId, ref.brandId),
+    eq(esquema.contentPlans.month, `${args.mes}-01`),
+  )
+
+  const [fila] = await db
+    .update(esquema.contentPlans)
+    .set({ status: 'borrador' })
+    .where(and(delMes, eq(esquema.contentPlans.status, 'aprobada')))
+    .returning({ id: esquema.contentPlans.id })
+
+  if (fila) return
+
+  const [actual] = await db
+    .select({ status: esquema.contentPlans.status })
+    .from(esquema.contentPlans)
+    .where(delMes)
+
+  if (!actual) {
+    throw permanente(
+      `La marca ${ref.brandSlug ?? args.slug} no tiene grilla para ${args.mes}`,
+    )
+  }
+  throw permanente(
+    `La grilla de ${args.mes} está en estado "${actual.status}" y solo se reabre una aprobada`,
+  )
 }
 
 async function cargarEstrategiaDelTrimestre(
