@@ -74,13 +74,17 @@ export function PanelDeDetalle({
   }, [slot.id])
 
   // Cambiar de slot (p. ej. al navegar al padre) descarta cualquier edición
-  // o confirmación pendiente del anterior.
+  // o confirmación pendiente del anterior — `ultimoIntentoIncluyoDerivados`
+  // incluido: hoy no queda accesible porque el error se limpia junto con él,
+  // pero es memoria del slot anterior y pertenece a este barrido por el mismo
+  // motivo que sus hermanos.
   useEffect(() => {
     setModo('ver')
     setAngulo(slot.angulo)
     setBrief(slot.brief)
     setConfirmandoDescarte(false)
     setError(null)
+    setUltimoIntentoIncluyoDerivados(false)
   }, [slot.id, slot.angulo, slot.brief])
 
   useEffect(() => {

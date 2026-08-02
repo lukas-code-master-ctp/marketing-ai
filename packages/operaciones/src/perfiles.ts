@@ -71,10 +71,16 @@ export async function perfilConHistorial(
 
 /**
  * La estrategia del trimestre al que pertenece `mes`, o `null` si la marca
- * no tiene ninguna cargada para ese periodo. A diferencia de
- * `cargarEstrategiaVigente` (usado por la generación de grilla), esto no
- * excluye las archivadas: es una vista de solo lectura, así que mostrar el
- * estado tal cual —incluida "archivada"— es más útil que ocultar la fila.
+ * no tiene ninguna cargada para ese periodo. Esto NO excluye las archivadas:
+ * es una vista de solo lectura, así que mostrar el estado tal cual —incluida
+ * "archivada"— es más útil que ocultar la fila.
+ *
+ * ⚠️ La gemela que de verdad se presta a confusión es
+ * `cargarEstrategiaDelTrimestre`, en `grilla.ts`: mismo paquete, nombre casi
+ * igual, filtrado opuesto (esa sí excluye las archivadas, porque alimenta
+ * `validarGrilla` y ahí hay que medir contra la que rige hoy). El comentario
+ * anterior citaba `cargarEstrategiaVigente` de `@gc/strategy`, que está en
+ * otro paquete y nunca fue el riesgo.
  */
 export async function estrategiaDelTrimestre(
   db: BaseDeDatos,
