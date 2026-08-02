@@ -4,8 +4,10 @@ import { ErrorDeDominio, permanente } from '@gc/shared'
 import {
   Estrategia, SlotPropuesto, trimestreDe, validarGrilla, type Problema, type TipoEstrategia,
 } from '@gc/strategy'
-import { and, asc, eq, ne } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
+
+export type EstadoDeGrilla = 'borrador' | 'aprobada' | 'en_ejecucion' | 'cerrada'
 
 export interface SlotDeLaGrilla {
   id: string
@@ -23,7 +25,7 @@ export interface SlotDeLaGrilla {
 
 export interface GrillaDelMes {
   contentPlanId: string | null
-  estado: 'borrador' | 'aprobada' | 'en_ejecucion' | 'cerrada' | null
+  estado: EstadoDeGrilla | null
   slots: SlotDeLaGrilla[]
   porCanal: Record<string, number>
   avisos: Problema[]
@@ -136,6 +138,63 @@ async function recalcularAvisos(
 }
 
 /**
+ * El slot pedido, de esta organización, y solo si su plan sigue en
+ * `borrador`. Es la misma regla que `p2.ts` le aplica a la regeneración, y
+ * por el mismo motivo: fuera de borrador la planificación ya fue revisada y,
+ * desde la Fase 2, tendrá piezas de contenido colgando de esos slots.
+ *
+ * El predicado va dentro del `UPDATE`, no en un `SELECT` previo, para que no
+ * quede una ventana entre comprobar y escribir.
+ */
+function slotModificable(db: BaseDeDatos, organizationId: string, slotId: string) {
+  return and(
+    eq(esquema.planSlots.id, slotId),
+    eq(esquema.planSlots.organizationId, organizationId),
+    inArray(
+      esquema.planSlots.contentPlanId,
+      db
+        .select({ id: esquema.contentPlans.id })
+        .from(esquema.contentPlans)
+        .where(
+          and(
+            eq(esquema.contentPlans.organizationId, organizationId),
+            eq(esquema.contentPlans.status, 'borrador'),
+          ),
+        ),
+    ),
+  )
+}
+
+/**
+ * Sin fila devuelta hay dos causas posibles y se distinguen releyendo: o el
+ * slot no existe en esta organización, o existe y su grilla ya salió de
+ * borrador. El mensaje nombra el estado real, no un genérico.
+ */
+async function explicarSlotNoModificable(
+  db: BaseDeDatos,
+  organizationId: string,
+  slotId: string,
+): Promise<never> {
+  const [fila] = await db
+    .select({ estado: esquema.contentPlans.status, mes: esquema.contentPlans.month })
+    .from(esquema.planSlots)
+    .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
+    .where(
+      and(
+        eq(esquema.planSlots.id, slotId),
+        eq(esquema.planSlots.organizationId, organizationId),
+      ),
+    )
+
+  if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
+
+  throw permanente(
+    `La grilla de ${fila.mes.slice(0, 7)} está en estado "${fila.estado}" y solo se ` +
+      `modifican los slots de una en borrador. Devuélvela a "borrador" para editarla.`,
+  )
+}
+
+/**
  * Cambia el estado del slot a `descartado`. No toca a sus derivados: la
  * cascada de la base gobierna el borrado, no el cambio de estado, y eso es
  * deliberado — la interfaz lo advierte y ofrece descartarlos aparte, nunca
@@ -149,15 +208,10 @@ export async function descartarSlot(
   const [fila] = await db
     .update(esquema.planSlots)
     .set({ status: 'descartado' })
-    .where(
-      and(
-        eq(esquema.planSlots.id, slotId),
-        eq(esquema.planSlots.organizationId, organizationId),
-      ),
-    )
+    .where(slotModificable(db, organizationId, slotId))
     .returning({ id: esquema.planSlots.id })
 
-  if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
+  if (!fila) await explicarSlotNoModificable(db, organizationId, slotId)
 }
 
 /**
@@ -194,15 +248,10 @@ export async function editarSlot(
   const [fila] = await db
     .update(esquema.planSlots)
     .set({ angle: campos.angulo, brief: campos.brief })
-    .where(
-      and(
-        eq(esquema.planSlots.id, slotId),
-        eq(esquema.planSlots.organizationId, organizationId),
-      ),
-    )
+    .where(slotModificable(db, organizationId, slotId))
     .returning({ id: esquema.planSlots.id })
 
-  if (!fila) throw permanente(`No existe el slot ${slotId} en esta organización`)
+  if (!fila) await explicarSlotNoModificable(db, organizationId, slotId)
 }
 
 /**

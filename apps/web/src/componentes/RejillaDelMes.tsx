@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import type { SlotDeLaGrilla } from '@gc/operaciones'
+import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
 import { FichaDeSlot } from './FichaDeSlot.js'
 import { PanelDeDetalle } from './PanelDeDetalle.js'
 
@@ -16,11 +16,13 @@ const DIAS_DE_LA_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 export function RejillaDelMes({
   marca,
   mes,
+  estado,
   semanas,
   slots,
 }: {
   marca: string
   mes: string
+  estado: EstadoDeGrilla
   semanas: string[][]
   slots: SlotDeLaGrilla[]
 }) {
@@ -91,6 +93,7 @@ export function RejillaDelMes({
           padre={padreDelSeleccionado}
           marca={marca}
           mes={mes}
+          estado={estado}
           derivadosVigentes={derivadosVigentesDelSeleccionado}
           onCerrar={cerrar}
           onVerPadre={setSeleccionadoId}

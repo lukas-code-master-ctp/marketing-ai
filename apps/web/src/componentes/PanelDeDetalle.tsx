@@ -1,8 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { SlotDeLaGrilla } from '@gc/operaciones'
+import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
 import { descartarSlotAccion, editarSlotAccion } from '../acciones.js'
+
+/** Para la frase «La grilla de 2026-09 está …», no para una etiqueta suelta. */
+const ESTADO_EN_PROSA: Record<EstadoDeGrilla, string> = {
+  borrador: 'en borrador',
+  aprobada: 'aprobada',
+  en_ejecucion: 'en ejecución',
+  cerrada: 'cerrada',
+}
 
 /**
  * Panel de solo lectura con el detalle completo de un slot, más los botones
@@ -22,12 +30,18 @@ import { descartarSlotAccion, editarSlotAccion } from '../acciones.js'
  * el foco a la ficha que lo abrió es responsabilidad de quien controla
  * `onCerrar` (`RejillaDelMes`), porque este componente no sabe qué elemento
  * lo disparó.
+ *
+ * Fuera de `borrador` los botones de acción no se renderizan —no se
+ * deshabilitan— porque `descartarSlot` y `editarSlot` ya rechazan esas
+ * escrituras: un botón deshabilitado prometería que existe una forma de
+ * habilitarlo desde aquí, y no la hay. El panel dice por qué en su lugar.
  */
 export function PanelDeDetalle({
   slot,
   padre,
   marca,
   mes,
+  estado,
   derivadosVigentes,
   onCerrar,
   onVerPadre,
@@ -36,11 +50,13 @@ export function PanelDeDetalle({
   padre?: SlotDeLaGrilla | undefined
   marca: string
   mes: string
+  estado: EstadoDeGrilla
   derivadosVigentes: SlotDeLaGrilla[]
   onCerrar: () => void
   onVerPadre: (id: string) => void
 }) {
   const contenedorRef = useRef<HTMLDivElement>(null)
+  const editable = estado === 'borrador'
 
   const [modo, setModo] = useState<'ver' | 'editar'>('ver')
   const [angulo, setAngulo] = useState(slot.angulo)
@@ -281,53 +297,60 @@ export function PanelDeDetalle({
           </div>
         )}
 
-        <div className="flex gap-2 border-t border-gray-100 pt-4">
-          {modo === 'ver' ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setModo('editar')}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Editar
-              </button>
-              {!slot.descartado && !confirmandoDescarte && (
+        {!editable ? (
+          <p className="border-t border-gray-100 pt-4 text-sm text-gray-500">
+            La grilla de {mes} está {ESTADO_EN_PROSA[estado]} y sus publicaciones ya no se editan
+            ni se descartan.
+          </p>
+        ) : (
+          <div className="flex gap-2 border-t border-gray-100 pt-4">
+            {modo === 'ver' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setModo('editar')}
+                  className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Editar
+                </button>
+                {!slot.descartado && !confirmandoDescarte && (
+                  <button
+                    type="button"
+                    disabled={ocupado}
+                    onClick={alPulsarDescartar}
+                    className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Descartar
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
                 <button
                   type="button"
                   disabled={ocupado}
-                  onClick={alPulsarDescartar}
-                  className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  onClick={() => void guardarEdicion()}
+                  className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                 >
-                  Descartar
+                  Guardar
                 </button>
-              )}
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                disabled={ocupado}
-                onClick={() => void guardarEdicion()}
-                className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Guardar
-              </button>
-              <button
-                type="button"
-                disabled={ocupado}
-                onClick={() => {
-                  setModo('ver')
-                  setAngulo(slot.angulo)
-                  setBrief(slot.brief)
-                  setError(null)
-                }}
-                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-            </>
-          )}
-        </div>
+                <button
+                  type="button"
+                  disabled={ocupado}
+                  onClick={() => {
+                    setModo('ver')
+                    setAngulo(slot.angulo)
+                    setBrief(slot.brief)
+                    setError(null)
+                  }}
+                  className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

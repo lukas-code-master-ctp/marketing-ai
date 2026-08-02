@@ -210,6 +210,39 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
+  it('no deja descartar ni editar slots de una grilla que salió de borrador', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      await aprobarGrilla(db, ref.organizationId, g.contentPlanId!)
+
+      // El motor (`p2.ts`) se niega a tocar nada que no esté en borrador
+      // porque regenerar destruiría planificación ya revisada. La web escribía
+      // en la misma tabla sin esa condición: se aprobaba septiembre y después
+      // se le descartaban slots y se le reescribían briefs, con el plan
+      // marcado "aprobada" y sin rastro del cambio.
+      const slot = g.slots[0]!
+
+      const alDescartar = await descartarSlot(db, ref.organizationId, slot.id)
+        .catch((e: unknown) => e)
+      expect(alDescartar).toMatchObject({ clase: 'permanente' })
+      expect((alDescartar as Error).message).toContain('aprobada')
+
+      const alEditar = await editarSlot(db, ref.organizationId, slot.id, {
+        angulo: 'un ángulo creíble',
+        brief: 'Un brief nuevo, suficientemente largo para ser creíble.',
+      }).catch((e: unknown) => e)
+      expect(alEditar).toMatchObject({ clase: 'permanente' })
+      expect((alEditar as Error).message).toContain('aprobada')
+
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const intacto = despues.slots.find((s) => s.id === slot.id)!
+      expect(intacto.descartado).toBe(false)
+      expect(intacto.angulo).toBe(slot.angulo)
+      expect(intacto.brief).toBe(slot.brief)
+    })
+  })
+
   it('las tres operaciones ignoran filas de otra organización', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)

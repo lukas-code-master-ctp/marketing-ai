@@ -101,7 +101,13 @@ export default async function PaginaDeGrilla({
           </p>
         </div>
       ) : (
-        <RejillaDelMes marca={marca} mes={mes} semanas={semanas} slots={grilla.slots} />
+        <RejillaDelMes
+          marca={marca}
+          mes={mes}
+          estado={grilla.estado}
+          semanas={semanas}
+          slots={grilla.slots}
+        />
       )}
     </div>
   )
