@@ -1,4 +1,5 @@
 import { perfilConHistorial } from '@gc/operaciones'
+import { ErrorDeDominio } from '@gc/shared'
 import { EditorDePerfil } from '../../../componentes/EditorDePerfil.js'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
 
@@ -15,30 +16,38 @@ export default async function PaginaDePerfil({
   const db = conexion()
   const organizationId = await organizacionPorDefecto(db)
 
-  // Sin perfil cargado, `perfilConHistorial` lanza `permanente`: se muestra
-  // el mensaje del dominio en vez de una página caída con un 500.
-  let datos: Awaited<ReturnType<typeof perfilConHistorial>> | null = null
-  let error: string | null = null
-  try {
-    datos = await perfilConHistorial(db, organizationId, marca)
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
+  // Que la marca no exista ya no llega hasta acá: lo resuelve
+  // `[marca]/layout.tsx` con un 404, igual que para grilla y estrategia. Lo
+  // único que queda es el estado vacío —una marca real sin perfil todavía—,
+  // que se pinta en la página como el "este mes no tiene grilla" del
+  // calendario, no como un error.
+  const datos = await perfilConHistorial(db, organizationId, marca).catch(
+    (error: unknown) => {
+      if (error instanceof ErrorDeDominio && error.clase === 'permanente') return null
+      throw error
+    },
+  )
 
   return (
     <div className="p-6">
       <h1 className="mb-4 text-xl font-semibold text-gray-900">Perfil de marca</h1>
 
-      {error ? (
+      {!datos ? (
         <div className="rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
-          <p>{error}</p>
+          <p>La marca {marca} todavía no tiene perfil cargado.</p>
+          <p className="mt-2">
+            Cárgalo con{' '}
+            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-gray-800">
+              pnpm cli perfil:cargar --marca {marca} --archivo perfiles/{marca}.json
+            </code>
+          </p>
         </div>
       ) : (
         <EditorDePerfil
           marca={marca}
-          version={datos!.version}
-          perfil={datos!.perfil}
-          versiones={datos!.versiones}
+          version={datos.version}
+          perfil={datos.perfil}
+          versiones={datos.versiones}
         />
       )}
     </div>
