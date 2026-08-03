@@ -2,10 +2,10 @@ import { cargarPerfilVigente, type TipoPerfilDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos, type Canal } from '@gc/db'
 import { ErrorDeDominio, permanente } from '@gc/shared'
 import {
-  Estrategia, SlotPropuesto, trimestreDe, validarGrilla, validarMes,
-  type Problema, type TipoEstrategia,
+  SlotPropuesto, leerEstrategiaDelTrimestre, validarGrilla, validarMes,
+  type Problema,
 } from '@gc/strategy'
-import { and, asc, eq, gte, inArray, lt, ne } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
 
 export type EstadoDeGrilla = 'borrador' | 'aprobada' | 'en_ejecucion' | 'cerrada'
@@ -140,7 +140,7 @@ async function recalcularProblemas(
     throw error
   }
 
-  const lectura = await cargarEstrategiaDelTrimestre(db, brandId, mes)
+  const lectura = await leerEstrategiaDelTrimestre(db, brandId, mes, { archivadas: 'excluir' })
   if (lectura.tipo === 'ausente') return []
   if (lectura.tipo === 'invalida') {
     return [
@@ -375,47 +375,6 @@ export async function reabrirGrilla(
   throw permanente(
     `La grilla de ${args.mes} está en estado "${actual.status}" y solo se reabre una aprobada`,
   )
-}
-
-type LecturaDeEstrategia =
-  | { tipo: 'ok'; periodo: string; estrategia: TipoEstrategia }
-  | { tipo: 'ausente'; periodo: string }
-  | { tipo: 'invalida'; periodo: string }
-
-/**
- * ⚠️ No confundir con `estrategiaDelTrimestre` de `perfiles.ts`: mismo
- * paquete, nombre casi igual, filtrado opuesto. Aquella SÍ devuelve las
- * archivadas porque alimenta una vista de solo lectura donde el estado se
- * muestra tal cual; esta las excluye porque alimenta `validarGrilla`, que
- * debe medir contra la estrategia que rige hoy.
- *
- * Devuelve un resultado en vez de lanzar: quien llama necesita distinguir
- * "no hay" de "hay pero no valida", y con dos `permanente` indistinguibles
- * no podía.
- */
-async function cargarEstrategiaDelTrimestre(
-  db: BaseDeDatos,
-  brandId: string,
-  mes: string,
-): Promise<LecturaDeEstrategia> {
-  const periodo = trimestreDe(mes)
-
-  const [fila] = await db
-    .select()
-    .from(esquema.strategies)
-    .where(
-      and(
-        eq(esquema.strategies.brandId, brandId),
-        eq(esquema.strategies.period, periodo),
-        ne(esquema.strategies.status, 'archivada'),
-      ),
-    )
-
-  if (!fila) return { tipo: 'ausente', periodo }
-
-  const r = Estrategia.safeParse(fila.data)
-  if (!r.success) return { tipo: 'invalida', periodo }
-  return { tipo: 'ok', periodo, estrategia: r.data }
 }
 
 export interface FilaDeGrilla {

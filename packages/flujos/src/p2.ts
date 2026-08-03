@@ -7,10 +7,10 @@ import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
 import {
-  Estrategia, GrillaPropuesta, expandirDerivados, hayBloqueantes, trimestreDe, validarGrilla,
+  GrillaPropuesta, expandirDerivados, hayBloqueantes, leerEstrategiaDelTrimestre, validarGrilla,
   type Problema, type TipoEstrategia, type TipoSlotPropuesto,
 } from '@gc/strategy'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import type { Dependencias } from './tipos.js'
@@ -189,40 +189,32 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
   return { nombre: 'p2_grilla', pasos: [pasoProponer, pasoPersistir] }
 }
 
+/**
+ * Envoltorio sobre `leerEstrategiaDelTrimestre` que traduce sus dos casos de
+ * fallo a los `permanente` que este flujo lanzaba antes, con los mismos
+ * textos: quien genera una grilla no puede continuar sin estrategia, así que
+ * distinguir "no hay" de "hay pero no valida" solo cambia el mensaje.
+ */
 async function cargarEstrategiaVigente(
   db: BaseDeDatos,
   brandId: string,
   mes: string,
   nombreVisible?: string,
 ): Promise<{ id: string; estrategia: TipoEstrategia }> {
-  const periodo = trimestreDe(mes)
+  const lectura = await leerEstrategiaDelTrimestre(db, brandId, mes, { archivadas: 'excluir' })
 
-  // `(brand_id, period)` es único, así que hay a lo más una fila: no hace
-  // falta ordenar, y "la más reciente" deja de ser un criterio.
-  const [fila] = await db
-    .select()
-    .from(esquema.strategies)
-    .where(
-      and(
-        eq(esquema.strategies.brandId, brandId),
-        eq(esquema.strategies.period, periodo),
-        ne(esquema.strategies.status, 'archivada'),
-      ),
-    )
-
-  if (!fila) {
+  if (lectura.tipo === 'ausente') {
     throw permanente(
-      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${periodo}. ` +
+      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${lectura.periodo}. ` +
         `Genérala antes de la grilla de ${mes}.`,
     )
   }
 
-  const r = Estrategia.safeParse(fila.data)
-  if (!r.success) {
+  if (lectura.tipo === 'invalida') {
     throw permanente(`La estrategia guardada de ${nombreVisible ?? brandId} no valida`)
   }
 
-  return { id: fila.id, estrategia: r.data }
+  return { id: lectura.id, estrategia: lectura.estrategia }
 }
 
 /** Acepta tanto la conexión como una transacción abierta. */
