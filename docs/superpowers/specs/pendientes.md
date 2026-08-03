@@ -1,7 +1,7 @@
 # Pendientes
 
-**Última actualización:** 2026-07-31, tras la rama `feat/integridad-prioridad-1`
-**Origen:** las revisiones adversariales de rama completa de `feat/motor-estrategia` y `feat/integridad-prioridad-1`, más los hallazgos menores acumulados en las dieciséis revisiones por tarea.
+**Última actualización:** 2026-08-01, tras la rama `feat/deuda-insumos-1b-1c`
+**Origen:** las revisiones adversariales de rama completa de las cinco ramas fusionadas hasta hoy, más los hallazgos menores acumulados en sus revisiones por tarea.
 
 Nada de esto rompe el sistema hoy. Está ordenado por cuánto más caro se vuelve cada cosa una vez que la Fase 1 construya encima.
 
@@ -29,9 +29,11 @@ El motor ya soporta reanudar (`ejecutarFlujo` acepta `ctx.runId`, `reanudarCorri
 
 ### 2. Nada filtra por `status = 'descartado'`
 
-La decisión de la cascada convierte `descartado` en el mecanismo normal de la UI para quitar un slot. Pero `verGrilla` selecciona sin filtrar por estado y `FilaDeGrilla` ni expone el campo; `SalidaP2.totalSlots` los cuenta; y `expandirDerivados` y `validarGrilla` tampoco los miran, así que una regeneración los recontaría en las reglas de cadencia y de distribución de pilares.
+La decisión de la cascada convierte `descartado` en el mecanismo normal de la UI para quitar un slot. Pero `SalidaP2.totalSlots` los cuenta, y `expandirDerivados` y `validarGrilla` tampoco los miran, así que una regeneración los recontaría en las reglas de cadencia y de distribución de pilares.
 
-Hoy no está roto porque no existe la ruta de descarte. La Fase 1 es su primer consumidor.
+Hoy no está roto porque nada regenera un mes que ya tuvo descartes. El worker de 1B es su primer consumidor real.
+
+**Parcialmente cerrado en `feat/app-web-1a`:** `verGrilla` sí selecciona `status` y `FilaDeGrilla` sí expone `descartado`; `grillaDelMes` los excluye de `porCanal` y de los problemas que recalcula. Lo que sigue abierto es el camino de generación, que es el que importa para 1B.
 
 ### 3. La salida entre pasos no está versionada
 
@@ -49,33 +51,29 @@ El problema aparece junto con el punto 1: una corrida vieja cuyo primer paso se 
 
 Resueltas en `feat/decisiones-previas-fase-1`. El detalle de cada una queda abajo como registro de por qué se eligió lo que se eligió.
 
-## Prioridad 1 — insumos para el diseño de los bloques 1B y 1C
+## ✅ Cerrado: los cinco insumos para 1B y 1C
 
-De la revisión de rama de `feat/app-web-1a`.
+Resueltos en `feat/deuda-insumos-1b-1c` ([diseño](2026-08-01-deuda-insumos-1b-1c-design.md) · [plan](../plans/2026-08-01-deuda-insumos-1b-1c.md)).
 
-### 1. La selección de "estrategia vigente" vive en tres lugares
+1. **La selección de "estrategia vigente" quedó en una sola función.** `leerEstrategiaDelTrimestre`, en `@gc/strategy/estrategias.ts`, con la política de archivadas como parámetro explícito en cada sitio de llamada. Las tres copias diferían en cuatro ejes que ningún nombre delataba, y la de `perfiles.ts` ni siquiera validaba: devolvía la columna cruda y dejaba parseando a la página, así que una estrategia corrupta se comportaba distinto según por dónde se entrara. Ahora sale como `invalida` por los tres caminos.
 
-`cargarEstrategiaVigente` (`@gc/strategy/p2.ts`), `cargarEstrategiaDelTrimestre` (`@gc/operaciones/grilla.ts`) y `estrategiaDelTrimestre` (`@gc/operaciones/perfiles.ts`). Las tres leen la estrategia de un trimestre; las dos primeras excluyen archivadas y la tercera no, deliberadamente, porque muestra en vez de calcular. Los nombres no delatan la diferencia. Una cuarta copia es peor que tres: extraer una sola con la política como parámetro.
+2. **La web no puede alcanzar el modelo, y hay algo que lo comprueba.** `p1`, `p2`, `tipos`, los prompts y los dos flujos de generación salieron a `@gc/flujos`; `@gc/strategy` y `@gc/operaciones` soltaron `@gc/ai` y `@gc/pipeline`. Lo vigila `pnpm comprobar:aislamiento`, que corre en CI.
 
-### 2. La web no está aislada del modelo por código, solo por convención
+   **Ojo con cómo se describe esta garantía**, porque costó dos correcciones llegar a decirlo bien: no la da el resolvedor de módulos. Webpack **sí** resuelve `@gc/ai` desde `apps/web`, porque Next agrega el almacén plano de pnpm (`node_modules/.pnpm/node_modules`) a su `resolve.modules`. Lo que bloquea un import escrito a mano es `tsc --noEmit`; lo que vigila la regresión que `tsc` no ve —volver a declarar `@gc/ai` en un paquete del camino, incluso como `devDependency`— es la comprobación. Las dos corren en CI. El detalle está en el §3 del diseño.
 
-`@gc/operaciones` reexporta `flujos.ts` desde su barril, que arrastra `@gc/strategy` y con él `@gc/ai` al proceso del servidor web. Hoy es inofensivo —`@gc/ai` no tiene efectos de módulo— pero la regla "la web nunca llama al modelo" es una línea en un `package.json`, no una garantía.
+3. **Reabrir la grilla desde la web.** Botón en la cabecera cuando el estado es `aprobada`, con confirmación. Los dos textos de la interfaz que mandaban al usuario a la terminal apuntan ahora a la pantalla.
 
-El arreglo es el patrón que ya se usó al resolver un problema de bundle en esta misma rama: subrutas de exportación. `@gc/operaciones/flujos` para el CLI, y que la web importe solo lo que consume.
+4. **El renderizado tiene arnés.** `jsdom` más `@testing-library/react`, con el entorno pedido por archivo y las Server Actions sustituidas. Las cinco garantías que este punto listaba están afirmadas.
 
-### 3. Falta reabrir una grilla desde la web
+   Lo que este arnés enseñó, y vale más que las pruebas mismas: **cuatro veces apareció una prueba cuyo nombre prometía una mitad que ninguna aserción respaldaba** — «sin degradarlo», «cada slot cae en una celda», «y el vigente no», «se muestra aparte». Todas pasaban. Es el modo de falla característico de este repositorio y el arnés no lo cura: lo hace más fácil de cometer, porque una aserción contra el documento entero se ve igual que una contra el lugar correcto. La defensa que funcionó fue mutar el código y exigir que la prueba se pusiera roja por la razón exacta.
 
-`grilla:reabrir` existe en el CLI. La bandeja de aprobación de la Fase 1 debería ofrecerlo, porque aprobar deja el mes inmutable y hoy volver atrás exige terminal.
+5. **La deuda menor, ítem por ítem.** `EditorDePerfil` lee la versión del retorno de la acción; `React.cache` deduplica la resolución de organización dentro de la petición; un `GET` ya no puede crear la organización (`resolverOrganizacion` recibe permiso, el CLI sí y la web no); los slots fuera de la rejilla se muestran en un grupo aparte, con una función pura probada decidiendo cuáles son; `angulo` y `brief` ganaron `.max(200)` y `.max(2000)`; el manifiesto de `apps/web` quedó sin `@gc/brand` y `transpilePackages` sin `@gc/ai` ni `@gc/pipeline`.
 
-### 4. Lo que el renderizado sin pruebas cuesta, en concreto
+### Lo que esta rama NO cerró, a propósito
 
-Nada verifica, y fallaría en silencio: que las fichas descartadas se lean como descartadas; que cada slot caiga en una celda; que "Reintentar" repita la operación que falló; que el foco entre al diálogo y vuelva al disparador; que el número de versión del perfil sea el recién guardado.
-
-Lo que sí sobrevive sin pruebas de renderizado es todo lo que la capa de dominio revalida por su cuenta. Esa es la línea: las derivaciones del cliente que deciden escrituras deben vivir en funciones puras probadas — como se hizo con `derivadosVigentesDe` — y no en componentes.
-
-### 5. Deuda menor registrada
-
-`EditorDePerfil` lee la versión de props y no del retorno de la acción; `layout.tsx` y `page.tsx` resuelven la organización por separado en cada petición; un GET a `/` puede crear la organización por defecto; los slots fuera de las semanas renderizadas no se muestran pero sí cuentan; el texto editado no tiene cota de longitud; el manifiesto de dependencias de `apps/web` declara `@gc/brand` sin usarlo y omite dos que transpila.
+- **Las páginas async de servidor siguen sin pruebas de renderizado.** El arnés cubre componentes de cliente; cubrir las rutas exige un navegador real, que es el subsistema que el diseño de 1A descartó y este no revisó.
+- **La rama de auto-creación de organización sigue sin ser segura ante concurrencia** (Prioridad 2). Con la web fuera de ese camino, solo queda alcanzable desde el CLI, donde no hay concurrencia.
+- **La cota de `angulo`/`brief` no es un invariante**, porque `expandirDerivados` antepone texto. Registrado abajo, en Prioridad 2.
 
 ---
 
