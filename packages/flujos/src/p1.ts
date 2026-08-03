@@ -50,6 +50,10 @@ interface SalidaDeLaGeneracion {
 export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
   const pasoGenerar = definirPaso<EntradaP1, SalidaDeLaGeneracion>({
     nombre: 'generar_estrategia',
+    // Explícito aunque coincida con el valor por omisión: quien cambie la forma
+    // de `SalidaDeLaGeneracion` tiene que ver el número al lado para acordarse
+    // de subirlo.
+    versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       // Un periodo con formato inválido no cuesta nada: se valida antes de
       // tocar la base o el presupuesto.
@@ -98,6 +102,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
 
   const pasoPersistir = definirPaso<SalidaDeLaGeneracion, SalidaP1>({
     nombre: 'persistir_estrategia',
+    versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       const { brandId, period, datos, version } = entrada
 

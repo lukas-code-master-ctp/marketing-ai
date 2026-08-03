@@ -384,6 +384,139 @@ describe('ejecutarFlujo', () => {
     })
   })
 
+  it('reanudar reutiliza la salida de un paso cuya versión calza', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let vecesQueCorrioElPrimero = 0
+      // El segundo paso necesita fallar solo la primera vez, y no puede leerlo
+      // del contador del primero: al reanudar, el primero justamente no se
+      // reejecuta, así que ese contador se queda quieto y el segundo volvería
+      // a caer para siempre.
+      let debeFallarElSegundo = true
+
+      const flujo = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            versionDeSalida: 3,
+            ejecutar: async () => {
+              vecesQueCorrioElPrimero++
+              return { dato: 'a' }
+            },
+          }),
+          definirPaso<{ dato: string }, { visto: string }>({
+            nombre: 'dos',
+            ejecutar: async (entrada) => {
+              if (debeFallarElSegundo) throw transitorio('cae la primera vez')
+              return { visto: entrada.dato }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow(/cae la primera vez/)
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      const r = await ejecutarFlujo(
+        db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA,
+      )
+
+      expect(r.estado).toBe('completado')
+      expect(r.salida).toEqual({ visto: 'a' })
+      // El primero no se reejecutó: su salida se reutilizó.
+      expect(vecesQueCorrioElPrimero).toBe(1)
+    })
+  })
+
+  it('reanudar rechaza una salida de versión incompatible, nombrando el remedio', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const v1 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            versionDeSalida: 1,
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw transitorio('cae')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v1, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow()
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+
+      // Misma corrida, el paso `uno` ahora produce otra forma.
+      const v2 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { otro: string }>({
+            nombre: 'uno',
+            versionDeSalida: 2,
+            ejecutar: async () => ({ otro: 'b' }),
+          }),
+          definirPaso<unknown, { ok: boolean }>({
+            nombre: 'dos',
+            ejecutar: async () => ({ ok: true }),
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v2, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA),
+      ).rejects.toThrow(/genérala de nuevo/i)
+    })
+  })
+
+  it('una salida guardada sin sobre de versión se trata como incompatible', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const flujo = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw transitorio('cae')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow()
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+
+      // Simula una fila escrita antes de que el sobre existiera.
+      await db
+        .update(esquema.pipelineSteps)
+        .set({ output: { dato: 'a' } })
+        .where(eq(esquema.pipelineSteps.name, 'uno'))
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA),
+      ).rejects.toThrow(/genérala de nuevo/i)
+    })
+  })
+
   it('reintenta un fallo de serialización de Postgres y no una violación de única', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const organizationId = await sembrarOrg(db)

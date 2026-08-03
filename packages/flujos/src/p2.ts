@@ -58,6 +58,10 @@ interface SalidaDeLaPropuesta {
 export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
   const pasoProponer = definirPaso<EntradaP2, SalidaDeLaPropuesta>({
     nombre: 'proponer_grilla',
+    // Explícito aunque coincida con el valor por omisión: quien cambie la forma
+    // de `SalidaDeLaPropuesta` tiene que ver el número al lado para acordarse
+    // de subirlo.
+    versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       // Se consulta el estado antes del presupuesto y de cualquier llamada al
       // modelo: si la grilla ya salió de borrador el upsert la va a rechazar
@@ -149,6 +153,7 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
 
   const pasoPersistir = definirPaso<SalidaDeLaPropuesta, SalidaP2>({
     nombre: 'persistir_grilla',
+    versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       const { mes, estrategia, perfil, slots, strategyId } = entrada
 

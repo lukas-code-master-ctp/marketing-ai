@@ -13,7 +13,29 @@ export interface ContextoDePaso {
 
 export interface DefinicionDePaso<E, S> {
   nombre: string
+  /**
+   * Versión de la forma que devuelve este paso. Se sube a mano cuando la forma
+   * cambia, y sirve para que reanudar una corrida vieja no le entregue al paso
+   * siguiente una salida que ya no sabe leer.
+   *
+   * Es un contador humano y no un hash a propósito: un hash rechazaría por
+   * cambios cosméticos y entrenaría a la gente a ignorarlo.
+   */
+  versionDeSalida?: number
   ejecutar(entrada: E, ctx: ContextoDePaso): Promise<S>
+}
+
+const VERSION_POR_DEFECTO = 1
+
+/** El sobre con que el motor guarda la salida de un paso. Los pasos no lo ven:
+ *  el motor lo pone al guardar y lo quita al reutilizar. */
+interface SobreDeSalida {
+  __v: number
+  datos: unknown
+}
+
+function esSobre(valor: unknown): valor is SobreDeSalida {
+  return typeof valor === 'object' && valor !== null && '__v' in valor && 'datos' in valor
 }
 
 export function definirPaso<E, S>(p: DefinicionDePaso<E, S>): DefinicionDePaso<E, S> {
@@ -80,7 +102,7 @@ export async function ejecutarFlujo(
     // completado puede haber devuelto null o void y aun así no debe reejecutarse.
     const previo = await pasoCompletado(db, clave)
     if (previo) {
-      valor = previo.output
+      valor = desenvolver(previo.output, paso, runId)
       continue
     }
 
@@ -173,6 +195,35 @@ async function marcarCorridaFallida(
   }
 }
 
+/**
+ * Una corrida vieja pudo completar este paso con una versión anterior del
+ * código, cuya salida el paso siguiente ya no sabe leer. Antes eso llegaba
+ * como `undefined` y reventaba lejos del origen; ahora se rechaza aquí, con
+ * un mensaje que dice qué hacer.
+ *
+ * Una salida sin sobre es de antes de que el sobre existiera, así que también
+ * es incompatible.
+ */
+function desenvolver(
+  salida: unknown,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  paso: DefinicionDePaso<any, any>,
+  runId: string,
+): unknown {
+  const esperada = paso.versionDeSalida ?? VERSION_POR_DEFECTO
+
+  if (!esSobre(salida) || salida.__v !== esperada) {
+    const encontrada = esSobre(salida) ? String(salida.__v) : 'ninguna'
+    throw permanente(
+      `La corrida ${runId} guardó el paso "${paso.nombre}" con una versión de salida ` +
+        `incompatible (esperada ${esperada}, encontrada ${encontrada}). No se puede reanudar: ` +
+        `genérala de nuevo.`,
+    )
+  }
+
+  return salida.datos
+}
+
 /** Devuelve la fila completa, no su salida: distinguir "no hay fila" de
  *  "hay fila cuya salida es null" es lo que sostiene la idempotencia. */
 async function pasoCompletado(db: BaseDeDatos, clave: string) {
@@ -228,12 +279,18 @@ async function ejecutarPaso(
   for (let intento = 1; intento <= o.maxIntentos; intento++) {
     try {
       const salida = await paso.ejecutar(entrada, ctx)
+      // Se guarda envuelto, pero se devuelve pelado: dentro de una misma
+      // invocación el paso siguiente recibe exactamente lo mismo que antes.
+      const sobre: SobreDeSalida = {
+        __v: paso.versionDeSalida ?? VERSION_POR_DEFECTO,
+        datos: salida,
+      }
       await db
         .update(esquema.pipelineSteps)
         .set({
           status: 'completado',
           attempt: intento,
-          output: salida as object,
+          output: sobre,
           error: null,
           finishedAt: new Date(),
         })
