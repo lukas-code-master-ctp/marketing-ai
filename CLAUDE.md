@@ -48,9 +48,34 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **`@gc/ai` es inalcanzable desde `apps/web`, y eso lo garantiza pnpm.** Los flujos
 que llaman al modelo viven en `@gc/flujos`, que la web no declara. Si algún día
-`@gc/operaciones` o `@gc/strategy` vuelven a depender de `@gc/ai`, la regla "la
-web nunca llama al modelo" vuelve a ser una convención. Se comprueba con
-`pnpm --filter @gc/web why @gc/ai`.
+`@gc/operaciones` o `@gc/strategy` vuelven a depender de `@gc/ai` —incluso como
+`devDependency`, que pnpm materializa dentro del paquete y vuelve resoluble desde
+cualquier archivo suyo—, la regla "la web nunca llama al modelo" vuelve a ser una
+convención. Se comprueba resolviendo de verdad, desde `apps/web` y desde
+`packages/operaciones`:
+
+```bash
+node -e "
+const { createRequire } = require('node:module')
+const r = createRequire(process.cwd() + '/package.json')
+for (const p of ['@gc/ai', '@gc/pipeline', '@gc/flujos', '@gc/operaciones', '@gc/strategy']) {
+  try { r.resolve(p); console.log('RESUELVE  ' + p) }
+  catch { console.log('NO RESUELVE  ' + p) }
+}"
+```
+
+Desde `apps/web` los tres primeros deben decir `NO RESUELVE` y los dos últimos
+`RESUELVE`; desde `packages/operaciones`, `@gc/ai` y `@gc/pipeline` deben decir
+`NO RESUELVE`. **No sirve `import()`**: los paquetes del workspace son TypeScript
+sin compilar, así que `import()` rechaza para todos con `ERR_UNKNOWN_FILE_EXTENSION`
+y un `catch` genérico diría "no resuelve" hasta de los declarados —una comprobación
+que no puede fallar. `pnpm --filter @gc/web why @gc/ai` sirve para ver la cadena,
+pero no discrimina por sí solo: no recorre las `devDependencies` de un paquete
+transitivo, que es justo por donde se coló el agujero la primera vez.
+
+Corolario: **el sembrador de pruebas de `@gc/operaciones` no arranca el motor.**
+`src/pruebas/siembra.ts` inserta las filas de la grilla directamente; que P2
+produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 **Cada ruta de Next necesita su propio `export const dynamic = 'force-dynamic'`.** No se propaga entre árboles de rutas. Sin él la página se prerenderiza y congela sus datos en el build. Verificar en `pnpm --filter @gc/web build` que salga `ƒ` y no `○`.
 

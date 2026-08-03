@@ -15,10 +15,5 @@
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
     "drizzle-orm": "^0.36.0"
-  },
-  "devDependencies": {
-    "@gc/ai": "workspace:*",
-    "@gc/flujos": "workspace:*",
-    "@gc/pipeline": "workspace:*"
   }
 }

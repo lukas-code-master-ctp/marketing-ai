@@ -170,9 +170,6 @@ importers:
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@types/react@19.2.18)(postgres@3.4.9)(react@19.2.8)
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
 
   packages/operaciones:
     dependencies:
@@ -191,16 +188,6 @@ importers:
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@types/react@19.2.18)(postgres@3.4.9)(react@19.2.8)
-    devDependencies:
-      '@gc/ai':
-        specifier: workspace:*
-        version: link:../ai
-      '@gc/flujos':
-        specifier: workspace:*
-        version: link:../flujos
-      '@gc/pipeline':
-        specifier: workspace:*
-        version: link:../pipeline
 
   packages/pipeline:
     dependencies:

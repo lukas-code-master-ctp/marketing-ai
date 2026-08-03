@@ -1,11 +1,7 @@
-import { ClienteFalso } from '@gc/ai'
-import { PERFIL_VALIDO } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
-import { generarGrilla } from '@gc/flujos'
 import { describe, expect, it } from 'vitest'
 import { crearMarca, resolverOrganizacion } from './marcas.js'
-import { cargarPerfilDeObjeto } from './perfiles.js'
 
 const SIN_ENV = {}
 
@@ -128,25 +124,6 @@ describe('marcas por organización', () => {
 
       expect(error).toMatchObject({ clase: 'permanente' })
       expect((error as Error).message).toContain('parcelas')
-    })
-  })
-
-  it('los errores nombran la marca por su slug, no por su UUID', async () => {
-    await conBaseDeDatosDePrueba(async (db) => {
-      const organizationId = await resolverOrganizacion(db, { env: {} })
-      const ref = await crearMarca(db, organizationId, { slug: 'parcelas', nombre: 'CTP' })
-      await cargarPerfilDeObjeto(db, organizationId, {
-        slug: 'parcelas', perfil: PERFIL_VALIDO,
-      })
-
-      // Sin estrategia para el trimestre: el mensaje nace en @gc/strategy,
-      // que hoy solo conoce el brandId. Es el error que originó esta tarea.
-      const error = await generarGrilla(db, new ClienteFalso([]), organizationId, {
-        slug: 'parcelas', mes: '2026-09',
-      }).catch((e: unknown) => e)
-
-      expect((error as Error).message).toContain('parcelas')
-      expect((error as Error).message).not.toContain(ref.brandId)
     })
   })
 })
