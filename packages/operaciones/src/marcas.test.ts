@@ -89,6 +89,28 @@ describe('resolverOrganizacion', () => {
       ).rejects.toMatchObject({ clase: 'permanente' })
     })
   })
+
+  it('con crearSiFalta: false y ninguna organización, falla en vez de insertar', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(
+        resolverOrganizacion(db, { crearSiFalta: false, env: {} }),
+      ).rejects.toThrow(/no hay ninguna organización/i)
+
+      const filas = await db.select().from(esquema.organizations)
+      expect(filas).toHaveLength(0)
+    })
+  })
+
+  it('sin la opción sigue creando la organización por defecto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const id = await resolverOrganizacion(db, { env: {} })
+
+      const filas = await db.select().from(esquema.organizations)
+      expect(filas).toHaveLength(1)
+      expect(filas[0]!.slug).toBe('principal')
+      expect(filas[0]!.id).toBe(id)
+    })
+  })
 })
 
 describe('marcas por organización', () => {

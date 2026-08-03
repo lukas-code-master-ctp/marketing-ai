@@ -14,6 +14,16 @@ export interface ReferenciaResuelta {
 export interface OpcionesDeOrganizacion {
   org?: string
   env?: Record<string, string | undefined>
+  /**
+   * Si no existe ninguna organización, ¿se crea la por defecto?
+   *
+   * Por defecto `true`, que es lo que el CLI necesita para que un clon nuevo
+   * arranque con un solo comando. La web pasa `false`: resuelve la
+   * organización en cada petición, incluidas las de lectura, y con esto
+   * activado un `GET /` escribía en la base — además por la rama que no es
+   * segura ante concurrencia.
+   */
+  crearSiFalta?: boolean
 }
 
 /**
@@ -45,6 +55,14 @@ export async function resolverOrganizacion(
   if (todas.length === 1) return todas[0]!.id
 
   if (todas.length === 0) {
+    if (opciones.crearSiFalta === false) {
+      throw permanente(
+        'No hay ninguna organización en la base. Créala desde la línea de comandos con ' +
+          '"pnpm cli marca:crear --slug <slug> --nombre <nombre>", que crea la organización ' +
+          'por defecto junto con la primera marca.',
+      )
+    }
+
     const [nueva] = await db
       .insert(esquema.organizations)
       .values({ name: ORGANIZACION_POR_DEFECTO, slug: SLUG_POR_DEFECTO })

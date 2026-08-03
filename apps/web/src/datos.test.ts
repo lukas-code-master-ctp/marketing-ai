@@ -1,7 +1,7 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { describe, expect, it } from 'vitest'
-import { marcasDeLaOrganizacion } from './datos.js'
+import { marcasDeLaOrganizacion, organizacionPorDefecto } from './datos.js'
 
 describe('marcasDeLaOrganizacion', () => {
   it('devuelve las marcas de la organización ordenadas por antigüedad', async () => {
@@ -30,6 +30,17 @@ describe('marcasDeLaOrganizacion', () => {
       const marcas = await marcasDeLaOrganizacion(db, org!.id)
 
       expect(marcas.map((m) => m.slug)).toEqual(['primera', 'segunda'])
+    })
+  })
+})
+
+describe('organizacionPorDefecto', () => {
+  it('organizacionPorDefecto no crea la organización cuando no existe', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(organizacionPorDefecto(db)).rejects.toThrow(/No hay ninguna organización/)
+
+      const filas = await db.select().from(esquema.organizations)
+      expect(filas).toHaveLength(0)
     })
   })
 })
