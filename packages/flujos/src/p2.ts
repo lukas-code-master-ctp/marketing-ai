@@ -6,14 +6,14 @@ import { cargarPerfilVigente, contextoDeMarca, type TipoPerfilDeMarca } from '@g
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
+import {
+  Estrategia, GrillaPropuesta, expandirDerivados, hayBloqueantes, trimestreDe, validarGrilla,
+  type Problema, type TipoEstrategia, type TipoSlotPropuesto,
+} from '@gc/strategy'
 import { and, eq, ne } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { expandirDerivados } from './derivados.js'
-import { Estrategia, GrillaPropuesta, type TipoEstrategia, type TipoSlotPropuesto } from './esquemas.js'
-import { trimestreDe } from './periodos.js'
 import type { Dependencias } from './tipos.js'
-import { hayBloqueantes, validarGrilla, type Problema } from './validacion.js'
 
 export const TAREA_GRILLA = definirTarea({
   nombre: 'proponer_grilla',

@@ -10,12 +10,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gc/ai": "workspace:*",
     "@gc/brand": "workspace:*",
     "@gc/db": "workspace:*",
-    "@gc/pipeline": "workspace:*",
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
     "drizzle-orm": "^0.36.0"
+  },
+  "devDependencies": {
+    "@gc/ai": "workspace:*",
+    "@gc/flujos": "workspace:*",
+    "@gc/pipeline": "workspace:*"
   }
 }

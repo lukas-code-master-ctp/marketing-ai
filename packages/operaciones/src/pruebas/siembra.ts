@@ -1,8 +1,8 @@
 import { ClienteFalso } from '@gc/ai'
 import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
+import { crearFlujoGrilla } from '@gc/flujos'
 import { ejecutarFlujo } from '@gc/pipeline'
-import { crearFlujoGrilla } from '@gc/strategy'
 
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }

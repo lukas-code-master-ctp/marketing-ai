@@ -6,8 +6,9 @@ import { validarMes } from '@gc/strategy'
 import { isNotNull } from 'drizzle-orm'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { generarEstrategia, generarGrilla } from '@gc/flujos'
 import {
-  cargarPerfilDeObjeto, crearMarca, generarEstrategia, generarGrilla, resolverOrganizacion, verGrilla,
+  cargarPerfilDeObjeto, crearMarca, resolverOrganizacion, verGrilla,
 } from '@gc/operaciones'
 
 const MUESTRAS = fileURLToPath(new URL('../../../packages/strategy/muestras', import.meta.url))

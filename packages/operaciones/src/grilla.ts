@@ -5,7 +5,7 @@ import {
   Estrategia, SlotPropuesto, trimestreDe, validarGrilla, validarMes,
   type Problema, type TipoEstrategia,
 } from '@gc/strategy'
-import { and, asc, eq, inArray, ne } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, lt, ne } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
 
 export type EstadoDeGrilla = 'borrador' | 'aprobada' | 'en_ejecucion' | 'cerrada'
@@ -416,4 +416,68 @@ async function cargarEstrategiaDelTrimestre(
   const r = Estrategia.safeParse(fila.data)
   if (!r.success) return { tipo: 'invalida', periodo }
   return { tipo: 'ok', periodo, estrategia: r.data }
+}
+
+export interface FilaDeGrilla {
+  fecha: string
+  canal: string
+  formato: string
+  pilar: string
+  angulo: string
+  derivado: boolean
+  /**
+   * `grilla:ver` listaba los descartados igual que los vigentes porque ni
+   * siquiera seleccionaba la columna, mientras la cabecera de la web sí los
+   * excluía de sus conteos. Dos lectores de `plan_slots` en el mismo paquete
+   * con nociones distintas de lo que hay en la grilla.
+   */
+  descartado: boolean
+}
+
+export async function verGrilla(
+  db: BaseDeDatos,
+  organizationId: string,
+  args: { slug: string; mes: string },
+): Promise<FilaDeGrilla[]> {
+  const ref = await resolverMarca(db, organizationId, args.slug)
+
+  // La misma validación que usa `trimestreDe` en `grilla:generar`: dos copias
+  // del formato eran dos maneras de que un comando aceptara lo que el otro
+  // rechaza.
+  validarMes(args.mes)
+
+  const [anio, mes] = args.mes.split('-').map(Number)
+  const desde = new Date(Date.UTC(anio!, mes! - 1, 1))
+  const hasta = new Date(Date.UTC(anio!, mes!, 1))
+
+  const filas = await db
+    .select({
+      scheduledFor: esquema.planSlots.scheduledFor,
+      channel: esquema.planSlots.channel,
+      format: esquema.planSlots.format,
+      pillar: esquema.planSlots.pillar,
+      angle: esquema.planSlots.angle,
+      sourceSlotId: esquema.planSlots.sourceSlotId,
+      status: esquema.planSlots.status,
+    })
+    .from(esquema.planSlots)
+    .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
+    .where(
+      and(
+        eq(esquema.contentPlans.brandId, ref.brandId),
+        gte(esquema.planSlots.scheduledFor, desde),
+        lt(esquema.planSlots.scheduledFor, hasta),
+      ),
+    )
+    .orderBy(asc(esquema.planSlots.scheduledFor))
+
+  return filas.map((f) => ({
+    fecha: f.scheduledFor.toISOString().slice(0, 16).replace('T', ' '),
+    canal: f.channel,
+    formato: f.format,
+    pilar: f.pillar,
+    angulo: f.angle,
+    derivado: f.sourceSlotId !== null,
+    descartado: f.status === 'descartado',
+  }))
 }

@@ -9,8 +9,7 @@ import { permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { Estrategia, type TipoEstrategia } from './esquemas.js'
-import { validarPeriodo } from './periodos.js'
+import { Estrategia, validarPeriodo, type TipoEstrategia } from '@gc/strategy'
 import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({

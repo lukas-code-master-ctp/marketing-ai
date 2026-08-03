@@ -46,6 +46,12 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI. La web lee, edita y aprueba.
 
+**`@gc/ai` es inalcanzable desde `apps/web`, y eso lo garantiza pnpm.** Los flujos
+que llaman al modelo viven en `@gc/flujos`, que la web no declara. Si algún día
+`@gc/operaciones` o `@gc/strategy` vuelven a depender de `@gc/ai`, la regla "la
+web nunca llama al modelo" vuelve a ser una convención. Se comprueba con
+`pnpm --filter @gc/web why @gc/ai`.
+
 **Cada ruta de Next necesita su propio `export const dynamic = 'force-dynamic'`.** No se propaga entre árboles de rutas. Sin él la página se prerenderiza y congela sus datos en el build. Verificar en `pnpm --filter @gc/web build` que salga `ƒ` y no `○`.
 
 ## Arquitectura
@@ -56,7 +62,8 @@ Cada una existe porque romperla ya costó trabajo real.
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
-@gc/strategy    flujos P1 (estrategia) y P2 (grilla), validación, derivados
+@gc/strategy    esquemas, validación, derivados, periodos, lectura de estrategia
+@gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
 @gc/operaciones operaciones que comparten CLI y web
 apps/cli        comandos de operación
 apps/web        Next.js App Router, Server Components y Server Actions

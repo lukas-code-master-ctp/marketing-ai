@@ -1,4 +1,3 @@
 export * from './marcas.js'
 export * from './perfiles.js'
-export * from './flujos.js'
 export * from './grilla.js'
