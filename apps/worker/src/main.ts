@@ -3,7 +3,7 @@ import { crearConexion } from '@gc/db'
 import { config } from 'dotenv'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tomarYEjecutarUna } from './tomar.js'
+import { tomarYEjecutarUna, type ResultadoDeTurno } from './tomar.js'
 
 // Un solo `.env`, en la raíz. Se resuelve desde la ubicación de este archivo y
 // no desde el cwd, igual que hacen el CLI y `next.config.ts`: pnpm ejecuta el
@@ -26,7 +26,7 @@ async function principal(): Promise<void> {
   const url = process.env.DATABASE_URL
   if (!url) throw new Error('Falta DATABASE_URL')
 
-  const { db } = crearConexion(url)
+  const { db, cerrar } = crearConexion(url)
 
   // Misma construcción que el CLI, con una diferencia: `CARPETA_DE_MUESTRAS`
   // se resuelve contra la raíz del repositorio y no contra donde se escribió
@@ -40,10 +40,23 @@ async function principal(): Promise<void> {
       : {}),
   })
 
+  // Sin esto, `docker compose stop` mata el proceso a mitad de corrida y la
+  // fila queda `en_curso` con `error` nulo para siempre, indistinguible de una
+  // que sigue ejecutándose: nada en el repositorio recupera corridas colgadas.
+  // La bandera deja terminar el turno en marcha y sale entre uno y otro; si la
+  // señal llega mientras espera, tarda a lo sumo un `INTERVALO_MS` en salir.
+  let terminando = false
+  const detener = () => {
+    terminando = true
+    console.log('[worker] señal recibida, se sale al terminar el turno')
+  }
+  process.on('SIGTERM', detener)
+  process.on('SIGINT', detener)
+
   console.log('[worker] escuchando corridas pendientes')
 
-  for (;;) {
-    let resultado: string
+  while (!terminando) {
+    let resultado: ResultadoDeTurno
     try {
       resultado = await tomarYEjecutarUna(db, { cliente })
     } catch (error) {
@@ -56,8 +69,12 @@ async function principal(): Promise<void> {
       resultado = 'nada'
     }
 
+    if (terminando) break
     if (resultado === 'nada') await new Promise((r) => setTimeout(r, INTERVALO_MS))
   }
+
+  await cerrar()
+  console.log('[worker] cerrado')
 }
 
 principal().catch((error) => {

@@ -64,6 +64,9 @@ describe('tomarCorridaPendiente', () => {
       const tomada = await tomarCorridaPendiente(db)
 
       expect(tomada?.id).toBe(runId)
+      // El slug viaja con la corrida porque quien la ejecuta se lo pasa al
+      // motor como `brandSlug`: sin él los errores nombran el UUID de la marca.
+      expect(tomada?.brandSlug).toBe('parcelas')
       const [fila] = await db
         .select()
         .from(esquema.pipelineRuns)

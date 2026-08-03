@@ -156,6 +156,8 @@ Garantías que hoy nadie afirma:
 - El límite exacto del 80 % de presupuesto y la rama de marca inexistente.
 - El salto diciembre → enero en el cálculo de mes de `costos.ts`.
 - La guardia de borrador contra `en_ejecucion` y `cerrada` (solo se ejercita `aprobada`).
+- La guarda `ne(status, 'fallido')` de `registrarFallo` en el worker no es falsable por caja negra: el motor y el worker producen el mismo texto por construcción —`mensaje()` está duplicada— así que quitarla no rompe ninguna prueba. No es código muerto: el `UPDATE` sí escribe en los tres casos donde el motor no llegó a marcar nada (flujo desconocido, fallo en el preámbulo del motor, fallo al crear la corrida). Afirmarla exige exportar la función interna y probarla directa.
+- Nada recupera una corrida colgada en `en_curso`. Si el worker muere a mitad —o lo matan sin darle tiempo a terminar el turno—, la fila queda así para siempre, indistinguible de una que sigue ejecutándose. El botón de reanudar de una tarea futura la cubre desde la interfaz, pero no hay barrido automático.
 
 ---
 

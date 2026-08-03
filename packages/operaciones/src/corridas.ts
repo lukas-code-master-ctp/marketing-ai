@@ -29,6 +29,13 @@ export interface CorridaTomada {
   id: string
   organizationId: string
   brandId: string | null
+  /**
+   * El slug de la marca, o `null` si la corrida no tiene marca. Viaja junto a
+   * la corrida —y no lo consulta después quien la toma— porque es lo que el
+   * motor pasa a los pasos como `brandSlug`: sin él los mensajes de error que
+   * ve el usuario dicen el UUID de la marca en vez de su nombre.
+   */
+  brandSlug: string | null
   flow: string
   input: Record<string, unknown>
 }
@@ -88,6 +95,7 @@ interface FilaTomada {
   id: string
   organization_id: string
   brand_id: string | null
+  brand_slug: string | null
   flow: string
   input: Record<string, unknown>
 }
@@ -129,6 +137,14 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
   // bloqueo: si alguien edita esta consulta y pierde `FOR UPDATE SKIP
   // LOCKED`, esta cláusula sigue impidiendo que el UPDATE tome una fila que
   // ya no está pendiente.
+  //
+  // El slug sale en el mismo `RETURNING`, con una subconsulta correlacionada y
+  // no con un `FROM brands`: un `UPDATE ... FROM` se comporta como un join
+  // interno, así que una corrida sin marca —`brand_id` nulo— no encontraría
+  // pareja y **no se actualizaría**. La subconsulta devuelve `NULL` en ese
+  // caso y deja el UPDATE intacto. La organización también se compara porque
+  // es la tenencia que la clave foránea compuesta ya exige: aquí solo se
+  // escribe igual que en el resto del paquete.
   const filas = (await db.execute(sql`
     UPDATE pipeline_runs SET status = 'en_curso'
     WHERE status = 'pendiente' AND id = (
@@ -138,7 +154,11 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, organization_id, brand_id, flow, input
+    RETURNING id, organization_id, brand_id, flow, input, (
+      SELECT b.slug FROM brands b
+      WHERE b.id = pipeline_runs.brand_id
+        AND b.organization_id = pipeline_runs.organization_id
+    ) AS brand_slug
   `)) as unknown as FilaTomada[]
 
   const fila = filas[0]
@@ -148,6 +168,7 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
     id: fila.id,
     organizationId: fila.organization_id,
     brandId: fila.brand_id,
+    brandSlug: fila.brand_slug,
     flow: fila.flow,
     input: fila.input,
   }

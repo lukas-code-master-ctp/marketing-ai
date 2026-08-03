@@ -15,10 +15,10 @@
     "@gc/operaciones": "workspace:*",
     "@gc/pipeline": "workspace:*",
     "@gc/shared": "workspace:*",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0"
   },
   "devDependencies": {
-    "drizzle-orm": "^0.36.0",
     "tsx": "^4.19.1"
   }
 }

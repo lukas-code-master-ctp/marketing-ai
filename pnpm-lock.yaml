@@ -133,10 +133,10 @@ importers:
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1
-    devDependencies:
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@types/react@19.2.18)(postgres@3.4.9)(react@19.2.8)
+    devDependencies:
       tsx:
         specifier: ^4.19.1
         version: 4.23.1

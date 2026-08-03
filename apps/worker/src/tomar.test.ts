@@ -96,6 +96,36 @@ describe('tomarYEjecutarUna', () => {
         .where(eq(esquema.pipelineRuns.id, fila!.id))
       expect(despues!.status).toBe('fallido')
       expect(despues!.error).toMatch(/flujo_del_futuro/)
+      // Este es el único fallo cuyo mensaje escribe el worker de punta a
+      // punta: ocurre antes de que `ejecutarFlujo` llegue a correr, así que
+      // el motor no lo toca. Si el worker dejara de anteponer la clase, la
+      // pantalla mostraría este error sin decir si reintentar sirve.
+      expect(despues!.error).toContain('[permanente]')
+    })
+  })
+
+  // El worker es el único camino de ejecución detrás del navegador, así que si
+  // pierde el slug, el cien por ciento de los mensajes de error que ve el
+  // usuario nombra la marca por su UUID. El mes es de 2026-Q4, sin estrategia
+  // sembrada: el flujo falla en el primer paso con el mensaje que interpola
+  // `ctx.brandSlug`, sin llegar al cliente.
+  it('el error guardado nombra la marca por su slug y no por su UUID', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-10',
+      })
+
+      expect(await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]), env: ENV })).toBe(
+        'fallida',
+      )
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.error).toContain('La marca parcelas no tiene estrategia vigente')
+      expect(fila!.error).not.toContain(ref.brandId)
     })
   })
 })

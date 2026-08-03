@@ -36,10 +36,15 @@ export async function tomarYEjecutarUna(
       ...(deps.env !== undefined ? { env: deps.env } : {}),
     })
 
+    // El slug va junto al id porque los pasos lo usan como `nombreVisible` en
+    // todo mensaje de error que ve el usuario —sin estrategia vigente, grilla
+    // no regenerable, perfil ausente, presupuesto agotado—: sin él la pantalla
+    // muestra el UUID de la marca en vez de su nombre.
     await ejecutarFlujo(db, flujo, corrida.input, {
       organizationId: corrida.organizationId,
       runId: corrida.id,
       ...(corrida.brandId !== null ? { brandId: corrida.brandId } : {}),
+      ...(corrida.brandSlug !== null ? { brandSlug: corrida.brandSlug } : {}),
     })
 
     return 'completada'
