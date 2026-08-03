@@ -1,39 +1,29 @@
 'use client'
 
 import { useState } from 'react'
-import { aprobarGrillaAccion } from '../acciones.js'
+import { reabrirGrillaAccion } from '../acciones.js'
 
 /**
- * Botón de aprobar en la cabecera de la grilla. Solo se renderiza cuando
- * `page.tsx` decide que el estado es `borrador`; tras aprobar, la Server
- * Action revalida la ruta y el servidor vuelve a renderizar la página con
- * `estado === 'aprobada'`, lo que hace desaparecer este botón sin estado
- * local que lo controle.
+ * La puerta de vuelta de la aprobación. Solo se renderiza cuando `page.tsx`
+ * decide que el estado es `aprobada`; tras reabrir, la Server Action revalida
+ * la ruta y el servidor vuelve a renderizar con `estado === 'borrador'`, lo
+ * que hace desaparecer este botón sin estado local que lo controle.
  *
- * Pide confirmación porque aprobar es una puerta de un solo sentido desde
- * esta pantalla: con la grilla aprobada, editar y descartar dejan de estar
- * disponibles y el motor tampoco la regenera. Volver atrás existe, pero solo
- * por línea de comandos, así que la confirmación lo dice explícitamente en
- * vez de dejar al usuario buscándolo.
+ * Pide confirmación por simetría con `BotonAprobarGrilla`, no porque reabrir
+ * sea destructivo: no lo es. Lo que dice la confirmación es lo que sí importa
+ * —que la grilla vuelve a ser regenerable por el motor— porque regenerar sí
+ * reemplaza los slots.
  */
-export function BotonAprobarGrilla({
-  marca,
-  mes,
-  contentPlanId,
-}: {
-  marca: string
-  mes: string
-  contentPlanId: string
-}) {
+export function BotonReabrirGrilla({ marca, mes }: { marca: string; mes: string }) {
   const [confirmando, setConfirmando] = useState(false)
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
 
-  async function aprobar() {
+  async function reabrir() {
     setOcupado(true)
     setError(null)
 
-    const resultado = await aprobarGrillaAccion(marca, mes, contentPlanId)
+    const resultado = await reabrirGrillaAccion(marca, mes)
     if (!resultado.ok) {
       setError({ mensaje: resultado.mensaje, reintentable: resultado.reintentable })
       setOcupado(false)
@@ -50,25 +40,25 @@ export function BotonAprobarGrilla({
         <button
           type="button"
           onClick={() => setConfirmando(true)}
-          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+          className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
-          Aprobar grilla
+          Reabrir grilla
         </button>
       ) : (
         <div className="max-w-sm rounded border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-900">
           <p className="mb-2">
-            Aprobar la grilla de {mes} la deja fija: sus publicaciones dejan de poder editarse o
-            descartarse, y el mes ya no se regenera. Se puede deshacer con «Reabrir grilla», que
-            aparece en esta misma cabecera una vez aprobada.
+            Reabrir la grilla de {mes} la devuelve a borrador: sus publicaciones vuelven a poder
+            editarse y descartarse, y el motor vuelve a poder regenerar el mes — lo que reemplaza
+            los slots que haya.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               disabled={ocupado}
-              onClick={() => void aprobar()}
+              onClick={() => void reabrir()}
               className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              Sí, aprobar
+              Sí, reabrir
             </button>
             <button
               type="button"
@@ -88,7 +78,7 @@ export function BotonAprobarGrilla({
         <div className="max-w-xs rounded border border-red-300 bg-red-50 p-2 text-right text-xs text-red-800">
           <p>{error.mensaje}</p>
           {error.reintentable && (
-            <button type="button" onClick={() => void aprobar()} className="font-medium underline">
+            <button type="button" onClick={() => void reabrir()} className="font-medium underline">
               Reintentar
             </button>
           )}

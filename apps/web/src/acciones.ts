@@ -3,7 +3,13 @@
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
 import { conexion, organizacionPorDefecto } from './datos.js'
-import { aprobarGrilla, cargarPerfilDeObjeto, descartarSlot, editarSlot } from '@gc/operaciones'
+import {
+  aprobarGrilla,
+  cargarPerfilDeObjeto,
+  descartarSlot,
+  editarSlot,
+  reabrirGrilla,
+} from '@gc/operaciones'
 
 /**
  * `null` por defecto y no `void`: con `void` la propiedad `datos` seguiría
@@ -69,6 +75,18 @@ export async function aprobarGrillaAccion(
 ): Promise<Resultado> {
   return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
     await aprobarGrilla(db, organizationId, contentPlanId)
+    return null
+  })
+}
+
+/**
+ * Devuelve una grilla aprobada a borrador. `reabrirGrilla` solo acepta esa
+ * transición: desde `en_ejecucion` o `cerrada` no, porque ahí ya hay
+ * publicaciones en vuelo o cerradas y reabrir no las deshace.
+ */
+export async function reabrirGrillaAccion(marca: string, mes: string): Promise<Resultado> {
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await reabrirGrilla(db, organizationId, { slug: marca, mes })
     return null
   })
 }

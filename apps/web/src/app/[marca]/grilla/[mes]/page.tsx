@@ -4,6 +4,7 @@ import { grillaDelMes } from '@gc/operaciones'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 import { BotonAprobarGrilla } from '../../../../componentes/BotonAprobarGrilla.js'
+import { BotonReabrirGrilla } from '../../../../componentes/BotonReabrirGrilla.js'
 import { RejillaDelMes } from '../../../../componentes/RejillaDelMes.js'
 
 // `[marca]/grilla/[mes]` es un árbol de rutas propio: el `force-dynamic` de
@@ -82,6 +83,7 @@ export default async function PaginaDeGrilla({
           {grilla.estado === 'borrador' && grilla.contentPlanId && (
             <BotonAprobarGrilla marca={marca} mes={mes} contentPlanId={grilla.contentPlanId} />
           )}
+          {grilla.estado === 'aprobada' && <BotonReabrirGrilla marca={marca} mes={mes} />}
         </div>
       </header>
 
