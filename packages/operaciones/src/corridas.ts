@@ -1,6 +1,6 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, sql } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
 
 /**
@@ -115,14 +115,26 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
   // la propiedad se llama `startedAt` pero la columna física es `created_at`,
   // y `ORDER BY started_at` revienta con «column does not exist».
   //
+  // El desempate por `id` importa porque `defaultNow()` es `now()`, que en
+  // Postgres marca el *inicio* de la transacción: dos corridas encoladas
+  // dentro de la misma transacción comparten el mismo `created_at` exacto, y
+  // sin desempate el orden entre ellas queda arbitrario.
+  //
   // `db.execute` con el driver postgres-js devuelve el arreglo de filas
   // directamente —no un `{ rows }`—, igual que en `esquema.test.ts`.
+  //
+  // El `WHERE status = 'pendiente'` del UPDATE externo es redundante con el
+  // de la subconsulta en el camino feliz —Postgres ya filtró por eso al
+  // elegir el `id`— pero no depende de que la subconsulta se reevalúe tras el
+  // bloqueo: si alguien edita esta consulta y pierde `FOR UPDATE SKIP
+  // LOCKED`, esta cláusula sigue impidiendo que el UPDATE tome una fila que
+  // ya no está pendiente.
   const filas = (await db.execute(sql`
     UPDATE pipeline_runs SET status = 'en_curso'
-    WHERE id = (
+    WHERE status = 'pendiente' AND id = (
       SELECT id FROM pipeline_runs
       WHERE status = 'pendiente'
-      ORDER BY ${esquema.pipelineRuns.startedAt}
+      ORDER BY ${esquema.pipelineRuns.startedAt}, id
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
@@ -165,8 +177,17 @@ export async function corridaDe(
       ? sql`${esquema.pipelineRuns.input}->>'mes' = ${args.periodo}`
       : sql`${esquema.pipelineRuns.input}->>'period' = ${args.periodo}`
 
+  // `encoladaHace` se calcula en SQL, no como `Date.now()` de la aplicación
+  // menos `startedAt` de Postgres: si ambos relojes no coinciden exactamente
+  // —hoy es el mismo host, pero no siempre lo será— la resta entre relojes
+  // distintos puede dar un número negativo, y esa cifra es la que la pantalla
+  // usa para distinguir "en cola" de "nadie tomó esta generación".
   const [fila] = await db
-    .select()
+    .select({
+      ...getTableColumns(esquema.pipelineRuns),
+      encoladaHace: sql<number>`extract(epoch from now() - ${esquema.pipelineRuns.startedAt})`
+        .mapWith(Number),
+    })
     .from(esquema.pipelineRuns)
     .where(
       and(
@@ -199,6 +220,6 @@ export async function corridaDe(
     estado: fila.status,
     error: fila.error,
     pasoActual: paso?.name ?? null,
-    encoladaHace: Math.floor((Date.now() - fila.startedAt.getTime()) / 1000),
+    encoladaHace: Math.floor(fila.encoladaHace),
   }
 }

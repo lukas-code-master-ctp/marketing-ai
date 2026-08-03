@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   corridaDe, encolarEstrategia, encolarGrilla, tomarCorridaPendiente,
 } from './corridas.js'
+import { crearMarca } from './marcas.js'
 import { sembrarConEstrategia } from './pruebas/siembra.js'
 
 describe('encolarGrilla', () => {
@@ -31,6 +32,21 @@ describe('encolarGrilla', () => {
 
       await expect(
         encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-13' }),
+      ).rejects.toThrow()
+
+      const filas = await db.select().from(esquema.pipelineRuns)
+      expect(filas).toHaveLength(0)
+    })
+  })
+})
+
+describe('encolarEstrategia', () => {
+  it('rechaza un periodo mal escrito antes de encolar nada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+
+      await expect(
+        encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q9' }),
       ).rejects.toThrow()
 
       const filas = await db.select().from(esquema.pipelineRuns)
@@ -125,10 +141,17 @@ describe('tomarCorridaPendiente', () => {
           for update
         `)
 
-        resultado = await Promise.race([
-          tomarCorridaPendiente(db),
-          new Promise((r) => setTimeout(() => r(ESPERANDO), 2_000)),
-        ])
+        // El temporizador es solo la red de seguridad para el camino en rojo
+        // —si `tomarCorridaPendiente` se quedara esperando, el timeout es lo
+        // que da un resultado en vez de colgar la prueba—. En el camino verde
+        // se cancela: si no, sigue vivo dos segundos después de que la
+        // prueba ya terminó.
+        let temporizador: ReturnType<typeof setTimeout>
+        const espera = new Promise((r) => {
+          temporizador = setTimeout(() => r(ESPERANDO), 2_000)
+        })
+        resultado = await Promise.race([tomarCorridaPendiente(db), espera])
+        clearTimeout(temporizador!)
       })
 
       expect(resultado).toBeNull()
@@ -199,6 +222,50 @@ describe('corridaDe', () => {
     })
   })
 
+  // La tenencia real la garantiza `resolverMarca` —dos organizaciones no
+  // pueden compartir un `brandId`—, pero los dos `eq` de organización en el
+  // `where` de `corridaDe` son profundidad sin prueba propia. Dos
+  // organizaciones con una marca del mismo slug es el escenario donde, si se
+  // quitara cualquiera de los dos filtros, la consulta seguiría siendo válida
+  // pero podría cruzar corridas entre organizaciones.
+  // `brandId` y `runId` son UUID generados por Postgres, así que en los
+  // hechos ya son globalmente únicos: dado que el filtro por marca ya
+  // desambigua, quitar solo el filtro por organización no alcanza a romper
+  // un escenario con una marca por organización (el revisor ya lo comprobó:
+  // la tenencia no está en riesgo hoy porque el guardián real es
+  // `resolverMarca`). Por eso la organización `alfa` lleva una *segunda*
+  // marca con una corrida del mismo mes: ahí el filtro por organización sola
+  // no alcanza a elegir la marca correcta, y es lo que le da dientes a esta
+  // prueba en vez de una que nunca podría fallar.
+  it('no cruza corridas entre marcas ni entre organizaciones', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const orgs = await db
+        .insert(esquema.organizations)
+        .values([{ name: 'A', slug: 'alfa' }, { name: 'B', slug: 'beta' }])
+        .returning()
+      const alfa = orgs.find((o) => o.slug === 'alfa')!
+      const beta = orgs.find((o) => o.slug === 'beta')!
+
+      await crearMarca(db, alfa.id, { slug: 'parcelas', nombre: 'En alfa' })
+      await crearMarca(db, alfa.id, { slug: 'otra-marca', nombre: 'Otra en alfa' })
+      await crearMarca(db, beta.id, { slug: 'parcelas', nombre: 'En beta' })
+
+      const runAlfaParcelas = await encolarGrilla(db, alfa.id, { slug: 'parcelas', mes: '2026-10' })
+      await encolarGrilla(db, alfa.id, { slug: 'otra-marca', mes: '2026-10' })
+      const runBeta = await encolarGrilla(db, beta.id, { slug: 'parcelas', mes: '2026-10' })
+
+      const cAlfa = await corridaDe(db, alfa.id, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+      const cBeta = await corridaDe(db, beta.id, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+
+      expect(cAlfa?.id).toBe(runAlfaParcelas)
+      expect(cBeta?.id).toBe(runBeta)
+    })
+  })
+
   it('informa el paso en curso cuando lo hay', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
@@ -216,6 +283,38 @@ describe('corridaDe', () => {
       })
 
       expect(c?.pasoActual).toBe('proponer_grilla')
+    })
+  })
+
+  // Con un solo paso insertado, cambiar el `desc` del `ORDER BY` por `asc`
+  // deja esta prueba en verde igual: no hay nada que ordenar. Separar dos
+  // pasos en el tiempo es lo que le da al orden algo que afirmar, y por eso
+  // el paso más reciente es el segundo, no el primero.
+  it('informa el paso más reciente cuando hay más de uno', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db.insert(esquema.pipelineSteps).values({
+        organizationId: ref.organizationId,
+        runId,
+        name: 'proponer_grilla',
+        status: 'completado',
+        idempotencyKey: `${runId}:proponer_grilla`,
+      })
+      await new Promise((r) => setTimeout(r, 10))
+      await db.insert(esquema.pipelineSteps).values({
+        organizationId: ref.organizationId,
+        runId,
+        name: 'persistir_grilla',
+        status: 'en_curso',
+        idempotencyKey: `${runId}:persistir_grilla`,
+      })
+
+      const c = await corridaDe(db, ref.organizationId, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+
+      expect(c?.pasoActual).toBe('persistir_grilla')
     })
   })
 })
