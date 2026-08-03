@@ -1,24 +1,22 @@
 {
-  "name": "@gc/cli",
+  "name": "@gc/flujos",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "scripts": {
-    "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@gc/ai": "workspace:*",
-    "@gc/db": "workspace:*",
-    "@gc/flujos": "workspace:*",
-    "@gc/operaciones": "workspace:*",
-    "dotenv": "^16.4.5"
-  },
-  "devDependencies": {
     "@gc/brand": "workspace:*",
+    "@gc/db": "workspace:*",
+    "@gc/operaciones": "workspace:*",
+    "@gc/pipeline": "workspace:*",
+    "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
-    "drizzle-orm": "^0.36.0",
-    "tsx": "^4.19.1"
+    "drizzle-orm": "^0.36.0"
   }
 }

@@ -89,7 +89,7 @@ Es la tarea de riesgo del plan: mueve 93 pruebas y toca los imports del CLI. Va 
 
 Run:
 ```bash
-docker compose up -d && pnpm test 2>&1 | grep -E "Tests +[0-9]+ (passed|failed)"
+docker compose up -d && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: nueve líneas `Tests N passed`, sumando 252. Si no suman 252, **detente y reporta**: el plan asume ese punto de partida.
@@ -331,7 +331,7 @@ Esperado: sin errores. Si `tsc` reporta un import roto en `@gc/flujos`, vuelve a
 
 Run:
 ```bash
-pnpm test 2>&1 | grep -E "RUN  v|Tests +[0-9]+ (passed|failed)"
+pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'RUN  v|Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: **diez** paquetes ahora, no nueve, y la suma sigue siendo 252. `@gc/strategy` baja y `@gc/flujos` aparece con lo que perdió.
@@ -350,10 +350,18 @@ Esperado: que **no** liste ninguna cadena de dependencia. Si `@gc/ai` sigue apar
 Como segunda comprobación, que el import falle de verdad:
 
 ```bash
-cd apps/web && node -e "import('@gc/ai').then(()=>console.log('RESUELVE — MAL'),()=>console.log('NO RESUELVE — BIEN'))" ; cd ../..
+cd apps/web && node -e "
+const { createRequire } = require('node:module')
+const r = createRequire(process.cwd() + '/package.json')
+for (const p of ['@gc/ai', '@gc/pipeline', '@gc/flujos', '@gc/operaciones', '@gc/strategy']) {
+  try { r.resolve(p); console.log('RESUELVE  ' + p) }
+  catch { console.log('NO RESUELVE  ' + p) }
+}" ; cd ../..
 ```
 
-Esperado: `NO RESUELVE — BIEN`.
+Esperado: `@gc/ai`, `@gc/pipeline` y `@gc/flujos` en `NO RESUELVE`; `@gc/operaciones` y `@gc/strategy` en `RESUELVE`.
+
+Se usa `require.resolve` y no `import()`: con `import()` **todos** los paquetes rechazan, porque se distribuyen como TypeScript sin compilar y Node falla con `ERR_UNKNOWN_FILE_EXTENSION` antes de llegar a la resolución. Un `catch` genérico ahí daría "no resuelve" para cualquier paquete, incluidos los que sí están declarados — una comprobación que no puede fallar.
 
 - [ ] **Step 14: Limpiar el manifiesto de `apps/web`**
 
@@ -872,7 +880,7 @@ Para confirmar que la primera puede fallar, cambia temporalmente en `estrategias
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "RUN  v|Tests +[0-9]+ (passed|failed)"
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'RUN  v|Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: typecheck limpio; 258 pruebas (252 + 4 del lector + 2 de `perfiles`), sin fallos.
@@ -1052,7 +1060,7 @@ Ajusta los imports del archivo para que traiga `organizacionPorDefecto` de `./da
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "Tests +[0-9]+ (passed|failed)"
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: typecheck limpio, 261 pruebas, sin fallos.
@@ -1482,7 +1490,7 @@ Esperado: FAIL en las dos pruebas de foco.
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "Tests +[0-9]+ (passed|failed)"
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: typecheck limpio, 270 pruebas, sin fallos.
@@ -1676,7 +1684,7 @@ Esperado: FAIL en "anuncia la versión que devolvió la acción".
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "Tests +[0-9]+ (passed|failed)" && pnpm --filter @gc/web build
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)' && pnpm --filter @gc/web build
 ```
 
 Esperado: typecheck limpio, 273 pruebas sin fallos, build exitoso con las cuatro rutas en `ƒ`.
@@ -1941,7 +1949,7 @@ En `apps/web/src/componentes/BotonAprobarGrilla.tsx`, el párrafo de confirmaci�
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "Tests +[0-9]+ (passed|failed)" && pnpm --filter @gc/web build
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)' && pnpm --filter @gc/web build
 ```
 
 Esperado: typecheck limpio, 276 pruebas sin fallos, build exitoso con las cuatro rutas en `ƒ`.
@@ -2232,7 +2240,7 @@ Esperado: FAIL en ambas.
 
 Run:
 ```bash
-pnpm -r typecheck && pnpm test 2>&1 | grep -E "RUN  v|Tests +[0-9]+ (passed|failed)" && pnpm --filter @gc/web build
+pnpm -r typecheck && pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'RUN  v|Tests +[0-9]+ (passed|failed)' && pnpm --filter @gc/web build
 ```
 
 Esperado: typecheck limpio, 282 pruebas en diez paquetes sin fallos, build exitoso con las cuatro rutas en `ƒ`.
@@ -2264,7 +2272,7 @@ Antes de considerar la rama terminada, las tres comprobaciones obligatorias del 
 - [ ] **Las pruebas de dominio**
 
 ```bash
-pnpm test 2>&1 | grep -E "RUN  v|Tests +[0-9]+ (passed|failed)"
+pnpm test 2>&1 | sed 's/\[[0-9;]*m//g' | grep -E 'RUN  v|Tests +[0-9]+ (passed|failed)'
 ```
 
 Esperado: diez paquetes, 282 pruebas, cero fallos.

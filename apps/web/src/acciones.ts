@@ -3,9 +3,23 @@
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
 import { conexion, organizacionPorDefecto } from './datos.js'
-import { aprobarGrilla, cargarPerfilDeObjeto, descartarSlot, editarSlot } from '@gc/operaciones'
+import {
+  aprobarGrilla,
+  cargarPerfilDeObjeto,
+  descartarSlot,
+  editarSlot,
+  reabrirGrilla,
+} from '@gc/operaciones'
 
-export type Resultado = { ok: true } | { ok: false; mensaje: string; reintentable: boolean }
+/**
+ * `null` por defecto y no `void`: con `void` la propiedad `datos` seguiría
+ * siendo obligatoria y las cuatro acciones que no devuelven nada tendrían que
+ * declararla igual. Con `null`, `ejecutar` devuelve lo que devuelva su
+ * callback y ninguna de ellas se toca.
+ */
+export type Resultado<T = null> =
+  | { ok: true; datos: T }
+  | { ok: false; mensaje: string; reintentable: boolean }
 
 /**
  * Resuelve la organización, ejecuta la operación de dominio, revalida la
@@ -13,15 +27,15 @@ export type Resultado = { ok: true } | { ok: false; mensaje: string; reintentabl
  * español, ya nombran la marca por su slug y ya explican el remedio: se
  * muestran tal cual, sin envolverlos en un texto genérico.
  */
-async function ejecutar(
+async function ejecutar<T = null>(
   ruta: string,
-  fn: (db: Awaited<ReturnType<typeof conexion>>, organizationId: string) => Promise<void>,
-): Promise<Resultado> {
+  fn: (db: Awaited<ReturnType<typeof conexion>>, organizationId: string) => Promise<T>,
+): Promise<Resultado<T>> {
   const db = conexion()
   try {
-    await fn(db, await organizacionPorDefecto(db))
+    const datos = await fn(db, await organizacionPorDefecto(db))
     revalidatePath(ruta)
-    return { ok: true }
+    return { ok: true, datos }
   } catch (error) {
     return {
       ok: false,
@@ -36,9 +50,10 @@ export async function descartarSlotAccion(
   mes: string,
   slotId: string,
 ): Promise<Resultado> {
-  return ejecutar(`/${marca}/grilla/${mes}`, (db, organizationId) =>
-    descartarSlot(db, organizationId, slotId),
-  )
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await descartarSlot(db, organizationId, slotId)
+    return null
+  })
 }
 
 export async function editarSlotAccion(
@@ -47,9 +62,10 @@ export async function editarSlotAccion(
   slotId: string,
   campos: { angulo: string; brief: string },
 ): Promise<Resultado> {
-  return ejecutar(`/${marca}/grilla/${mes}`, (db, organizationId) =>
-    editarSlot(db, organizationId, slotId, campos),
-  )
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await editarSlot(db, organizationId, slotId, campos)
+    return null
+  })
 }
 
 export async function aprobarGrillaAccion(
@@ -57,9 +73,22 @@ export async function aprobarGrillaAccion(
   mes: string,
   contentPlanId: string,
 ): Promise<Resultado> {
-  return ejecutar(`/${marca}/grilla/${mes}`, (db, organizationId) =>
-    aprobarGrilla(db, organizationId, contentPlanId),
-  )
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await aprobarGrilla(db, organizationId, contentPlanId)
+    return null
+  })
+}
+
+/**
+ * Devuelve una grilla aprobada a borrador. `reabrirGrilla` solo acepta esa
+ * transición: desde `en_ejecucion` o `cerrada` no, porque ahí ya hay
+ * publicaciones en vuelo o cerradas y reabrir no las deshace.
+ */
+export async function reabrirGrillaAccion(marca: string, mes: string): Promise<Resultado> {
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await reabrirGrilla(db, organizationId, { slug: marca, mes })
+    return null
+  })
 }
 
 /**
@@ -69,8 +98,15 @@ export async function aprobarGrillaAccion(
  * reglas (proporciones que no suman 1, un pilar que no es snake_case, etc.)
  * vuelve como error `permanente` con el detalle de cuál regla falló, y ese
  * mensaje es el que ve el usuario tal cual.
+ *
+ * `cargarPerfilDeObjeto` ya devuelve la versión que quedó. Devolverla al
+ * cliente es lo que permite que el editor anuncie la versión real en vez de
+ * la que traía en props, que es la anterior hasta que la revalidación llega.
  */
-export async function guardarPerfilAction(slug: string, textoJson: string): Promise<Resultado> {
+export async function guardarPerfilAction(
+  slug: string,
+  textoJson: string,
+): Promise<Resultado<{ version: number }>> {
   let perfil: unknown
   try {
     perfil = JSON.parse(textoJson)
@@ -82,7 +118,7 @@ export async function guardarPerfilAction(slug: string, textoJson: string): Prom
     }
   }
 
-  return ejecutar(`/${slug}/perfil`, async (db, organizationId) => {
-    await cargarPerfilDeObjeto(db, organizationId, { slug, perfil })
-  })
+  return ejecutar(`/${slug}/perfil`, (db, organizationId) =>
+    cargarPerfilDeObjeto(db, organizationId, { slug, perfil }).then((version) => ({ version })),
+  )
 }

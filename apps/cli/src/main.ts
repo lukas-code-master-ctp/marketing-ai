@@ -2,9 +2,9 @@ import { resolverDesdeInvocacion } from './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
+import { generarEstrategia, generarGrilla } from '@gc/flujos'
 import {
-  cargarPerfilDeArchivo, crearMarca, generarEstrategia, generarGrilla, reabrirGrilla,
-  resolverOrganizacion, verGrilla,
+  cargarPerfilDeArchivo, crearMarca, reabrirGrilla, resolverOrganizacion, verGrilla,
 } from '@gc/operaciones'
 
 const AYUDA = `

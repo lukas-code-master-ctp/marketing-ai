@@ -1,7 +1,6 @@
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { describe, expect, it } from 'vitest'
-import { verGrilla } from './flujos.js'
-import { descartarSlot, grillaDelMes } from './grilla.js'
+import { descartarSlot, grillaDelMes, verGrilla } from './grilla.js'
 import { sembrarConGrilla } from './pruebas/siembra.js'
 
 describe('verGrilla', () => {

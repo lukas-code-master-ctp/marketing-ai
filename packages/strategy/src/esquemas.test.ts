@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GrillaPropuesta } from './esquemas.js'
+import { GrillaPropuesta, SlotPropuesto } from './esquemas.js'
 
 const slot = (hora: string) => ({
   fecha: '2026-09-30',
@@ -47,5 +47,28 @@ describe('GrillaPropuesta · hora', () => {
     expect(r.success).toBe(false)
     if (r.success) return
     expect(r.error.issues.map((i) => i.message).join(' ')).toContain('00:00–23:59')
+  })
+})
+
+describe('SlotPropuesto · cotas de longitud', () => {
+  // `angulo` y `brief` tenían mínimo y no máximo. Son los dos únicos campos que
+  // la web deja editar a mano, así que sin cota superior un pegado accidental
+  // se persistía completo. La cota es del dominio, no del formulario: por eso
+  // vive aquí y la hereda tanto la generación como `editarSlot`.
+  it('SlotPropuesto rechaza un ángulo o un brief pasados de largo', () => {
+    const base = {
+      fecha: '2026-09-03',
+      hora: '10:00',
+      canal: 'instagram' as const,
+      formato: 'carrusel',
+      pilar: 'educativo',
+      angulo: 'Un ángulo razonable',
+      brief: 'Un brief cualquiera con largo suficiente para pasar el mínimo.',
+    }
+
+    expect(SlotPropuesto.safeParse({ ...base, angulo: 'a'.repeat(201) }).success).toBe(false)
+    expect(SlotPropuesto.safeParse({ ...base, angulo: 'a'.repeat(200) }).success).toBe(true)
+    expect(SlotPropuesto.safeParse({ ...base, brief: 'b'.repeat(2001) }).success).toBe(false)
+    expect(SlotPropuesto.safeParse({ ...base, brief: 'b'.repeat(2000) }).success).toBe(true)
   })
 })

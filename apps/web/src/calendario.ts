@@ -1,11 +1,13 @@
 import type { SlotDeLaGrilla } from '@gc/operaciones'
 // `@gc/strategy/periodos` y no `@gc/strategy`: desde que `derivadosVigentesDe`
 // vive acá, este módulo lo importa `RejillaDelMes`, que es un componente de
-// cliente. El barril del paquete reexporta `p1`/`p2`, que arrastran @gc/ai y
-// @gc/db al bundle del navegador — y ahí `node:crypto` y `net` no existen: el
-// build de Next falla. La subruta trae solo las funciones de periodo, que no
-// dependen de nada de eso. El tipo de `@gc/operaciones` es `import type` y se
-// borra al compilar, así que no arrastra nada.
+// cliente. El barril del paquete arrastra @gc/db al bundle del navegador —vía
+// `esquemas.ts`, y desde la unificación de lectura de estrategia también vía
+// los constructores de consulta de drizzle de `estrategias.ts`— y ahí
+// `node:crypto` y `net` no existen: el build de Next falla. La subruta trae
+// solo las funciones de periodo, que no dependen de nada de eso. El tipo de
+// `@gc/operaciones` es `import type` y se borra al compilar, así que no
+// arrastra nada.
 import { validarMes } from '@gc/strategy/periodos'
 
 const DIA_EN_MS = 24 * 60 * 60 * 1000
@@ -88,4 +90,24 @@ export function derivadosVigentesDe(
   idDelPadre: string,
 ): SlotDeLaGrilla[] {
   return slots.filter((s) => s.idDelPadre === idDelPadre && !s.descartado)
+}
+
+/**
+ * Los slots cuya fecha no aparece en ninguna de las semanas renderizadas.
+ *
+ * Un slot así no se muestra pero sí cuenta —en `porCanal` y en los problemas
+ * que calcula `grillaDelMes`— y esa es la peor combinación: la cabecera dice
+ * que hay algo que la rejilla no enseña. La rejilla los pinta aparte.
+ *
+ * Vive aquí y no dentro del componente por el mismo motivo que
+ * `derivadosVigentesDe`: es una derivación sobre los datos cargados, y el
+ * renderizado tiene arnés pero la lógica que decide qué se muestra merece su
+ * propia prueba, independiente de cómo se pinte.
+ */
+export function slotsFueraDeLaRejilla(
+  slots: SlotDeLaGrilla[],
+  semanas: string[][],
+): SlotDeLaGrilla[] {
+  const renderizadas = new Set(semanas.flat())
+  return slots.filter((s) => !renderizadas.has(s.fecha))
 }

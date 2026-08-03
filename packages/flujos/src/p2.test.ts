@@ -402,6 +402,24 @@ describe('flujo P2 · grilla', () => {
     })
   })
 
+  it('falla de forma permanente si la estrategia guardada no valida contra su esquema', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db
+        .update(esquema.strategies)
+        .set({ data: { objetivos: 'esto no es un arreglo' } })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const fallo = ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
+      )
+
+      await expect(fallo).rejects.toMatchObject({ clase: 'permanente' })
+      await expect(fallo).rejects.toThrow(/no valida/)
+    })
+  })
+
   it('ignora una estrategia más reciente de otro trimestre', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)

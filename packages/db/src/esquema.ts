@@ -25,7 +25,10 @@ const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull()
 const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readonly string[]) =>
   check(nombreRestriccion, sql.raw(`${columna} in (${valores.map((v) => `'${v}'`).join(', ')})`))
 
-const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
+// Exportado —a diferencia de los otros ESTADOS_*— porque el lector de
+// estrategias de `@gc/strategy` deriva de él el tipo del estado que devuelve,
+// y repetir la lista allá sería una segunda fuente de verdad.
+export const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
 const ESTADOS_CONTENT_PLAN = ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'] as const
 const ESTADOS_PLAN_SLOT = ['planificado', 'descartado'] as const
 const ESTADOS_PIPELINE = ['en_curso', 'completado', 'fallido'] as const

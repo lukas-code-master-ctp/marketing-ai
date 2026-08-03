@@ -306,13 +306,7 @@ export function PanelDeDetalle({
             La grilla de {mes} está {ESTADO_EN_PROSA[estado]} y sus publicaciones ya no se editan
             ni se descartan.
             {estado === 'aprobada' && (
-              <>
-                {' '}
-                Para volver a editarla, reábrela con{' '}
-                <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
-                  pnpm cli grilla:reabrir --marca {marca} --mes {mes}
-                </code>
-              </>
+              <> Para volver a editarla, usa «Reabrir grilla» en la cabecera del mes.</>
             )}
           </p>
         ) : (

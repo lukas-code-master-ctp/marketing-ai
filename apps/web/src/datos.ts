@@ -1,6 +1,7 @@
 import { crearConexion, esquema, type BaseDeDatos } from '@gc/db'
 import { resolverOrganizacion } from '@gc/operaciones'
 import { asc, eq } from 'drizzle-orm'
+import { cache } from 'react'
 
 /**
  * Next.js reejecuta módulos entre peticiones en desarrollo; una conexión por
@@ -43,6 +44,16 @@ export async function marcasDeLaOrganizacion(
     .orderBy(asc(esquema.brands.createdAt))
 }
 
-export async function organizacionPorDefecto(db: BaseDeDatos): Promise<string> {
-  return resolverOrganizacion(db)
-}
+/**
+ * `cache` de React deduplica la llamada dentro de una misma petición:
+ * `layout.tsx` y `page.tsx` la piden por separado y antes eran dos consultas
+ * idénticas. No es estado global —el ámbito es la petición— así que no
+ * comparte nada entre usuarios ni entre peticiones.
+ *
+ * `crearSiFalta: false` porque esto corre en el camino de lectura: sin él, un
+ * `GET /` sobre una base vacía insertaba una fila. Crear la organización es
+ * del CLI.
+ */
+export const organizacionPorDefecto = cache(async (db: BaseDeDatos): Promise<string> => {
+  return resolverOrganizacion(db, { crearSiFalta: false })
+})

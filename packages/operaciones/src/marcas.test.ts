@@ -1,11 +1,7 @@
-import { ClienteFalso } from '@gc/ai'
-import { PERFIL_VALIDO } from '@gc/brand'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { describe, expect, it } from 'vitest'
 import { crearMarca, resolverOrganizacion } from './marcas.js'
-import { cargarPerfilDeObjeto } from './perfiles.js'
-import { generarGrilla } from './flujos.js'
 
 const SIN_ENV = {}
 
@@ -93,6 +89,28 @@ describe('resolverOrganizacion', () => {
       ).rejects.toMatchObject({ clase: 'permanente' })
     })
   })
+
+  it('con crearSiFalta: false y ninguna organización, falla en vez de insertar', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(
+        resolverOrganizacion(db, { crearSiFalta: false, env: {} }),
+      ).rejects.toThrow(/no hay ninguna organización/i)
+
+      const filas = await db.select().from(esquema.organizations)
+      expect(filas).toHaveLength(0)
+    })
+  })
+
+  it('sin la opción sigue creando la organización por defecto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const id = await resolverOrganizacion(db, { env: {} })
+
+      const filas = await db.select().from(esquema.organizations)
+      expect(filas).toHaveLength(1)
+      expect(filas[0]!.slug).toBe('principal')
+      expect(filas[0]!.id).toBe(id)
+    })
+  })
 })
 
 describe('marcas por organización', () => {
@@ -128,25 +146,6 @@ describe('marcas por organización', () => {
 
       expect(error).toMatchObject({ clase: 'permanente' })
       expect((error as Error).message).toContain('parcelas')
-    })
-  })
-
-  it('los errores nombran la marca por su slug, no por su UUID', async () => {
-    await conBaseDeDatosDePrueba(async (db) => {
-      const organizationId = await resolverOrganizacion(db, { env: {} })
-      const ref = await crearMarca(db, organizationId, { slug: 'parcelas', nombre: 'CTP' })
-      await cargarPerfilDeObjeto(db, organizationId, {
-        slug: 'parcelas', perfil: PERFIL_VALIDO,
-      })
-
-      // Sin estrategia para el trimestre: el mensaje nace en @gc/strategy,
-      // que hoy solo conoce el brandId. Es el error que originó esta tarea.
-      const error = await generarGrilla(db, new ClienteFalso([]), organizationId, {
-        slug: 'parcelas', mes: '2026-09',
-      }).catch((e: unknown) => e)
-
-      expect((error as Error).message).toContain('parcelas')
-      expect((error as Error).message).not.toContain(ref.brandId)
     })
   })
 })

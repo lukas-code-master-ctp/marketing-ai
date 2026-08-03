@@ -1,8 +1,8 @@
 import { guardarPerfil } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
-import { trimestreDe } from '@gc/strategy'
-import { and, desc, eq } from 'drizzle-orm'
+import { leerEstrategiaDelTrimestre, type LecturaDeEstrategia } from '@gc/strategy'
+import { desc, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { resolverMarca } from './marcas.js'
 
@@ -10,12 +10,6 @@ export interface PerfilConHistorial {
   version: number
   perfil: unknown
   versiones: { version: number; createdAt: Date }[]
-}
-
-export interface EstrategiaDelTrimestre {
-  periodo: string
-  estrategia: unknown
-  estado: string
 }
 
 export async function cargarPerfilDeObjeto(
@@ -70,33 +64,23 @@ export async function perfilConHistorial(
 }
 
 /**
- * La estrategia del trimestre al que pertenece `mes`, o `null` si la marca
- * no tiene ninguna cargada para ese periodo. Esto NO excluye las archivadas:
- * es una vista de solo lectura, así que mostrar el estado tal cual —incluida
- * "archivada"— es más útil que ocultar la fila.
+ * La estrategia del trimestre al que pertenece `mes`, por slug de marca.
  *
- * ⚠️ La gemela que de verdad se presta a confusión es
- * `cargarEstrategiaDelTrimestre`, en `grilla.ts`: mismo paquete, nombre casi
- * igual, filtrado opuesto (esa sí excluye las archivadas, porque alimenta
- * `validarGrilla` y ahí hay que medir contra la que rige hoy). El comentario
- * anterior citaba `cargarEstrategiaVigente` de `@gc/strategy`, que está en
- * otro paquete y nunca fue el riesgo.
+ * `archivadas: 'incluir'` porque alimenta una vista de solo lectura: mostrar
+ * la fila con su estado —"Archivada" incluido— es más útil que esconderla.
+ * La política va explícita aquí, que es el punto de haberla vuelto un
+ * parámetro; antes era una diferencia silenciosa con la gemela de `grilla.ts`.
+ *
+ * Devuelve la unión y no `| null`: la página necesita distinguir "no hay" de
+ * "hay pero está corrupta", y antes esto entregaba la columna cruda sin
+ * validar y la dejaba parseando por su cuenta.
  */
 export async function estrategiaDelTrimestre(
   db: BaseDeDatos,
   organizationId: string,
   slug: string,
   mes: string,
-): Promise<EstrategiaDelTrimestre | null> {
+): Promise<LecturaDeEstrategia> {
   const ref = await resolverMarca(db, organizationId, slug)
-  const periodo = trimestreDe(mes)
-
-  const [fila] = await db
-    .select()
-    .from(esquema.strategies)
-    .where(and(eq(esquema.strategies.brandId, ref.brandId), eq(esquema.strategies.period, periodo)))
-
-  if (!fila) return null
-
-  return { periodo, estrategia: fila.data, estado: fila.status }
+  return leerEstrategiaDelTrimestre(db, ref.brandId, mes, { archivadas: 'incluir' })
 }

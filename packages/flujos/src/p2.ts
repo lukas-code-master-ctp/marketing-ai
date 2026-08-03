@@ -6,14 +6,14 @@ import { cargarPerfilVigente, contextoDeMarca, type TipoPerfilDeMarca } from '@g
 import { esquema, type BaseDeDatos } from '@gc/db'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
-import { and, eq, ne } from 'drizzle-orm'
+import {
+  GrillaPropuesta, expandirDerivados, hayBloqueantes, leerEstrategiaDelTrimestre, validarGrilla,
+  type Problema, type TipoEstrategia, type TipoSlotPropuesto,
+} from '@gc/strategy'
+import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { expandirDerivados } from './derivados.js'
-import { Estrategia, GrillaPropuesta, type TipoEstrategia, type TipoSlotPropuesto } from './esquemas.js'
-import { trimestreDe } from './periodos.js'
 import type { Dependencias } from './tipos.js'
-import { hayBloqueantes, validarGrilla, type Problema } from './validacion.js'
 
 export const TAREA_GRILLA = definirTarea({
   nombre: 'proponer_grilla',
@@ -23,6 +23,13 @@ export const TAREA_GRILLA = definirTarea({
   maxTokensSalida: 8000,
 })
 
+// Aviso para quien despliegue esto: `fileURLToPath` corre en tiempo de
+// ejecución con la ruta absoluta de la máquina donde vive este checkout —
+// funciona en desarrollo local y en cualquier build hecho y ejecutado en la
+// misma máquina/imagen, pero si el CLI (o el worker que lo reemplace) corre
+// en una máquina distinta a la que generó el build, con una ruta de proyecto
+// distinta, la ruta absoluta ya no existe y `readFile(RUTA_PROMPT)` falla
+// con ENOENT.
 const RUTA_PROMPT = fileURLToPath(new URL('./prompts/proponer-grilla.md', import.meta.url))
 
 export interface EntradaP2 {
@@ -182,40 +189,32 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
   return { nombre: 'p2_grilla', pasos: [pasoProponer, pasoPersistir] }
 }
 
+/**
+ * Envoltorio sobre `leerEstrategiaDelTrimestre` que traduce sus dos casos de
+ * fallo a los `permanente` que este flujo lanzaba antes, con los mismos
+ * textos: quien genera una grilla no puede continuar sin estrategia, así que
+ * distinguir "no hay" de "hay pero no valida" solo cambia el mensaje.
+ */
 async function cargarEstrategiaVigente(
   db: BaseDeDatos,
   brandId: string,
   mes: string,
   nombreVisible?: string,
 ): Promise<{ id: string; estrategia: TipoEstrategia }> {
-  const periodo = trimestreDe(mes)
+  const lectura = await leerEstrategiaDelTrimestre(db, brandId, mes, { archivadas: 'excluir' })
 
-  // `(brand_id, period)` es único, así que hay a lo más una fila: no hace
-  // falta ordenar, y "la más reciente" deja de ser un criterio.
-  const [fila] = await db
-    .select()
-    .from(esquema.strategies)
-    .where(
-      and(
-        eq(esquema.strategies.brandId, brandId),
-        eq(esquema.strategies.period, periodo),
-        ne(esquema.strategies.status, 'archivada'),
-      ),
-    )
-
-  if (!fila) {
+  if (lectura.tipo === 'ausente') {
     throw permanente(
-      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${periodo}. ` +
+      `La marca ${nombreVisible ?? brandId} no tiene estrategia vigente para ${lectura.periodo}. ` +
         `Genérala antes de la grilla de ${mes}.`,
     )
   }
 
-  const r = Estrategia.safeParse(fila.data)
-  if (!r.success) {
+  if (lectura.tipo === 'invalida') {
     throw permanente(`La estrategia guardada de ${nombreVisible ?? brandId} no valida`)
   }
 
-  return { id: fila.id, estrategia: r.data }
+  return { id: lectura.id, estrategia: lectura.estrategia }
 }
 
 /** Acepta tanto la conexión como una transacción abierta. */

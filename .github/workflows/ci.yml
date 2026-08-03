@@ -23,4 +23,10 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      # La fuga que esto vigila —una dependencia hacia @gc/ai materializada en
+      # el node_modules de un paquete que la web arrastra— no rompe el build,
+      # ni el typecheck, ni las pruebas. Sin este paso, CI queda verde con el
+      # agujero abierto y el único detector depende de que alguien se acuerde.
+      - name: Comprobar aislamiento de la web respecto del modelo
+        run: pnpm comprobar:aislamiento
       - run: pnpm test

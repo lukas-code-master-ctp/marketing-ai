@@ -9,8 +9,7 @@ import { permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { Estrategia, type TipoEstrategia } from './esquemas.js'
-import { validarPeriodo } from './periodos.js'
+import { Estrategia, validarPeriodo, type TipoEstrategia } from '@gc/strategy'
 import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({
@@ -21,6 +20,13 @@ export const TAREA_ESTRATEGIA = definirTarea({
   maxTokensSalida: 3000,
 })
 
+// Aviso para quien despliegue esto: `fileURLToPath` corre en tiempo de
+// ejecución con la ruta absoluta de la máquina donde vive este checkout —
+// funciona en desarrollo local y en cualquier build hecho y ejecutado en la
+// misma máquina/imagen, pero si el CLI (o el worker que lo reemplace) corre
+// en una máquina distinta a la que generó el build, con una ruta de proyecto
+// distinta, la ruta absoluta ya no existe y `readFile(RUTA_PROMPT)` falla
+// con ENOENT.
 const RUTA_PROMPT = fileURLToPath(new URL('./prompts/generar-estrategia.md', import.meta.url))
 
 export interface EntradaP1 {

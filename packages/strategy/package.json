@@ -14,10 +14,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gc/ai": "workspace:*",
     "@gc/brand": "workspace:*",
     "@gc/db": "workspace:*",
-    "@gc/pipeline": "workspace:*",
     "@gc/shared": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "zod": "^3.23.8"
