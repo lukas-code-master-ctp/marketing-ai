@@ -545,6 +545,33 @@ describe('restricciones CHECK de enums', () => {
   })
 })
 
+describe('estado pendiente en pipeline_runs', () => {
+  it('pipeline_runs acepta el estado pendiente y rechaza uno inventado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Principal', slug: 'principal' })
+        .returning({ id: esquema.organizations.id })
+
+      const [corrida] = await db
+        .insert(esquema.pipelineRuns)
+        .values({ organizationId: org!.id, flow: 'p2_grilla', status: 'pendiente' })
+        .returning({ status: esquema.pipelineRuns.status })
+
+      expect(corrida!.status).toBe('pendiente')
+
+      await expect(
+        db.insert(esquema.pipelineRuns).values({
+          organizationId: org!.id,
+          flow: 'p2_grilla',
+          // el CHECK es la garantía, no el tipo de Drizzle
+          status: 'inventado' as never,
+        }),
+      ).rejects.toThrow()
+    })
+  })
+})
+
 /**
  * Catálogo, no comportamiento. Las pruebas de arriba solo se disparan cuando
  * alguien borra o inserta la fila justa, así que siete de las doce compuestas
