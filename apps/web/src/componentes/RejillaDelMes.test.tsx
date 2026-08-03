@@ -145,4 +145,45 @@ describe('RejillaDelMes', () => {
     // Y dice qué fecha es, que es lo único que explica por qué no está arriba.
     expect(within(aviso).queryByText('2026-11-15')).not.toBeNull()
   })
+
+  it('no muestra la sección de "fuera de la rejilla" cuando todos los slots caen dentro del mes', () => {
+    // Guarda el `> 0` del componente: con `>= 0` la sección aparecería
+    // siempre, con un aviso ámbar falso de "0 publicaciones caen fuera de
+    // 2026-09" en cada mes sano. Sin esta prueba esa mutación pasa las 35
+    // pruebas de `apps/web` sin que ninguna se dé cuenta.
+    const { container } = render(
+      <RejillaDelMes
+        marca="parcelas"
+        mes="2026-09"
+        estado="borrador"
+        semanas={semanasDelMes('2026-09')}
+        slots={[slot('a', '2026-09-01'), slot('b', '2026-09-15')]}
+      />,
+    )
+
+    expect(container.querySelector('section')).toBeNull()
+    expect(within(container).queryByText(/fuera de 2026-09/i)).toBeNull()
+  })
+
+  it('el encabezado de "fuera de la rejilla" usa el plural cuando hay más de un slot', () => {
+    // Guarda la rama plural del ternario singular/plural: invertirlo deja
+    // pasar "1 publicación cae fuera de" con dos slots fuera, y la prueba
+    // del singular (arriba, con un solo slot) no lo detecta porque su regex
+    // solo pide que el texto contenga "fuera de 2026-09", cierto en ambas
+    // ramas.
+    const { container } = render(
+      <RejillaDelMes
+        marca="parcelas"
+        mes="2026-09"
+        estado="borrador"
+        semanas={semanasDelMes('2026-09')}
+        slots={[slot('fuera1', '2026-11-15'), slot('fuera2', '2026-12-01')]}
+      />,
+    )
+
+    expect(
+      within(container).getByText('2 publicaciones caen fuera de 2026-09'),
+    ).not.toBeNull()
+    expect(within(container).queryByText(/^1 publicación cae fuera de/)).toBeNull()
+  })
 })

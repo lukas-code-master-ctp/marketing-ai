@@ -111,13 +111,13 @@ export function RejillaDelMes({
             {mes}
           </h2>
           <p className="mb-2 text-xs text-amber-800">
-            Su fecha no corresponde a ningún día de este calendario, así que no aparece arriba —
-            pero sí cuenta en los totales de la cabecera.
+            Su fecha no corresponde a ningún día de este calendario, así que no aparece arriba. Si
+            no está descartada, sí cuenta en los totales de la cabecera.
           </p>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-2">
             {fueraDeLaRejilla.map((s) => (
-              <div key={s.id}>
-                <span className="mr-2 text-xs text-amber-900">{s.fecha}</span>
+              <div key={s.id} className="flex flex-col gap-0.5">
+                <span className="text-xs text-amber-900">{s.fecha}</span>
                 <FichaDeSlot slot={s} onSeleccionar={abrir} />
               </div>
             ))}
