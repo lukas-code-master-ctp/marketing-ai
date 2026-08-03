@@ -31,11 +31,27 @@ const VERSION_POR_DEFECTO = 1
  *  el motor lo pone al guardar y lo quita al reutilizar. */
 interface SobreDeSalida {
   __v: number
-  datos: unknown
+  /**
+   * Opcional a la fuerza: `JSON.stringify` descarta las claves cuyo valor es
+   * `undefined`, así que un paso que devuelve void persiste `{"__v":1}` y nada
+   * más. La clave ausente es entonces un sobre legítimo, no uno corrupto.
+   */
+  datos?: unknown
 }
 
+/**
+ * El sobre se reconoce solo por `__v`, y se exige que sea un número: `datos`
+ * puede faltar (paso que devuelve void), y un `__v` de otro tipo viene de una
+ * fila que nunca fue un sobre —dejarlo pasar produciría un mensaje de rechazo
+ * que dice "encontrada [object Object]".
+ */
 function esSobre(valor: unknown): valor is SobreDeSalida {
-  return typeof valor === 'object' && valor !== null && '__v' in valor && 'datos' in valor
+  return (
+    typeof valor === 'object' &&
+    valor !== null &&
+    '__v' in valor &&
+    typeof (valor as { __v: unknown }).__v === 'number'
+  )
 }
 
 export function definirPaso<E, S>(p: DefinicionDePaso<E, S>): DefinicionDePaso<E, S> {
@@ -98,18 +114,21 @@ export async function ejecutarFlujo(
   for (const paso of flujo.pasos) {
     const clave = `${runId}:${paso.nombre}`
 
-    // Se pregunta por la existencia de la fila, no por su contenido: un paso
-    // completado puede haber devuelto null o void y aun así no debe reejecutarse.
-    const previo = await pasoCompletado(db, clave)
-    if (previo) {
-      valor = desenvolver(previo.output, paso, runId)
-      continue
-    }
-
+    // Reutilizar y ejecutar comparten el mismo `try` a propósito: un rechazo por
+    // versión también deja la corrida detenida, y `reanudarCorrida` ya la puso
+    // en 'en_curso'. Fuera del try, ese rechazo la abandonaría ahí —en curso y
+    // sin error— que es justo el estado que este archivo declara inaceptable
+    // más abajo, y además borraría el diagnóstico que la web va a mostrar.
     try {
-      valor = await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
-        maxIntentos, dormir, aleatorio,
-      })
+      // Se pregunta por la existencia de la fila, no por su contenido: un paso
+      // completado puede haber devuelto null o void y aun así no debe
+      // reejecutarse.
+      const previo = await pasoCompletado(db, clave)
+      valor = previo
+        ? desenvolver(previo.output, paso, runId)
+        : await ejecutarPaso(db, paso, valor, ctxPaso, clave, {
+            maxIntentos, dormir, aleatorio,
+          })
     } catch (error) {
       await marcarCorridaFallida(db, runId, error)
       throw error
@@ -213,14 +232,16 @@ function desenvolver(
   const esperada = paso.versionDeSalida ?? VERSION_POR_DEFECTO
 
   if (!esSobre(salida) || salida.__v !== esperada) {
-    const encontrada = esSobre(salida) ? String(salida.__v) : 'ninguna'
+    const hallazgo = esSobre(salida) ? `encontrada ${salida.__v}` : 'no se encontró ninguna'
     throw permanente(
       `La corrida ${runId} guardó el paso "${paso.nombre}" con una versión de salida ` +
-        `incompatible (esperada ${esperada}, encontrada ${encontrada}). No se puede reanudar: ` +
-        `genérala de nuevo.`,
+        `incompatible (esperada ${esperada}, ${hallazgo}). No se puede reanudar: ` +
+        `genera el contenido de nuevo.`,
     )
   }
 
+  // `salida.datos` da `undefined` cuando la clave no está, que es exactamente lo
+  // que devolvió el paso al ejecutarse en vivo. Reanudar entrega lo mismo.
   return salida.datos
 }
 

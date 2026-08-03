@@ -102,6 +102,8 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
 
   const pasoPersistir = definirPaso<SalidaDeLaGeneracion, SalidaP1>({
     nombre: 'persistir_estrategia',
+    // Explícito aunque coincida con el valor por omisión: quien cambie la forma
+    // de `SalidaP1` tiene que ver el número al lado para acordarse de subirlo.
     versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       const { brandId, period, datos, version } = entrada

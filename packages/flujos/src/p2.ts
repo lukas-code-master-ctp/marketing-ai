@@ -153,6 +153,8 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
 
   const pasoPersistir = definirPaso<SalidaDeLaPropuesta, SalidaP2>({
     nombre: 'persistir_grilla',
+    // Explícito aunque coincida con el valor por omisión: quien cambie la forma
+    // de `SalidaP2` tiene que ver el número al lado para acordarse de subirlo.
     versionDeSalida: 1,
     ejecutar: async (entrada, ctx) => {
       const { mes, estrategia, perfil, slots, strategyId } = entrada
