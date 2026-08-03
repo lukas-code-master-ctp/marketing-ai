@@ -21,7 +21,7 @@ Dos de ellos lo son de forma concreta. El lector de estrategia está triplicado 
 
 | Decisión | Elección | Razón |
 |---|---|---|
-| Aislar la web del modelo | **Separar `@gc/flujos` como paquete** | La garantía la da el resolvedor de pnpm, no una prueba ni una convención |
+| Aislar la web del modelo | **Separar `@gc/flujos` como paquete** | Deja el import fuera del alcance de `tsc` y el paquete fuera del grafo de la web: dos cosas automatizadas, en vez de una convención (ver la corrección en §3 — no es el resolvedor del bundler quien lo impide) |
 | Unificar el lector de estrategia | **Uno solo, con la política de archivadas como parámetro** | Ver §4 |
 | Pruebas de renderizado | **Arnés de componentes de cliente, sin navegador** | Cubre las cinco garantías listadas sin montar el subsistema que 1A descartó |
 | Auto-creación de la organización | **Solo el CLI puede crearla** | Un `GET` no debe escribir |
@@ -63,7 +63,13 @@ Y los dos paquetes que quedan atrás **borran `@gc/ai` y `@gc/pipeline` de sus m
 | `@gc/operaciones` | `marcas`, `perfiles`, `grilla` | `@gc/ai`, `@gc/pipeline` |
 | `@gc/flujos` | `p1`, `p2`, `tipos`, `flujos` | — |
 
-Con el `node_modules` aislado de pnpm, `apps/web` deja de poder resolver `@gc/ai` aunque alguien escriba el import a mano. Es un error de resolución, no una revisión de código que puede pasarse.
+Con el `node_modules` aislado de pnpm, `apps/web` deja de poder resolver `@gc/ai` aunque alguien escriba el import a mano.
+
+> **Corrección posterior a la implementación (revisión adversarial de rama).** Este párrafo decía además «Es un error de resolución, no una revisión de código que puede pasarse». Es falso para el bundler y se comprobó: con un import de `ClienteOpenRouter` en `apps/web/src/datos.ts` y `typescript: { ignoreBuildErrors: true }` para aislar webpack de `tsc`, el build compila y `https://openrouter.ai/api/v1/chat/completions` aparece dentro de `apps/web/.next/server/chunks/`. Next agrega `node_modules/.pnpm/node_modules` —el almacén plano de pnpm, con un enlace a todos los paquetes del workspace— a su `resolve.modules`, porque Next mismo está instalado ahí. Node no mira ese directorio; webpack sí.
+>
+> Lo que de verdad bloquea el import escrito a mano es **`tsc --noEmit`** (`TS2307`), que resuelve como Node. Es una garantía de tipos, no de resolución. Y lo que vigila la regresión que `tsc` no puede ver —volver a declarar `@gc/ai` en un paquete del camino, incluso como `devDependency`— es **`pnpm comprobar:aislamiento`**, que desde esta corrección deriva su conjunto auditado del cierre transitivo de dependencias de workspace de `apps/web` (§8) y no de `transpilePackages`. Las dos corren en CI.
+>
+> El enfoque elegido sigue siendo el correcto: el corte de paquetes es lo que hace que `tsc` y la comprobación de grafo tengan algo que exigir. Lo que cambia es cómo se describe la garantía — automatizada y verificada en cada push, no imposible por construcción.
 
 ### Direcciones y ciclos
 
@@ -226,7 +232,7 @@ Se resuelve casi solo con §3: `@gc/ai` y `@gc/pipeline` salen de `transpilePack
 
 Cada parte con la prueba que la haría fallar si se revierte:
 
-- **Separación de paquetes:** la suite completa verde es la prueba. Más una comprobación explícita de que `@gc/ai` no aparece en el cierre transitivo de dependencias de `apps/web` (`pnpm why`).
+- **Separación de paquetes:** la suite completa verde es la prueba. Más una comprobación explícita de que `@gc/ai` no aparece en el cierre transitivo de dependencias de `apps/web` (`pnpm why`). — *Implementado como `scripts/comprobar-aislamiento.mjs`, que recorre los `package.json` desde `apps/web` para armar ese cierre e intenta resolver los tres módulos prohibidos desde cada paquete. Una primera versión derivaba el conjunto de `transpilePackages`, que se podía achicar en silencio; se corrigió al cierre que este punto pedía. Corre en CI.*
 - **Lector unificado:** que `'excluir'` no devuelva una archivada y `'incluir'` sí; que una estrategia corrupta salga como `invalida` **por los tres caminos**, que es el defecto que se está cerrando; que el mensaje de P2 siga nombrando el periodo faltante.
 - **Reabrir desde la web:** la operación ya está probada; la acción se prueba como las otras cuatro.
 - **Arnés:** las cinco garantías de §6, cada una rota a propósito antes de darse por buena.

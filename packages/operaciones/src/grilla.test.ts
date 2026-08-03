@@ -169,6 +169,57 @@ describe('grillaDelMes', () => {
       expect(corrupta.problemas[0]!.detalle).toContain('2026-Q3')
     })
   })
+
+  it('no recalcula los problemas contra una estrategia archivada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+
+      // `(brand_id, period)` es único, así que archivar la estrategia del
+      // trimestre no la reemplaza por otra: deja a la grilla ya generada sin
+      // nada vigente contra qué medirse. Por eso `recalcularProblemas` lee con
+      // `{ archivadas: 'excluir' }` — y ese era el único de los tres sitios de
+      // llamada del lector unificado que ninguna prueba fijaba: mutarlo a
+      // `'incluir'` dejaba la suite entera en verde.
+
+      // Control: con la estrategia vigente, esta grilla SÍ produce un problema
+      // que la nombra. Sin él, la afirmación de más abajo pasaría igual aunque
+      // el lector devolviera la archivada, porque no habría nada que
+      // distinguir. El mix pide tiktok tres veces por semana y la grilla no
+      // tiene ni un slot de tiktok.
+      await db
+        .update(esquema.strategies)
+        .set({
+          data: {
+            objetivos: [{ nombre: 'Alcance', metrica: 'alcance', meta: '+10%' }],
+            mensajesClave: ['mensaje uno largo', 'mensaje dos largo'],
+            mixDeCanales: [
+              { canal: 'blog', publicacionesPorSemana: 1 },
+              { canal: 'linkedin', publicacionesPorSemana: 1 },
+              { canal: 'instagram', publicacionesPorSemana: 1 },
+              { canal: 'tiktok', publicacionesPorSemana: 3 },
+            ],
+            reciclaje: [{ desde: 'blog', hacia: ['linkedin', 'instagram'], diasDespues: 2 }],
+            temasPrioritarios: ['factibilidad de agua'],
+          },
+        })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const vigente = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(vigente.problemas.some((p) => p.detalle.includes('tiktok'))).toBe(true)
+
+      // Archivada: la grilla se sigue viendo entera —retirar la estrategia no
+      // esconde lo que ya se planificó— pero sus problemas dejan de calcularse
+      // contra ella.
+      await db
+        .update(esquema.strategies)
+        .set({ status: 'archivada' })
+        .where(eq(esquema.strategies.brandId, ref.brandId))
+
+      const archivada = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(archivada.slots).toHaveLength(12)
+      expect(archivada.problemas).toEqual([])
+    })
+  })
 })
 
 describe('descartarSlot, editarSlot y aprobarGrilla', () => {

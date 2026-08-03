@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 // Comprueba de verdad la garantía "la web nunca llama al modelo": que
 // `@gc/ai`, `@gc/pipeline` y `@gc/flujos` sean irresolubles desde `apps/web`
-// y desde cada paquete que `apps/web/next.config.ts` transpila (los cinco
-// listados en `transpilePackages`, no solo dos). Cualquiera de esos seis
-// destinos (los cinco paquetes más la app) puede reabrir el agujero: pnpm
+// y desde cada paquete del workspace que `apps/web` arrastra, directo o
+// transitivo. Cualquiera de esos destinos puede reabrir el agujero: pnpm
 // materializa una dependencia dentro del `node_modules` del paquete que la
 // declara, incluso si es `devDependency`, y eso la vuelve resoluble desde
-// cualquier archivo de ese paquete — la web lo carga igual porque lo
-// transpila entero.
+// cualquier archivo de ese paquete — la web lo carga igual, porque un paquete
+// que está en su cierre de dependencias termina en su bundle.
+//
+// El conjunto auditado sale del **cierre transitivo de dependencias de
+// workspace de `apps/web`**, recorriendo los `package.json` desde ahí hacia
+// abajo. Antes salía de `transpilePackages` en `apps/web/next.config.ts`, y
+// eso era un conjunto que se podía reducir en silencio: ese mismo archivo
+// documenta que su lista NO controla la resolución, así que quitar una
+// entrada dejaba de auditar un paquete sin cambiar nada de lo que la web
+// realmente carga. El cierre de dependencias no se puede achicar sin cambiar
+// el grafo de verdad, que es justo la regresión que esto vigila.
 //
 // Se resuelve con `createRequire(<paquete>/package.json).resolve(...)`,
 // nunca con `import()`: todos los paquetes del workspace se distribuyen como
@@ -20,57 +28,106 @@
 // sí depende de `@gc/ai` y `@gc/pipeline`, ambos deben resolver. Sin este
 // control, un script roto que dijera "no resuelve" a todo pasaría en verde
 // sin comprobar nada.
+//
+// Lo que esta comprobación NO es: una garantía del bundler. El webpack de
+// Next resuelve `@gc/ai` desde `apps/web` igual, porque su `resolve.modules`
+// incluye `node_modules/.pnpm/node_modules`, el almacén plano de pnpm, donde
+// hay un enlace a todos los paquetes del workspace. Ver CLAUDE.md: quien
+// bloquea el import escrito a mano es `tsc --noEmit`; quien vigila el grafo
+// de dependencias es este script; y quien los ejecuta a los dos en cada push
+// es CI.
 
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import ts from 'typescript'
 
 const raizDir = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-const rutaNextConfig = path.join(raizDir, 'apps/web/next.config.ts')
+
+const PAQUETE_RAIZ = '@gc/web'
+const MODULOS_PROHIBIDOS = ['@gc/ai', '@gc/pipeline', '@gc/flujos']
 
 /**
- * Lee `transpilePackages` de `apps/web/next.config.ts` parseando su AST con
- * el compilador de TypeScript, en vez de repetir la lista a mano: así una
- * entrada nueva en esa lista queda auditada sola, sin tocar este script.
+ * Índice `nombre de paquete -> directorio`, leyendo el `name` real de cada
+ * `package.json` en vez de suponer que `@gc/<x>` vive en `packages/<x>`:
+ * `@gc/web` y `@gc/cli` viven en `apps/`, así que esa convención nunca fue
+ * cierta del todo.
+ *
+ * Los globos salen de `pnpm-workspace.yaml`, que es la única definición del
+ * workspace. Solo se soportan los de la forma `<prefijo>/*`, que son los dos
+ * que hay; cualquier otro se rechaza en vez de ignorarse en silencio.
  */
-function leerTranspilePackages(rutaArchivo) {
-  const texto = readFileSync(rutaArchivo, 'utf8')
-  const fuente = ts.createSourceFile(rutaArchivo, texto, ts.ScriptTarget.Latest, true)
-  let paquetes = null
+function indexarPaquetesDelWorkspace() {
+  const yaml = readFileSync(path.join(raizDir, 'pnpm-workspace.yaml'), 'utf8')
+  const globos = yaml
+    .split('\n')
+    .map((linea) => linea.trim())
+    .filter((linea) => linea.startsWith('- '))
+    .map((linea) => linea.slice(2).trim().replace(/^["']|["']$/g, ''))
 
-  function visitar(nodo) {
-    if (
-      ts.isPropertyAssignment(nodo) &&
-      ts.isIdentifier(nodo.name) &&
-      nodo.name.text === 'transpilePackages' &&
-      ts.isArrayLiteralExpression(nodo.initializer)
-    ) {
-      paquetes = nodo.initializer.elements
-        .filter(ts.isStringLiteralLike)
-        .map((elemento) => elemento.text)
+  if (globos.length === 0) {
+    throw new Error('pnpm-workspace.yaml no declara ningún globo de paquetes')
+  }
+
+  const indice = new Map()
+  for (const globo of globos) {
+    if (!globo.endsWith('/*')) {
+      throw new Error(
+        `El globo "${globo}" de pnpm-workspace.yaml no tiene la forma "<prefijo>/*" y este ` +
+          'script no sabe expandirlo. Ampliar la expansión antes de agregar globos así.',
+      )
     }
-    ts.forEachChild(nodo, visitar)
+    const prefijo = path.join(raizDir, globo.slice(0, -2))
+    for (const entrada of readdirSync(prefijo, { withFileTypes: true })) {
+      if (!entrada.isDirectory()) continue
+      const dir = path.join(prefijo, entrada.name)
+      const manifiesto = path.join(dir, 'package.json')
+      if (!existsSync(manifiesto)) continue
+      const { name } = JSON.parse(readFileSync(manifiesto, 'utf8'))
+      if (name) indice.set(name, dir)
+    }
   }
-
-  visitar(fuente)
-
-  if (paquetes === null || paquetes.length === 0) {
-    throw new Error(`No se encontró "transpilePackages" (o vino vacío) en ${rutaArchivo}`)
-  }
-  return paquetes
+  return indice
 }
 
-// Convención del monorepo: cada paquete `@gc/<nombre>` vive en
-// `packages/<nombre>`. Si algún día deja de cumplirse, este mapeo es lo
-// primero que hay que revisar.
-function dirDePaquete(nombrePaquete) {
-  const nombreCorto = nombrePaquete.replace(/^@gc\//, '')
-  return path.join(raizDir, 'packages', nombreCorto)
-}
+/**
+ * Cierre transitivo de dependencias **de workspace** a partir de un paquete.
+ *
+ * Recorre `dependencies` y `devDependencies` por igual: pnpm materializa las
+ * dos dentro del `node_modules` del paquete que las declara, así que las dos
+ * vuelven a `@gc/ai` resoluble desde sus archivos. La primera vez que este
+ * agujero apareció fue justamente por una `devDependency`.
+ *
+ * Devuelve el conjunto sin el paquete de partida.
+ */
+function cierreDeDependencias(nombreRaiz, indice) {
+  const visitados = new Set()
+  const pendientes = [nombreRaiz]
 
-const MODULOS_PROHIBIDOS = ['@gc/ai', '@gc/pipeline', '@gc/flujos']
+  while (pendientes.length > 0) {
+    const nombre = pendientes.pop()
+    const dir = indice.get(nombre)
+    if (!dir) {
+      throw new Error(
+        `"${nombre}" aparece como dependencia de workspace pero no existe en el workspace. ` +
+          'Revisa pnpm-workspace.yaml y los package.json.',
+      )
+    }
+    const manifiesto = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))
+    const declaradas = [
+      ...Object.keys(manifiesto.dependencies ?? {}),
+      ...Object.keys(manifiesto.devDependencies ?? {}),
+    ]
+    for (const dep of declaradas) {
+      if (!indice.has(dep)) continue // dependencia externa: no es del workspace
+      if (visitados.has(dep) || dep === nombreRaiz) continue
+      visitados.add(dep)
+      pendientes.push(dep)
+    }
+  }
+
+  return visitados
+}
 
 function intentarResolver(dirPaquete, nombreModulo) {
   const requerir = createRequire(path.join(dirPaquete, 'package.json'))
@@ -82,15 +139,45 @@ function intentarResolver(dirPaquete, nombreModulo) {
   }
 }
 
-const paquetesTranspilados = leerTranspilePackages(rutaNextConfig)
+const indice = indexarPaquetesDelWorkspace()
+const dirRaiz = indice.get(PAQUETE_RAIZ)
+if (!dirRaiz) throw new Error(`No se encontró el paquete ${PAQUETE_RAIZ} en el workspace`)
 
-const objetivosNegativos = [
-  { etiqueta: 'apps/web', dir: path.join(raizDir, 'apps/web') },
-  ...paquetesTranspilados.map((nombre) => ({ etiqueta: nombre, dir: dirDePaquete(nombre) })),
-]
+const cierre = cierreDeDependencias(PAQUETE_RAIZ, indice)
 
 let huboError = false
 const lineasResumen = []
+
+// Un cierre vacío significaría que el recorrido se rompió, y entonces el
+// script no auditaría nada y pasaría en verde: exactamente la comprobación
+// que no puede fallar que este cambio vino a eliminar.
+if (cierre.size === 0) {
+  huboError = true
+  console.error(
+    `✗ El cierre de dependencias de workspace de ${PAQUETE_RAIZ} salió vacío. El recorrido ` +
+      'de package.json está roto y esta comprobación no estaría auditando nada.',
+  )
+}
+
+// Fuga a nivel de grafo: si un módulo prohibido aparece en el propio cierre,
+// la web lo arrastra por declaración y no hace falta resolver nada para
+// saberlo. Se reporta aquí y se saca de los destinos, porque auditar
+// "@gc/ai no resuelve @gc/ai" no diría nada.
+const prohibidosEnElCierre = MODULOS_PROHIBIDOS.filter((m) => cierre.has(m))
+for (const modulo of prohibidosEnElCierre) {
+  huboError = true
+  console.error(
+    `✗ "${modulo}" está en el cierre transitivo de dependencias de ${PAQUETE_RAIZ}: algún ` +
+      'package.json del camino lo declara. La web volvería a alcanzar al modelo.',
+  )
+}
+
+const paquetesAuditados = [...cierre].filter((n) => !MODULOS_PROHIBIDOS.includes(n)).sort()
+
+const objetivosNegativos = [
+  { etiqueta: 'apps/web', dir: dirRaiz },
+  ...paquetesAuditados.map((nombre) => ({ etiqueta: nombre, dir: indice.get(nombre) })),
+]
 
 for (const objetivo of objetivosNegativos) {
   for (const modulo of MODULOS_PROHIBIDOS) {
@@ -98,9 +185,10 @@ for (const objetivo of objetivosNegativos) {
     if (resuelve) {
       huboError = true
       console.error(
-        `✗ ${objetivo.etiqueta} puede resolver "${modulo}" y no debería: la web lo ` +
-          `transpila, así que alcanzaría al modelo. Revisa las dependencias ` +
-          `(incluidas devDependencies) declaradas en ${path.join(objetivo.dir, 'package.json')}.`,
+        `✗ ${objetivo.etiqueta} puede resolver "${modulo}" y no debería: está en el cierre de ` +
+          `dependencias de ${PAQUETE_RAIZ}, así que alcanzaría al modelo. Revisa las ` +
+          `dependencias (incluidas devDependencies) declaradas en ` +
+          `${path.join(objetivo.dir, 'package.json')}.`,
       )
     } else {
       lineasResumen.push(`  ${objetivo.etiqueta}: NO RESUELVE ${modulo} (correcto)`)
@@ -110,17 +198,22 @@ for (const objetivo of objetivosNegativos) {
 
 // Control positivo: si esto falla, el script no distingue nada — cualquier
 // script que dijera "no resuelve" a todo pasaría igual de verde.
-const dirFlujos = dirDePaquete('@gc/flujos')
-for (const modulo of ['@gc/ai', '@gc/pipeline']) {
-  const resuelve = intentarResolver(dirFlujos, modulo)
-  if (resuelve) {
-    lineasResumen.push(`  packages/flujos: RESUELVE ${modulo} (control positivo, correcto)`)
-  } else {
-    huboError = true
-    console.error(
-      `✗ Control positivo roto: packages/flujos debería poder resolver "${modulo}" y no ` +
-        'pudo. Si esto falla, la comprobación no distingue nada y no sirve de nada.',
-    )
+const dirFlujos = indice.get('@gc/flujos')
+if (!dirFlujos) {
+  huboError = true
+  console.error('✗ Control positivo roto: no se encontró @gc/flujos en el workspace.')
+} else {
+  for (const modulo of ['@gc/ai', '@gc/pipeline']) {
+    const resuelve = intentarResolver(dirFlujos, modulo)
+    if (resuelve) {
+      lineasResumen.push(`  packages/flujos: RESUELVE ${modulo} (control positivo, correcto)`)
+    } else {
+      huboError = true
+      console.error(
+        `✗ Control positivo roto: packages/flujos debería poder resolver "${modulo}" y no ` +
+          'pudo. Si esto falla, la comprobación no distingue nada y no sirve de nada.',
+      )
+    }
   }
 }
 
@@ -129,7 +222,10 @@ if (huboError) {
   process.exit(1)
 }
 
-console.log('Aislamiento de @gc/ai y @gc/pipeline verificado.')
-console.log(`Auditados (deben fallar): apps/web, ${paquetesTranspilados.join(', ')}`)
+console.log('Aislamiento de @gc/ai, @gc/pipeline y @gc/flujos verificado.')
+console.log(
+  `Cierre de dependencias de workspace de ${PAQUETE_RAIZ} ` +
+    `(${paquetesAuditados.length} paquetes): ${paquetesAuditados.join(', ')}`,
+)
 console.log(lineasResumen.join('\n'))
 process.exit(0)

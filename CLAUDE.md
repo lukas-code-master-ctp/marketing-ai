@@ -46,33 +46,69 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI. La web lee, edita y aprueba.
 
-**`@gc/ai` es inalcanzable desde `apps/web`, y eso lo garantiza pnpm.** Los flujos
-que llaman al modelo viven en `@gc/flujos`, que la web no declara. Si algún día
-`@gc/operaciones` o `@gc/strategy` vuelven a depender de `@gc/ai` —incluso como
-`devDependency`, que pnpm materializa dentro del paquete y vuelve resoluble desde
-cualquier archivo suyo—, la regla "la web nunca llama al modelo" vuelve a ser una
-convención. La web transpila y carga cinco paquetes (`transpilePackages` en
-`apps/web/next.config.ts`), y cualquiera de ellos puede reabrir el agujero, no
-solo `@gc/operaciones`. Se comprueba resolviendo de verdad, desde `apps/web` y
-desde cada uno de esos cinco paquetes:
+**`@gc/ai` es inalcanzable desde `apps/web`, y lo sostienen `tsc` y una
+comprobación del grafo de dependencias — no el bundler.** Los flujos que llaman
+al modelo viven en `@gc/flujos`, que la web no declara. La garantía se apoya en
+tres piezas, y conviene saber exactamente qué hace cada una porque el reparto
+no es el intuitivo:
+
+1. **`tsc --noEmit` es lo que bloquea el import escrito a mano.** Un
+   `import { ClienteOpenRouter } from '@gc/ai'` en `apps/web` falla con
+   `TS2307: Cannot find module '@gc/ai'`, porque TypeScript resuelve como Node
+   y `apps/web/node_modules/@gc` no tiene `ai`. Es una garantía de tipos.
+2. **`pnpm comprobar:aislamiento` es lo que vigila el grafo.** Comprueba que ni
+   `apps/web` ni ningún paquete de su cierre transitivo de dependencias de
+   workspace pueda resolver `@gc/ai`, `@gc/pipeline` ni `@gc/flujos`. Atrapa la
+   regresión que `tsc` no puede ver: si `@gc/operaciones` o `@gc/strategy`
+   vuelven a declarar `@gc/ai` —incluso como `devDependency`, que pnpm
+   materializa dentro del paquete y vuelve resoluble desde cualquier archivo
+   suyo—, el import pasa a compilar y `tsc` calla.
+3. **CI corre las dos en cada push** (`.github/workflows/ci.yml`). Sin eso la
+   segunda es un script que alguien tiene que acordarse de ejecutar, y la fuga
+   que vigila no rompe ni el build, ni el typecheck, ni las pruebas.
+
+**Lo que NO la sostiene: la resolución de módulos del bundler.** El webpack de
+Next resuelve `@gc/ai` desde `apps/web` perfectamente. Está comprobado: con un
+import de `ClienteOpenRouter` en `apps/web/src/datos.ts` y
+`typescript: { ignoreBuildErrors: true }` para aislar webpack de `tsc`, el
+build compila y `https://openrouter.ai/api/v1/chat/completions` queda dentro de
+`apps/web/.next/server/chunks/`. El motivo es que Next agrega
+`node_modules/.pnpm/node_modules` a `resolve.modules` —el almacén plano de
+pnpm, que tiene un enlace a **todos** los paquetes del workspace, los declare
+quien los declare— porque Next mismo está instalado ahí dentro. Node nunca mira
+ese directorio; webpack sí. Así que no es cierto que "sea un error de
+resolución y no una revisión de código que puede pasarse": es un error de
+compilación de tipos más una comprobación de grafo, las dos automatizadas.
+
+Sigue alcanzando porque las dos regresiones posibles están cubiertas y las dos
+corren solas: escribir el import lo para `tsc`, y volver a declarar la
+dependencia lo para la comprobación de aislamiento. Lo que no hay es una
+barrera que actúe si alguien apaga las dos a la vez.
 
 ```bash
 pnpm comprobar:aislamiento
 ```
 
-El script (`scripts/comprobar-aislamiento.mjs`) lee la lista de paquetes a
-auditar directamente de `transpilePackages` en `next.config.ts` —así una
-entrada nueva ahí queda auditada sola— e intenta resolver `@gc/ai`,
-`@gc/pipeline` y `@gc/flujos` desde cada uno y desde `apps/web`: todos deben
-fallar. Incluye además un control positivo, desde `packages/flujos`, donde
-`@gc/ai` y `@gc/pipeline` sí deben resolver; sin eso, un script roto que
-dijera "no resuelve" a todo pasaría en verde sin comprobar nada. **No usa
-`import()`**: los paquetes del workspace son TypeScript sin compilar, así que
-`import()` rechaza para todos con `ERR_UNKNOWN_FILE_EXTENSION` y un `catch`
-genérico diría "no resuelve" hasta de los declarados —una comprobación que no
-puede fallar. `pnpm --filter @gc/web why @gc/ai` sirve para ver la cadena,
-pero no discrimina por sí solo: no recorre las `devDependencies` de un paquete
-transitivo, que es justo por donde se coló el agujero la primera vez.
+El script (`scripts/comprobar-aislamiento.mjs`) **deriva el conjunto auditado
+del cierre transitivo de dependencias de workspace de `apps/web`**, recorriendo
+los `package.json` desde ahí hacia abajo (hoy son cinco: `@gc/brand`, `@gc/db`,
+`@gc/operaciones`, `@gc/shared`, `@gc/strategy`). Antes lo leía de
+`transpilePackages` en `next.config.ts`, y eso se podía achicar en silencio:
+ese archivo documenta que su lista **no** controla la resolución, así que
+quitar una entrada dejaba de auditar un paquete sin cambiar nada real. El
+cierre de dependencias no se puede reducir sin cambiar el grafo de verdad.
+Recorre `dependencies` y `devDependencies` por igual, porque pnpm materializa
+las dos.
+
+**No usa `import()`**: los paquetes del workspace son TypeScript sin compilar,
+así que `import()` rechaza para todos con `ERR_UNKNOWN_FILE_EXTENSION` y un
+`catch` genérico diría "no resuelve" hasta de los declarados —una comprobación
+que no puede fallar. Por lo mismo lleva un **control positivo** desde
+`packages/flujos`, donde `@gc/ai` y `@gc/pipeline` sí deben resolver, y una
+guarda que falla si el cierre sale vacío. `pnpm --filter @gc/web why @gc/ai`
+sirve para ver la cadena, pero no discrimina por sí solo: no recorre las
+`devDependencies` de un paquete transitivo, que es justo por donde se coló el
+agujero la primera vez.
 
 Corolario: **el sembrador de pruebas de `@gc/operaciones` no arranca el motor.**
 `src/pruebas/siembra.ts` inserta las filas de la grilla directamente; que P2
