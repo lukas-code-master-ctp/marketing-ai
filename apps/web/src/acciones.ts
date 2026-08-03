@@ -80,8 +80,15 @@ export async function aprobarGrillaAccion(
  * reglas (proporciones que no suman 1, un pilar que no es snake_case, etc.)
  * vuelve como error `permanente` con el detalle de cuál regla falló, y ese
  * mensaje es el que ve el usuario tal cual.
+ *
+ * `cargarPerfilDeObjeto` ya devuelve la versión que quedó. Devolverla al
+ * cliente es lo que permite que el editor anuncie la versión real en vez de
+ * la que traía en props, que es la anterior hasta que la revalidación llega.
  */
-export async function guardarPerfilAction(slug: string, textoJson: string): Promise<Resultado> {
+export async function guardarPerfilAction(
+  slug: string,
+  textoJson: string,
+): Promise<Resultado<{ version: number }>> {
   let perfil: unknown
   try {
     perfil = JSON.parse(textoJson)
@@ -93,8 +100,7 @@ export async function guardarPerfilAction(slug: string, textoJson: string): Prom
     }
   }
 
-  return ejecutar(`/${slug}/perfil`, async (db, organizationId) => {
-    await cargarPerfilDeObjeto(db, organizationId, { slug, perfil })
-    return null
-  })
+  return ejecutar(`/${slug}/perfil`, (db, organizationId) =>
+    cargarPerfilDeObjeto(db, organizationId, { slug, perfil }).then((version) => ({ version })),
+  )
 }

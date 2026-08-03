@@ -11,7 +11,9 @@ import { guardarPerfilAction } from '../acciones.js'
  * escribió aunque el guardado falle; solo cambia con una edición manual o
  * tras un guardado exitoso, que además hace crecer `versiones` (prop) porque
  * la Server Action revalida la ruta y esta página vuelve a renderizarse con
- * el perfil y el historial ya actualizados.
+ * el perfil y el historial ya actualizados. El número que se anuncia tras
+ * guardar sale del retorno de la acción y no de `version` (prop): esa prop
+ * llega recién con la revalidación y hasta entonces vale la versión anterior.
  */
 export function EditorDePerfil({
   marca,
@@ -27,12 +29,12 @@ export function EditorDePerfil({
   const [texto, setTexto] = useState(() => JSON.stringify(perfil, null, 2))
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
-  const [guardadoOk, setGuardadoOk] = useState(false)
+  const [versionGuardada, setVersionGuardada] = useState<number | null>(null)
 
   async function guardar() {
     setOcupado(true)
     setError(null)
-    setGuardadoOk(false)
+    setVersionGuardada(null)
 
     const resultado = await guardarPerfilAction(marca, texto)
     if (!resultado.ok) {
@@ -41,7 +43,7 @@ export function EditorDePerfil({
       return
     }
 
-    setGuardadoOk(true)
+    setVersionGuardada(resultado.datos.version)
     setOcupado(false)
   }
 
@@ -52,7 +54,7 @@ export function EditorDePerfil({
           value={texto}
           onChange={(e) => {
             setTexto(e.target.value)
-            setGuardadoOk(false)
+            setVersionGuardada(null)
           }}
           spellCheck={false}
           rows={32}
@@ -69,9 +71,9 @@ export function EditorDePerfil({
           >
             Guardar
           </button>
-          {guardadoOk && (
+          {versionGuardada !== null && (
             <span className="text-sm text-green-700">
-              Perfil guardado como versión {version}.
+              Perfil guardado como versión {versionGuardada}.
             </span>
           )}
         </div>
