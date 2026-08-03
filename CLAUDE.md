@@ -22,7 +22,12 @@ pnpm -r typecheck
 pnpm --filter @gc/web dev     # http://localhost:3000
 pnpm --filter @gc/web build   # parte de "terminado" para la app web
 pnpm cli                      # ayuda del CLI
+pnpm --filter @gc/worker start   # el worker, si no lo levantaste con docker compose
 ```
+
+El worker construye el cliente del modelo al arrancar, así que no levanta sin
+`OPENROUTER_API_KEY` o sin `IA_EN_SECO=true`. Es a propósito: prefiere no
+arrancar antes que arrancar sano y marcar fallida toda la cola.
 
 ## Reglas que no son negociables
 
@@ -44,7 +49,9 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **Ninguna salida del modelo se parsea con expresiones regulares.** Toda tarea declara un esquema Zod y valida. Validar entrada de usuario con regex sí es válido.
 
-**La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI. La web lee, edita y aprueba.
+**La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI y del worker. La web lee, edita y aprueba.
+
+**El error de una corrida que ejecutó el motor lo escribe el motor.** `ejecutarFlujo` la marca fallida antes de relanzar, con la clase del error delante (`[permanente] …`). Quien lo llame anota el fallo solo si nadie lo anotó ya — el worker lo hace con un `AND status <> 'fallido'` — porque sobrescribir ese mensaje pierde el diagnóstico bueno. Lo que sí hay que anotar es lo que falla **antes** de entrar al motor: ahí la corrida ya está `en_curso` y nadie más la sacaría de ese estado.
 
 **`@gc/ai` es inalcanzable desde `apps/web`, y lo sostienen `tsc` y una
 comprobación del grafo de dependencias — no el bundler.** Los flujos que llaman
@@ -126,9 +133,10 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 @gc/brand       perfiles de marca versionados
 @gc/strategy    esquemas, validación, derivados, periodos, lectura de estrategia
 @gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
-@gc/operaciones operaciones que comparten CLI y web
+@gc/operaciones operaciones que comparten CLI, web y worker
 apps/cli        comandos de operación
 apps/web        Next.js App Router, Server Components y Server Actions
+apps/worker     toma corridas pendientes y las ejecuta. Lo único que llama al modelo sin que se lo pidan
 ```
 
 `esTransitorio` es el **único** punto donde se decide reintentar, y clasifica por SQLSTATE — por eso cubre toda llamada a la base sin envolverlas una por una.
