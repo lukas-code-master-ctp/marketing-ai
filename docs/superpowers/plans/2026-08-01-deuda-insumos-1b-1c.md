@@ -1273,12 +1273,12 @@ import { RejillaDelMes } from './RejillaDelMes.js'
 
 // Los componentes de cliente importan las Server Actions. Sustituirlas evita
 // arrastrar la base y el 'use server' a una prueba que mide renderizado.
+// Solo las dos que el árbol bajo prueba importa: RejillaDelMes monta
+// PanelDeDetalle, y ese es todo el consumo de acciones que hay aquí. Declarar
+// de más obliga a mantener firmas que esta prueba no ejercita.
 vi.mock('../acciones.js', () => ({
   descartarSlotAccion: vi.fn(async () => ({ ok: true, datos: null })),
   editarSlotAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  aprobarGrillaAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  reabrirGrillaAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  guardarPerfilAction: vi.fn(async () => ({ ok: true, datos: { version: 2 } })),
 }))
 
 afterEach(cleanup)
@@ -1319,7 +1319,7 @@ describe('RejillaDelMes', () => {
     )
 
     for (const s of slots) {
-      expect(screen.getByText(s.angulo)).toBeDefined()
+      expect(screen.queryByText(s.angulo)).not.toBeNull()
     }
   })
 
@@ -1339,7 +1339,7 @@ describe('RejillaDelMes', () => {
       />,
     )
 
-    expect(screen.getByText('Ángulo de vecino')).toBeDefined()
+    expect(screen.queryByText('Ángulo de vecino')).not.toBeNull()
   })
 })
 ```
@@ -1365,12 +1365,12 @@ import { descartarSlotAccion } from '../acciones.js'
 import { semanasDelMes } from '../calendario.js'
 import { RejillaDelMes } from './RejillaDelMes.js'
 
+// Solo las dos que el árbol bajo prueba importa: RejillaDelMes monta
+// PanelDeDetalle, y ese es todo el consumo de acciones que hay aquí. Declarar
+// de más obliga a mantener firmas que esta prueba no ejercita.
 vi.mock('../acciones.js', () => ({
   descartarSlotAccion: vi.fn(async () => ({ ok: true, datos: null })),
   editarSlotAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  aprobarGrillaAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  reabrirGrillaAccion: vi.fn(async () => ({ ok: true, datos: null })),
-  guardarPerfilAction: vi.fn(async () => ({ ok: true, datos: { version: 2 } })),
 }))
 
 afterEach(cleanup)
@@ -1437,7 +1437,7 @@ describe('PanelDeDetalle a través de la rejilla', () => {
     await userEvent.click(screen.getByText(SLOT.angulo).closest('button')!)
     await userEvent.click(screen.getByRole('button', { name: 'Descartar' }))
 
-    expect(screen.getByText('La base no respondió')).toBeDefined()
+    expect(screen.queryByText('La base no respondió')).not.toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
 
@@ -1456,7 +1456,7 @@ describe('PanelDeDetalle a través de la rejilla', () => {
     await userEvent.click(screen.getByText(SLOT.angulo).closest('button')!)
     await userEvent.click(screen.getByRole('button', { name: 'Descartar' }))
 
-    expect(screen.getByText(/está en estado "aprobada"/)).toBeDefined()
+    expect(screen.queryByText(/está en estado "aprobada"/)).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull()
   })
 })
@@ -1558,7 +1558,7 @@ describe('EditorDePerfil', () => {
     render(<EditorDePerfil {...PROPS} />)
     await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
 
-    expect(screen.getByText('Perfil guardado como versión 8.')).toBeDefined()
+    expect(screen.queryByText('Perfil guardado como versión 8.')).not.toBeNull()
     expect(screen.queryByText('Perfil guardado como versión 7.')).toBeNull()
   })
 
@@ -1589,7 +1589,7 @@ describe('EditorDePerfil', () => {
     expect(vi.mocked(guardarPerfilAction).mock.calls[0]).toEqual(
       vi.mocked(guardarPerfilAction).mock.calls[1],
     )
-    expect(screen.getByText('Perfil guardado como versión 8.')).toBeDefined()
+    expect(screen.queryByText('Perfil guardado como versión 8.')).not.toBeNull()
   })
 })
 ```
@@ -1766,7 +1766,7 @@ describe('BotonReabrirGrilla', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
 
     expect(vi.mocked(reabrirGrillaAccion)).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Reabrir grilla' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Reabrir grilla' })).not.toBeNull()
   })
 
   it('un fallo transitorio ofrece reintentar y repite la misma llamada', async () => {
@@ -1778,7 +1778,7 @@ describe('BotonReabrirGrilla', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
     await userEvent.click(screen.getByRole('button', { name: 'Sí, reabrir' }))
 
-    expect(screen.getByText('La base no respondió')).toBeDefined()
+    expect(screen.queryByText('La base no respondió')).not.toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
     expect(vi.mocked(reabrirGrillaAccion)).toHaveBeenCalledTimes(2)
@@ -2086,9 +2086,9 @@ Agrega a `apps/web/src/componentes/RejillaDelMes.test.tsx`, dentro del `describe
       />,
     )
 
-    expect(screen.getByText('Ángulo de dentro')).toBeDefined()
-    expect(screen.getByText('Ángulo de fuera')).toBeDefined()
-    expect(screen.getByText(/fuera de 2026-09/i)).toBeDefined()
+    expect(screen.queryByText('Ángulo de dentro')).not.toBeNull()
+    expect(screen.queryByText('Ángulo de fuera')).not.toBeNull()
+    expect(screen.queryByText(/fuera de 2026-09/i)).not.toBeNull()
   })
 ```
 
