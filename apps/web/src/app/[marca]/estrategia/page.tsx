@@ -1,5 +1,5 @@
 import { estrategiaDelTrimestre } from '@gc/operaciones'
-import { trimestreDe, type TipoEstrategia } from '@gc/strategy'
+import type { TipoEstrategia } from '@gc/strategy'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
@@ -28,7 +28,6 @@ export default async function PaginaDeEstrategia({
   const organizationId = await organizacionPorDefecto(db)
 
   const mes = mesActual()
-  const periodo = trimestreDe(mes)
   const resultado = await estrategiaDelTrimestre(db, organizationId, marca, mes)
 
   return (
@@ -37,11 +36,11 @@ export default async function PaginaDeEstrategia({
 
       {resultado.tipo === 'ausente' ? (
         <div className="mt-4 rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
-          <p>La marca no tiene estrategia cargada para el trimestre {periodo}.</p>
+          <p>La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.</p>
           <p className="mt-2">
             Genérala con{' '}
             <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-gray-800">
-              pnpm cli estrategia:generar --marca {marca} --periodo {periodo}
+              pnpm cli estrategia:generar --marca {marca} --periodo {resultado.periodo}
             </code>
           </p>
         </div>

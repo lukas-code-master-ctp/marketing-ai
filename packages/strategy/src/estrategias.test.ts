@@ -72,4 +72,50 @@ describe('leerEstrategiaDelTrimestre', () => {
       expect(r).toEqual({ tipo: 'ausente', periodo: '2026-Q4' })
     })
   })
+
+  it('cada marca recupera su propia estrategia y no la de otra marca de la misma organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Principal', slug: 'principal' })
+        .returning({ id: esquema.organizations.id })
+      const [marcaA] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'parcelas', name: 'Parcelas' })
+        .returning({ id: esquema.brands.id })
+      const [marcaB] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'otra-marca', name: 'Otra marca' })
+        .returning({ id: esquema.brands.id })
+
+      const datosA = { ...ESTRATEGIA_VALIDA, temasPrioritarios: ['Riego tecnificado'] }
+      const datosB = { ...ESTRATEGIA_VALIDA, temasPrioritarios: ['Financiamiento sin banco'] }
+
+      await db.insert(esquema.strategies).values([
+        {
+          organizationId: org!.id,
+          brandId: marcaA!.id,
+          period: '2026-Q3',
+          status: 'aprobada',
+          data: datosA,
+          brandProfileVersion: 1,
+        },
+        {
+          organizationId: org!.id,
+          brandId: marcaB!.id,
+          period: '2026-Q3',
+          status: 'aprobada',
+          data: datosB,
+          brandProfileVersion: 1,
+        },
+      ])
+
+      const rA = await leerEstrategiaDelTrimestre(db, marcaA!.id, '2026-09', { archivadas: 'incluir' })
+      const rB = await leerEstrategiaDelTrimestre(db, marcaB!.id, '2026-09', { archivadas: 'incluir' })
+
+      if (rA.tipo !== 'ok' || rB.tipo !== 'ok') throw new Error('inalcanzable')
+      expect(rA.estrategia.temasPrioritarios).toEqual(['Riego tecnificado'])
+      expect(rB.estrategia.temasPrioritarios).toEqual(['Financiamiento sin banco'])
+    })
+  })
 })
