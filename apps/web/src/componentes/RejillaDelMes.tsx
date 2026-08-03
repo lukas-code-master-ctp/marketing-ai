@@ -75,7 +75,14 @@ export function RejillaDelMes({
           const esDelMes = fecha.startsWith(`${mes}-`)
           const slotsDelDia = porFecha.get(fecha) ?? []
           return (
-            <div key={fecha} className={`min-h-28 p-1.5 ${esDelMes ? 'bg-white' : 'bg-gray-50'}`}>
+            // `data-fecha` además de `key`: React no emite la `key` al DOM, así
+            // que sin él no hay forma de afirmar en qué celda cayó cada ficha y
+            // una rejilla que ignorara la fecha pasaría las pruebas.
+            <div
+              key={fecha}
+              data-fecha={fecha}
+              className={`min-h-28 p-1.5 ${esDelMes ? 'bg-white' : 'bg-gray-50'}`}
+            >
               <div className={`mb-1 text-xs ${esDelMes ? 'text-gray-500' : 'text-gray-300'}`}>
                 {Number(fecha.slice(-2))}
               </div>

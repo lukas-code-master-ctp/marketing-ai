@@ -43,6 +43,11 @@ describe('FichaDeSlot', () => {
   it('un derivado se marca con la flecha y el vigente no', () => {
     render(<FichaDeSlot slot={slot({ esDerivado: true })} onSeleccionar={vi.fn()} />)
     expect(screen.getByRole('button').textContent).toContain('↳')
+    cleanup()
+
+    // La otra mitad: sin ella, renderizar la flecha siempre pasaría igual.
+    render(<FichaDeSlot slot={slot()} onSeleccionar={vi.fn()} />)
+    expect(screen.getByRole('button').textContent).not.toContain('↳')
   })
 
   it('al pulsarla avisa con su id y con el propio botón', async () => {
