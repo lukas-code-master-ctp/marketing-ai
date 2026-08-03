@@ -113,4 +113,36 @@ describe('RejillaDelMes', () => {
 
     expect(within(celda(container, '2026-08-31')).queryByText('Ángulo de vecino')).not.toBeNull()
   })
+
+  it('un slot fuera de las semanas renderizadas se muestra aparte y no desaparece', () => {
+    const { container } = render(
+      <RejillaDelMes
+        marca="parcelas"
+        mes="2026-09"
+        estado="borrador"
+        semanas={semanasDelMes('2026-09')}
+        slots={[slot('dentro', '2026-09-10'), slot('fuera', '2026-11-15')]}
+      />,
+    )
+
+    // "No desaparece": el slot cuya fecha no cae en ninguna celda sigue en el
+    // documento, y el que sí cae sigue exactamente donde estaba —la sección
+    // nueva no puede cobrarse la rejilla.
+    expect(within(celda(container, '2026-09-10')).queryByText('Ángulo de dentro')).not.toBeNull()
+    expect(within(container).queryByText('Ángulo de fuera')).not.toBeNull()
+
+    // "Aparte": y no en una celda cualquiera. Preguntarle solo al documento si
+    // el texto está en alguna parte dejaría pasar una rejilla que lo pintara
+    // en el día equivocado, que es la mitad que este nombre promete.
+    for (const c of Array.from(container.querySelectorAll<HTMLElement>('[data-fecha]'))) {
+      expect(within(c).queryByText('Ángulo de fuera')).toBeNull()
+    }
+
+    const encabezado = within(container).getByText(/fuera de 2026-09/i)
+    const aviso = encabezado.closest('section')
+    if (!aviso) throw new Error('El aviso de slots fuera de la rejilla no vive en una <section>')
+    expect(within(aviso).queryByText('Ángulo de fuera')).not.toBeNull()
+    // Y dice qué fecha es, que es lo único que explica por qué no está arriba.
+    expect(within(aviso).queryByText('2026-11-15')).not.toBeNull()
+  })
 })

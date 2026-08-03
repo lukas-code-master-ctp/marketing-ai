@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
-import { derivadosVigentesDe } from '../calendario.js'
+import { derivadosVigentesDe, slotsFueraDeLaRejilla } from '../calendario.js'
 import { FichaDeSlot } from './FichaDeSlot.js'
 import { PanelDeDetalle } from './PanelDeDetalle.js'
 
@@ -63,6 +63,12 @@ export function RejillaDelMes({
     ? derivadosVigentesDe(slots, seleccionado.id)
     : []
 
+  // Un slot cuya fecha no cae en ninguna celda existía y contaba en la
+  // cabecera, pero no se veía por ningún lado. No debería ocurrir —la
+  // generación valida que las fechas caigan en el mes— pero si ocurre, es
+  // preferible verlo que perderlo.
+  const fueraDeLaRejilla = slotsFueraDeLaRejilla(slots, semanas)
+
   return (
     <div>
       <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-gray-200 bg-gray-200 text-sm">
@@ -95,6 +101,29 @@ export function RejillaDelMes({
           )
         })}
       </div>
+
+      {fueraDeLaRejilla.length > 0 && (
+        <section className="mt-4 rounded border border-amber-300 bg-amber-50 p-3">
+          <h2 className="mb-2 text-sm font-semibold text-amber-900">
+            {fueraDeLaRejilla.length === 1
+              ? '1 publicación cae fuera de '
+              : `${fueraDeLaRejilla.length} publicaciones caen fuera de `}
+            {mes}
+          </h2>
+          <p className="mb-2 text-xs text-amber-800">
+            Su fecha no corresponde a ningún día de este calendario, así que no aparece arriba —
+            pero sí cuenta en los totales de la cabecera.
+          </p>
+          <div className="flex flex-col gap-1">
+            {fueraDeLaRejilla.map((s) => (
+              <div key={s.id}>
+                <span className="mr-2 text-xs text-amber-900">{s.fecha}</span>
+                <FichaDeSlot slot={s} onSeleccionar={abrir} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {seleccionado && (
         <PanelDeDetalle

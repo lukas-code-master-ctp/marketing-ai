@@ -1,6 +1,8 @@
 import type { SlotDeLaGrilla } from '@gc/operaciones'
 import { describe, expect, it } from 'vitest'
-import { derivadosVigentesDe, mesAnterior, mesSiguiente, semanasDelMes } from './calendario.js'
+import {
+  derivadosVigentesDe, mesAnterior, mesSiguiente, semanasDelMes, slotsFueraDeLaRejilla,
+} from './calendario.js'
 
 describe('semanasDelMes', () => {
   it('siempre devuelve semanas completas de siete días', () => {
@@ -77,6 +79,50 @@ describe('derivadosVigentesDe', () => {
   it('no cuenta los derivados ya descartados', () => {
     const todos = [padre, hijoA, slot('hijo-b', 'padre', true)]
     expect(derivadosVigentesDe(todos, padre.id).map((s) => s.id)).toEqual(['hijo-a'])
+  })
+})
+
+describe('slotsFueraDeLaRejilla', () => {
+  const base = {
+    hora: '10:00',
+    canal: 'instagram',
+    formato: 'carrusel',
+    pilar: 'educativo',
+    angulo: 'Un ángulo',
+    brief: 'Un brief cualquiera con largo suficiente.',
+    descartado: false,
+    esDerivado: false,
+    idDelPadre: null,
+  }
+
+  it('devuelve vacío cuando todos los slots caen en una celda', () => {
+    const semanas = semanasDelMes('2026-09')
+    const slots = [
+      { ...base, id: 'a', fecha: '2026-09-01' },
+      { ...base, id: 'b', fecha: '2026-09-30' },
+      // Un día de relleno del mes vecino sí se renderiza, así que no está fuera.
+      { ...base, id: 'c', fecha: semanas[0]![0]! },
+    ]
+
+    expect(slotsFueraDeLaRejilla(slots, semanas)).toEqual([])
+  })
+
+  it('encuentra el slot cuya fecha no aparece en ninguna semana', () => {
+    const semanas = semanasDelMes('2026-09')
+    const perdido = { ...base, id: 'perdido', fecha: '2026-11-15' }
+
+    const dentro = { ...base, id: 'a', fecha: '2026-09-10' }
+    const fuera = slotsFueraDeLaRejilla([dentro, perdido], semanas)
+
+    expect(fuera).toEqual([perdido])
+  })
+
+  it('conserva el orden de entrada', () => {
+    const semanas = semanasDelMes('2026-09')
+    const uno = { ...base, id: 'uno', fecha: '2026-11-15' }
+    const dos = { ...base, id: 'dos', fecha: '2026-01-02' }
+
+    expect(slotsFueraDeLaRejilla([uno, dos], semanas).map((s) => s.id)).toEqual(['uno', 'dos'])
   })
 })
 

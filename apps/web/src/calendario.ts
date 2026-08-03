@@ -91,3 +91,23 @@ export function derivadosVigentesDe(
 ): SlotDeLaGrilla[] {
   return slots.filter((s) => s.idDelPadre === idDelPadre && !s.descartado)
 }
+
+/**
+ * Los slots cuya fecha no aparece en ninguna de las semanas renderizadas.
+ *
+ * Un slot así no se muestra pero sí cuenta —en `porCanal` y en los problemas
+ * que calcula `grillaDelMes`— y esa es la peor combinación: la cabecera dice
+ * que hay algo que la rejilla no enseña. La rejilla los pinta aparte.
+ *
+ * Vive aquí y no dentro del componente por el mismo motivo que
+ * `derivadosVigentesDe`: es una derivación sobre los datos cargados, y el
+ * renderizado tiene arnés pero la lógica que decide qué se muestra merece su
+ * propia prueba, independiente de cómo se pinte.
+ */
+export function slotsFueraDeLaRejilla(
+  slots: SlotDeLaGrilla[],
+  semanas: string[][],
+): SlotDeLaGrilla[] {
+  const renderizadas = new Set(semanas.flat())
+  return slots.filter((s) => !renderizadas.has(s.fecha))
+}

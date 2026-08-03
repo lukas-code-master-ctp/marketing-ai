@@ -252,6 +252,25 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
+  it('editarSlot rechaza un brief pasado de largo, con el mensaje en español', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const g = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      const slot = g.slots[0]!
+
+      await expect(
+        editarSlot(db, ref.organizationId, slot.id, {
+          angulo: 'Un ángulo razonable',
+          brief: 'b'.repeat(2001),
+        }),
+      ).rejects.toThrow(/no puede pasar de 2000 caracteres/)
+
+      // Y la fila no se tocó.
+      const despues = await grillaDelMes(db, ref.organizationId, 'parcelas', '2026-09')
+      expect(despues.slots[0]!.brief).toBe(slot.brief)
+    })
+  })
+
   it('aprobar mueve el plan a aprobada', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)

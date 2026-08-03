@@ -52,9 +52,19 @@ export const SlotPropuesto = z.object({
   pilar: z.string().min(2),
   // Los mensajes van en español porque estos dos campos son los únicos que la
   // interfaz web deja editar a mano (`editarSlot`), y ahí el texto del rechazo
-  // se muestra tal cual al usuario.
-  angulo: z.string().min(5, 'debe tener al menos 5 caracteres'),
-  brief: z.string().min(20, 'debe tener al menos 20 caracteres'),
+  // se muestra tal cual al usuario. Las cotas superiores existen por el mismo
+  // motivo que las inferiores: sin ellas un pegado accidental persistía
+  // completo. Los números salen de para qué sirve cada campo —el ángulo es una
+  // frase, el brief es un párrafo de encargo— y quedan muy por encima de lo
+  // que produce el modelo, así que no rechazan generación legítima.
+  angulo: z
+    .string()
+    .min(5, 'debe tener al menos 5 caracteres')
+    .max(200, 'no puede pasar de 200 caracteres'),
+  brief: z
+    .string()
+    .min(20, 'debe tener al menos 20 caracteres')
+    .max(2000, 'no puede pasar de 2000 caracteres'),
 })
 
 export const GrillaPropuesta = z.object({
