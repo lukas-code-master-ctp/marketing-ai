@@ -19,8 +19,9 @@ describe('generarGrilla', () => {
         slug: 'parcelas', perfil: PERFIL_VALIDO,
       })
 
-      // Sin estrategia para el trimestre: el mensaje nace en @gc/strategy,
-      // que hoy solo conoce el brandId. Es el error que originó esta tarea.
+      // Sin estrategia para el trimestre: el mensaje nace en
+      // `cargarEstrategiaVigente`, en @gc/flujos/src/p2.ts, que hoy solo
+      // conoce el brandId. Es el error que originó esta tarea.
       const error = await generarGrilla(db, new ClienteFalso([]), organizationId, {
         slug: 'parcelas', mes: '2026-09',
       }).catch((e: unknown) => e)
