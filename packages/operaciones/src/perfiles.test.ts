@@ -3,7 +3,12 @@ import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { cargarPerfilDeObjeto, estrategiaDelTrimestre, perfilConHistorial } from './perfiles.js'
+import {
+  PLANTILLA_DE_PERFIL,
+  cargarPerfilDeObjeto,
+  estrategiaDelTrimestre,
+  perfilConHistorial,
+} from './perfiles.js'
 import { sembrarConEstrategia, sembrarConGrilla } from './pruebas/siembra.js'
 
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
@@ -27,8 +32,46 @@ describe('perfilConHistorial', () => {
 
       const r = await perfilConHistorial(db, ref.organizationId, 'parcelas')
 
-      expect(r.version).toBe(2)
-      expect(r.versiones.map((v) => v.version)).toEqual([2, 1])
+      expect(r).not.toBeNull()
+      expect(r!.version).toBe(2)
+      expect(r!.versiones.map((v) => v.version)).toEqual([2, 1])
+    })
+  })
+
+  it('perfilConHistorial devuelve null cuando la marca todavía no tiene perfil', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Principal', slug: 'principal' })
+        .returning({ id: esquema.organizations.id })
+      await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'nueva', name: 'Nueva' })
+
+      expect(await perfilConHistorial(db, org!.id, 'nueva')).toBeNull()
+    })
+  })
+})
+
+/**
+ * La plantilla la ve una persona que abre el perfil de una marca recién
+ * creada. Si no valida, su primer "Guardar" le devuelve una lista de reglas
+ * rotas que ella no escribió. Se guarda de verdad y no solo se valida: entre
+ * `validarPerfil` y la columna hay una escritura que también puede fallar.
+ */
+describe('PLANTILLA_DE_PERFIL', () => {
+  it('se puede guardar tal cual y queda como la versión 1', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+
+      const version = await cargarPerfilDeObjeto(db, ref.organizationId, {
+        slug: 'parcelas',
+        perfil: PLANTILLA_DE_PERFIL,
+      })
+
+      expect(version).toBe(1)
+      const guardado = await perfilConHistorial(db, ref.organizationId, 'parcelas')
+      expect(guardado!.perfil).toEqual(PLANTILLA_DE_PERFIL)
     })
   })
 })

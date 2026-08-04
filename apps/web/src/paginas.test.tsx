@@ -4,9 +4,12 @@ import type { LecturaDeEstrategia } from '@gc/strategy'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { corridaDe, estrategiaDelTrimestre, grillaDelMes } from '@gc/operaciones'
+import { corridaDe, estrategiaDelTrimestre, grillaDelMes, perfilConHistorial } from '@gc/operaciones'
 import PaginaDeEstrategia from './app/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/[marca]/grilla/[mes]/page.js'
+import PaginaDePerfil from './app/[marca]/perfil/page.js'
+import Inicio from './app/page.js'
+import { marcasDeLaOrganizacion } from './datos.js'
 
 /**
  * Las dos pantallas son componentes de servidor: se invocan como funciones y
@@ -22,10 +25,17 @@ vi.mock('@gc/operaciones', () => ({
   corridaDe: vi.fn(),
   grillaDelMes: vi.fn(),
   estrategiaDelTrimestre: vi.fn(),
+  perfilConHistorial: vi.fn(),
+  // Valor marcado y no el real: lo que estas pruebas afirman es que la
+  // pantalla siembra el editor **con la plantilla**, no cómo es la plantilla.
+  // Que la de verdad valide contra el esquema lo cubre `perfiles.test.ts` en
+  // `@gc/operaciones`, que es el único lado que puede importar `@gc/brand`.
+  PLANTILLA_DE_PERFIL: { marcador: 'plantilla-de-partida' },
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
   organizacionPorDefecto: vi.fn(),
+  marcasDeLaOrganizacion: vi.fn(),
 }))
 
 // Las Server Actions no se ejercitan aquí: estas pruebas preguntan por lo que
@@ -39,12 +49,20 @@ vi.mock('./acciones.js', () => ({
   reabrirGrillaAccion: vi.fn(),
   descartarSlotAccion: vi.fn(),
   editarSlotAccion: vi.fn(),
+  guardarPerfilAction: vi.fn(),
+  crearMarcaAccion: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
   notFound: () => {
     throw new Error('notFound')
+  },
+  // Como el de verdad: `redirect` corta la ejecución lanzando. Devolver sin
+  // lanzar dejaría a la página siguiendo de largo hasta el `return`, y una
+  // prueba que afirma "redirige" pasaría igual si el redirect no existiera.
+  redirect: (destino: string) => {
+    throw new Error(`redirect:${destino}`)
   },
 }))
 vi.mock('next/link', () => ({
@@ -58,6 +76,8 @@ beforeEach(() => {
   vi.mocked(corridaDe).mockReset()
   vi.mocked(grillaDelMes).mockReset()
   vi.mocked(estrategiaDelTrimestre).mockReset()
+  vi.mocked(perfilConHistorial).mockReset()
+  vi.mocked(marcasDeLaOrganizacion).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
 })
 
@@ -211,5 +231,84 @@ describe('el botón de generar mientras hay una corrida viva', () => {
     expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
     expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
     expect(screen.queryByText(/no valida contra su esquema/i)).not.toBeNull()
+  })
+})
+
+async function renderPerfil(marca: string) {
+  render(await PaginaDePerfil({ params: Promise.resolve({ marca }) }))
+}
+
+function editor(): HTMLTextAreaElement {
+  return screen.getByLabelText('Perfil de marca en formato JSON') as HTMLTextAreaElement
+}
+
+/**
+ * Una marca creada desde la web no tiene perfil, y sin perfil no se genera ni
+ * estrategia ni grilla. La pantalla mandaba a la terminal justo ahí, que es
+ * de donde esta rama viene sacando a la gente.
+ */
+describe('la pantalla de perfil', () => {
+  it('sin perfil abre el editor con la plantilla de partida y no manda al CLI', async () => {
+    vi.mocked(perfilConHistorial).mockResolvedValue(null)
+
+    await renderPerfil('nueva')
+
+    expect(JSON.parse(editor().value)).toEqual({ marcador: 'plantilla-de-partida' })
+    expect(screen.queryByText(/pnpm cli/)).toBeNull()
+    expect(screen.queryByText(/todavía no tiene perfil/)).not.toBeNull()
+  })
+
+  it('con perfil abre el editor con ese perfil y sin el aviso de marca nueva', async () => {
+    vi.mocked(perfilConHistorial).mockResolvedValue({
+      version: 3,
+      perfil: { esElPerfilGuardado: true },
+      versiones: [{ version: 3, createdAt: new Date('2026-08-01T00:00:00Z') }],
+    })
+
+    await renderPerfil('parcelas')
+
+    expect(JSON.parse(editor().value)).toEqual({ esElPerfilGuardado: true })
+    expect(screen.queryByText(/todavía no tiene perfil/)).toBeNull()
+  })
+})
+
+async function renderInicio(searchParams: { nueva?: string } = {}) {
+  render(await Inicio({ searchParams: Promise.resolve(searchParams) }))
+}
+
+const UNA_MARCA = [{ id: 'm-1', slug: 'parcelas', name: 'CTP' }]
+
+describe('la pantalla de inicio', () => {
+  it('sin ninguna marca muestra el formulario en vez de redirigir', async () => {
+    vi.mocked(marcasDeLaOrganizacion).mockResolvedValue([])
+
+    await renderInicio()
+
+    expect(screen.queryByRole('button', { name: 'Crear marca' })).not.toBeNull()
+  })
+
+  it('con marcas redirige a la grilla del mes actual de la primera', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-15T00:00:00Z'))
+    try {
+      vi.mocked(marcasDeLaOrganizacion).mockResolvedValue(UNA_MARCA)
+
+      const error = await renderInicio().catch((e: unknown) => e)
+
+      expect((error as Error).message).toBe('redirect:/parcelas/grilla/2026-11')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // El redirect de arriba deja el formulario inalcanzable en cuanto existe una
+  // marca, que es siempre a partir de la primera. Sin este parámetro, crear la
+  // segunda marca seguiría siendo cosa del CLI.
+  it('con marcas y ?nueva muestra el formulario en vez de redirigir', async () => {
+    vi.mocked(marcasDeLaOrganizacion).mockResolvedValue(UNA_MARCA)
+
+    await renderInicio({ nueva: '1' })
+
+    expect(screen.queryByRole('button', { name: 'Crear marca' })).not.toBeNull()
   })
 })

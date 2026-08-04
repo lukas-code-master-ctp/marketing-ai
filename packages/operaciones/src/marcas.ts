@@ -94,11 +94,49 @@ export async function resolverMarca(
   return { organizationId: marca.organizationId, brandId: marca.id, brandSlug: slug }
 }
 
+/**
+ * El slug es un segmento de URL (`/parcelas/grilla/2026-09`) y la clave por la
+ * que el CLI, la web y el worker nombran la marca. Validar con expresión
+ * regular es correcto acá: es entrada de una persona, no salida de un modelo.
+ */
+const SLUG_DE_MARCA = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/** `numeric(10, 2)`: dólares con hasta dos decimales y punto, nunca coma. */
+const MONTO_USD = /^\d{1,8}(?:\.\d{1,2})?$/
+
+/**
+ * Crea la marca, validando antes de tocar la base.
+ *
+ * La validación vive acá y no en el formulario web porque el CLI escribe por
+ * esta misma puerta, y porque el error tiene que salir clasificado como
+ * `permanente`: reintentar un slug con espacios no lo arregla. Sin esto, un
+ * presupuesto con coma llegaba a Postgres y volvía como
+ * `invalid input syntax for type numeric` —en inglés y nombrando un tipo de
+ * la base— a una persona que solo escribió "25,50" en un formulario.
+ */
 export async function crearMarca(
   db: BaseDeDatos,
   organizationId: string,
   args: { slug: string; nombre: string; presupuesto?: string },
 ): Promise<ReferenciaResuelta> {
+  if (!SLUG_DE_MARCA.test(args.slug)) {
+    throw permanente(
+      `El slug "${args.slug}" no sirve como identificador de marca: usa solo ` +
+        'minúsculas, números y guiones, por ejemplo "mi-marca". Es lo que aparece ' +
+        'en la dirección de cada pantalla.',
+    )
+  }
+
+  if (args.nombre.trim() === '') {
+    throw permanente('El nombre de la marca no puede quedar en blanco')
+  }
+
+  if (args.presupuesto !== undefined && !MONTO_USD.test(args.presupuesto)) {
+    throw permanente(
+      `El presupuesto "${args.presupuesto}" no es un monto válido: escríbelo en ` +
+        'dólares, con punto y hasta dos decimales, por ejemplo 25 o 25.50.',
+    )
+  }
+
   try {
     const [marca] = await db
       .insert(esquema.brands)

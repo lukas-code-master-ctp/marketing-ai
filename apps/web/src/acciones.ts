@@ -6,6 +6,7 @@ import { conexion, organizacionPorDefecto } from './datos.js'
 import {
   aprobarGrilla,
   cargarPerfilDeObjeto,
+  crearMarca,
   descartarSlot,
   editarSlot,
   encolarEstrategia,
@@ -46,6 +47,34 @@ async function ejecutar<T = null>(
       reintentable: clasificarError(error) === 'transitorio',
     }
   }
+}
+
+/**
+ * Crea la marca. Es una escritura corta y no pasa por el worker: no hay nada
+ * que generar todavía, solo una fila.
+ *
+ * Revalida `/` porque ahí vive el selector de marcas del layout raíz, que es
+ * lo que cambia al crear una.
+ *
+ * El presupuesto llega como el texto crudo del campo, que viene vacío cuando
+ * la persona no lo llenó: en ese caso no se pasa y manda el valor por omisión
+ * de la columna. Ni el slug ni el nombre ni el monto se validan acá — eso vive
+ * en `crearMarca`, para que el CLI, que escribe por la misma puerta, no tenga
+ * su propia versión de las reglas.
+ */
+export async function crearMarcaAccion(
+  slug: string,
+  nombre: string,
+  presupuestoUsd: string,
+): Promise<Resultado> {
+  return ejecutar('/', async (db, organizationId) => {
+    await crearMarca(db, organizationId, {
+      slug,
+      nombre,
+      ...(presupuestoUsd !== '' ? { presupuesto: presupuestoUsd } : {}),
+    })
+    return null
+  })
 }
 
 export async function descartarSlotAccion(
