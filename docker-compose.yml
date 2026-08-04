@@ -22,9 +22,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    env_file: [.env]
+    # `required: false` no es cosmético: `.env` está en `.gitignore` —lo
+    # versionado es `.env.example`—, y con la forma corta (`env_file: [.env]`)
+    # Compose **aborta al cargar la configuración** si el archivo no existe.
+    # En un clon nuevo eso rompía hasta `docker compose up -d postgres`, que no
+    # necesita ninguna variable, y `docker compose up -d` es el arranque del
+    # proyecto según CLAUDE.md. Sin el archivo, el worker sale con
+    # `Falta OPENROUTER_API_KEY`, que es el error correcto y legible.
+    env_file:
+      - path: .env
+        required: false
     # Dentro de la red de compose, Postgres es `postgres` y no `localhost`.
     # El .env de la raíz apunta al host, así que se sobrescribe aquí.
+    #
+    # OJO con `DATABASE_URL_TEST`: entra tal cual desde el .env, apuntando a
+    # `localhost`, que dentro del contenedor es el worker mismo y no Postgres.
+    # Hoy nadie la lee, así que no se sobrescribe. Pero quien corra las pruebas
+    # dentro del contenedor va a ver un `ECONNREFUSED` que no tiene nada que
+    # ver con su cambio: la corrección es `@postgres:5432`, como abajo.
     #
     # `IA_EN_SECO` y `OPENROUTER_API_KEY` NO se tocan aquí a propósito: salen
     # del .env como en cualquier otra forma de correr el worker. Fijar
@@ -35,24 +50,36 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/gestor
     volumes:
       - .:/app
-      # Un volumen anónimo por cada `node_modules` del workspace. pnpm en
+      # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en
       # Windows deja enlaces con rutas absolutas del host (`/c/Users/...`) que
       # dentro del contenedor no existen, y los binarios nativos —tsx trae
       # esbuild— son de otra plataforma. Sin cubrirlos todos, el `pnpm install`
       # de adentro escribiría sobre el montaje y dejaría inservible la
       # instalación del host, que es la que usan `pnpm test` y la app web.
-      - /app/node_modules
-      - /app/apps/cli/node_modules
-      - /app/apps/web/node_modules
-      - /app/apps/worker/node_modules
-      - /app/packages/ai/node_modules
-      - /app/packages/brand/node_modules
-      - /app/packages/db/node_modules
-      - /app/packages/flujos/node_modules
-      - /app/packages/operaciones/node_modules
-      - /app/packages/pipeline/node_modules
-      - /app/packages/shared/node_modules
-      - /app/packages/strategy/node_modules
+      #
+      # Con nombre y no anónimos: los anónimos no los borra `docker compose
+      # down`, solo `down -v`, que **también se lleva `pgdata`** y con él la
+      # base de desarrollo que CLAUDE.md pide preservar. O sea que no había
+      # limpieza segura, y cada `down` dejaba doce volúmenes abandonados de unos
+      # 700 MB (se habían acumulado 3,4 GB). Con nombre se reutilizan entre
+      # `down` y `up`, nunca se abandonan, y se leen en `docker volume ls`.
+      #
+      # Esta lista tiene guardián: `pnpm comprobar:volumenes` (en CI). Si
+      # agregas un paquete al workspace y olvidas su línea, el `pnpm install`
+      # del contenedor pisa los `node_modules` del host y el daño es silencioso
+      # —ni pruebas, ni typecheck, ni CI lo verían—.
+      - nm-root:/app/node_modules
+      - nm-cli:/app/apps/cli/node_modules
+      - nm-web:/app/apps/web/node_modules
+      - nm-worker:/app/apps/worker/node_modules
+      - nm-ai:/app/packages/ai/node_modules
+      - nm-brand:/app/packages/brand/node_modules
+      - nm-db:/app/packages/db/node_modules
+      - nm-flujos:/app/packages/flujos/node_modules
+      - nm-operaciones:/app/packages/operaciones/node_modules
+      - nm-pipeline:/app/packages/pipeline/node_modules
+      - nm-shared:/app/packages/shared/node_modules
+      - nm-strategy:/app/packages/strategy/node_modules
       # El almacén de pnpm, fuera del montaje y en un volumen con nombre.
       # pnpm lo pone junto al proyecto cuando la casa del usuario está en otro
       # sistema de archivos, que es justo lo que pasa aquí: sin `--store-dir`
@@ -72,7 +99,8 @@ services:
     # exponencial hasta 30 s, más las llamadas al modelo. Se prefiere esperar a
     # cortar, porque una corrida cortada queda `en_curso` para siempre y nada
     # en el repositorio recupera corridas colgadas. Cuando no hay trabajo el
-    # apagado sigue tomando un segundo: el margen es un techo, no una pausa.
+    # apagado sigue tomando un segundo: el margen es un techo, no una pausa —y
+    # durante el `pnpm install` también, gracias al `trap` del `command`.
     stop_grace_period: 180s
     # `--config.confirm-modules-purge=false` no es cosmético. Cuando pnpm decide
     # que hay que rehacer `node_modules` desde cero —le pasa en cuanto cambia
@@ -81,8 +109,34 @@ services:
     # código 0**: el `&&` sigue adelante y el worker arranca sobre lo que
     # hubiera quedado en el volumen. Comprobado aquí: `pnpm install` terminó sin
     # instalar nada y sin avisar. Con la bandera purga y reinstala.
-    command: sh -c "pnpm install --frozen-lockfile --store-dir /pnpm-store --config.confirm-modules-purge=false && pnpm --filter @gc/worker start"
+    #
+    # El `trap` y el `exec` tampoco son adorno. Durante el `pnpm install` el PID 1
+    # es `sh` corriendo la cadena `A && B`, y `sh` **no reenvía ni honra**
+    # SIGTERM mientras espera a un comando en primer plano: la señal se perdía
+    # entera, el install terminaba, el worker arrancaba sin enterarse de que le
+    # habían pedido parar, y Docker lo mataba con SIGKILL a los 180 s. Medido:
+    # `stop` durante el install colgaba 180.913 ms y salía con 137. La ventana
+    # es **cada arranque** —de 5 a 20 s con el almacén tibio, unos dos minutos
+    # en el primer arranque de un clon nuevo—, justo cuando uno corta.
+    # Con `trap` el mismo `stop` tarda 2.758 ms y sale 143; el `exec` saca a
+    # `sh` del medio para el resto de la vida del contenedor, así que el
+    # apagado ordenado del worker sigue siendo el de siempre.
+    command: sh -c 'trap "exit 143" TERM INT; pnpm install --frozen-lockfile --store-dir /pnpm-store --config.confirm-modules-purge=false && exec pnpm --filter @gc/worker start'
 
 volumes:
   pgdata:
   pnpm-store:
+  # Los `node_modules` del workspace. Ver el comentario del servicio: uno por
+  # paquete, con nombre para que `docker compose down` no los abandone.
+  nm-root:
+  nm-cli:
+  nm-web:
+  nm-worker:
+  nm-ai:
+  nm-brand:
+  nm-db:
+  nm-flujos:
+  nm-operaciones:
+  nm-pipeline:
+  nm-shared:
+  nm-strategy:

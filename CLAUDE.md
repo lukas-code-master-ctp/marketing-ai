@@ -16,14 +16,23 @@ Cada bloque de trabajo tiene su spec y su plan en `docs/superpowers/`. Los plane
 ## Comandos
 
 ```bash
-docker compose up -d          # Postgres y el worker. Sin esto fallan seis paquetes y no se genera nada
+docker compose up -d postgres # la base. Sin esto fallan seis paquetes
+docker compose up -d          # lo anterior más el worker — que exige credenciales, ver abajo
 pnpm test                     # NUNCA `pnpm -r test` — ver abajo
 pnpm -r typecheck
 pnpm --filter @gc/web dev     # http://localhost:3000
 pnpm --filter @gc/web build   # parte de "terminado" para la app web
 pnpm cli                      # ayuda del CLI
 pnpm --filter @gc/worker start   # el worker, si no lo levantaste con docker compose
+pnpm comprobar:aislamiento    # que la web no alcance al modelo
+pnpm comprobar:volumenes      # que el compose tape todos los node_modules del workspace
 ```
+
+Los dos primeros están separados a propósito: para trabajar en los paquetes o
+en la web basta la base, y ese comando no depende de tener credenciales ni
+`.env`. Prometer que `docker compose up -d` "levanta todo" sería falso en
+cuanto falte la clave, y dejaría un servicio en rojo en `docker compose ps` en
+una máquina perfectamente sana.
 
 El worker construye el cliente del modelo al arrancar, así que no levanta sin
 `OPENROUTER_API_KEY` o sin `IA_EN_SECO=true`. Es a propósito: prefiere no
