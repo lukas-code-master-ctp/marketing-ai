@@ -119,9 +119,11 @@ export default async function PaginaDeGrilla({
                   etiqueta="Regenerar grilla"
                   advertencia={
                     `Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. ` +
-                    (descartados > 0
-                      ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
-                      : 'Las ediciones que hayas hecho a mano se pierden.')
+                    (descartados === 1
+                      ? 'La que descartaste vuelve a aparecer, y las ediciones que hiciste a mano se pierden.'
+                      : descartados > 1
+                        ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
+                        : 'Las ediciones que hayas hecho a mano se pierden.')
                   }
                 />
               )}

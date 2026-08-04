@@ -287,6 +287,16 @@ describe('la advertencia de regenerar la grilla', () => {
     expect(screen.queryByText(/Regenerar la grilla de 2026-10/)).not.toBeNull()
   })
 
+  it('concuerda en singular cuando el descarte es uno solo', async () => {
+    await abrirLaConfirmacion([slotDeGrilla('a'), slotDeGrilla('b', { descartado: true })])
+
+    // «Las 1 que descartaste vuelven» es gramatical para una expresión regular
+    // pero no para una persona, y es el caso alcanzable más común: descartas
+    // una publicación que no te convence y regeneras.
+    expect(screen.queryByText(/La que descartaste vuelve a aparecer/)).not.toBeNull()
+    expect(screen.queryByText(/Las 1 que descartaste/)).toBeNull()
+  })
+
   it('no habla de descartes cuando no hay ninguno', async () => {
     await abrirLaConfirmacion([slotDeGrilla('a'), slotDeGrilla('b')])
 
