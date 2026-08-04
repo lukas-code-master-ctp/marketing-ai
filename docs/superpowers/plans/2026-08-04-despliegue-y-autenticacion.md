@@ -48,6 +48,7 @@ Copiadas de `CLAUDE.md` y del spec. Aplican a **todas** las tareas.
 | `packages/db/src/cliente.ts` | `crearConexion` acepta la opción del agrupador |
 | `packages/db/src/agrupador.ts` (nuevo) | `usaAgrupador(url)`, función pura y probada |
 | `apps/web/src/auth.ts` (nuevo) | La configuración de Auth.js: Google, la lista permitida, la sesión |
+| `apps/web/src/auth/registro.ts` (nuevo) | `registrarPersona`, aparte para que se pueda probar sin construir NextAuth |
 | `apps/web/src/auth/permitidos.ts` (nuevo) | `correoPermitido(correo, lista)` y `sesionDeDesarrollo(env)`, las dos puras |
 | `apps/web/src/app/api/auth/[...nextauth]/route.ts` (nuevo) | El manejador que Auth.js necesita |
 | `apps/web/src/app/entrar/page.tsx` (nuevo) | La pantalla de entrada y la de rechazo |
@@ -822,7 +823,91 @@ Esperado: typecheck limpio; en el listado aparece `/entrar`, y las cuatro rutas 
 pnpm test 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)' && pnpm comprobar:aislamiento && pnpm comprobar:volumenes
 ```
 
-Esperado: 412 pruebas (esta tarea no agrega ninguna: lo probable ya se probó en la Task 3), los dos guardianes en verde.
+Esperado: 417 pruebas, los dos guardianes en verde.
+
+- [ ] **Step 8: Las dos garantías que el spec pide y que faltaban**
+
+El spec exige afirmar que `users` se llena sola sin duplicar, y que el rechazo sea legible. Las dos son de esta tarea.
+
+**Para que la primera sea posible, `registrarPersona` vive en `apps/web/src/auth/registro.ts` y no dentro de `auth.ts`**: aquel construye NextAuth al cargarse y arrastra variables de entorno que en pruebas no existen. Muévela ahí y que `auth.ts` la importe.
+
+Crea `apps/web/src/auth/registro.test.ts`:
+
+```ts
+import { esquema } from '@gc/db'
+import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../datos.js', () => ({ conexion: vi.fn() }))
+
+const { conexion } = await import('../datos.js')
+const { registrarPersona } = await import('./registro.js')
+
+describe('registrarPersona', () => {
+  it('crea la fila en el primer inicio de sesión', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      vi.mocked(conexion).mockReturnValue(db)
+
+      const id = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
+
+      const filas = await db.select().from(esquema.users)
+      expect(filas).toHaveLength(1)
+      expect(filas[0]!.id).toBe(id)
+      expect(filas[0]!.email).toBe('lukas@ejemplo.cl')
+    })
+  })
+
+  it('el segundo inicio de sesión no duplica y devuelve el mismo id', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      vi.mocked(conexion).mockReturnValue(db)
+
+      const primero = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
+      const segundo = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
+
+      expect(segundo).toBe(primero)
+      expect(await db.select().from(esquema.users)).toHaveLength(1)
+    })
+  })
+
+  it('refresca el nombre sin cambiar la identidad', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      vi.mocked(conexion).mockReturnValue(db)
+
+      const id = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
+      const mismo = await registrarPersona('lukas@ejemplo.cl', 'Lukas Rencoret')
+
+      expect(mismo).toBe(id)
+      const [fila] = await db.select().from(esquema.users)
+      expect(fila!.name).toBe('Lukas Rencoret')
+    })
+  })
+})
+```
+
+Y agrega a `apps/web/src/paginas.test.tsx` la del rechazo:
+
+```tsx
+  it('la pantalla de entrada explica el rechazo cuando la cuenta no está autorizada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: 'AccessDenied' }) }))
+
+    expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+
+  it('sin error la pantalla de entrada no acusa a nadie de nada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({}) }))
+
+    // Sin esta mitad, una pantalla que mostrara siempre el aviso pasaría.
+    expect(screen.queryByText(/no está en la lista/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+```
+
+**Confírmalas con mutación:** quita el `onConflictDoUpdate` de `registrarPersona` —la del duplicado se pone roja— y cambia `error === 'AccessDenied'` por `true` —la de "no acusa a nadie" se pone roja—. Restaura después de cada una y pega la salida.
 
 ```bash
 git add -A
@@ -1038,7 +1123,7 @@ Las dos direcciones importan: la primera atrapa que la guarda no exista, la segu
 pnpm -r typecheck && pnpm test 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)'
 ```
 
-Esperado: typecheck limpio, 416 pruebas.
+Esperado: typecheck limpio, 421 pruebas.
 
 ```bash
 git add -A
@@ -1240,7 +1325,7 @@ Esperado: FAIL en "aprobar registra quién lo hizo".
 pnpm -r typecheck && pnpm test 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)' && pnpm --filter @gc/web build 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E "^[┌├└].*(ƒ|○)"
 ```
 
-Esperado: typecheck limpio, 418 pruebas, build con las rutas del dominio en `ƒ`.
+Esperado: typecheck limpio, 423 pruebas, build con las rutas del dominio en `ƒ`.
 
 ```bash
 git add -A
@@ -1413,7 +1498,7 @@ Esto comprueba de una sola vez las dos cosas que ninguna prueba puede: que el ag
 pnpm test 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'RUN  v|Tests +[0-9]+ (passed|failed)'
 ```
 
-Esperado: once paquetes, 418 pruebas, cero fallos.
+Esperado: once paquetes, 423 pruebas, cero fallos.
 
 - [ ] **El bundle y los guardianes**
 
@@ -1437,7 +1522,7 @@ Usa la skill `superpowers:finishing-a-development-branch`.
 
 **El orden importa.** La Task 4 necesita la tabla de la Task 1 y las funciones puras de la Task 3. La Task 5 necesita `sesionActual` de la Task 4. La Task 6 necesita el `usuarioId` que la Task 5 agrega al ayudante. Las tareas 2 y 7 son independientes.
 
-**Los conteos son acumulativos y orientativos:** 396 → 398 (T1) → 403 (T2) → 412 (T3) → 416 (T5) → 418 (T6). Las tareas 4, 7 y 8 no agregan pruebas. **Si necesitas una prueba más para que algo afirme de verdad lo que su nombre promete, escríbela** y dilo en el informe: el conteo sirve para detectar pasos saltados, no para mandar sobre la cobertura.
+**Los conteos son acumulativos y orientativos:** 396 → 398 (T1) → 403 (T2) → 412 (T3) → 417 (T4) → 421 (T5) → 423 (T6). Las tareas 7 y 8 no agregan pruebas. **Si necesitas una prueba más para que algo afirme de verdad lo que su nombre promete, escríbela** y dilo en el informe: el conteo sirve para detectar pasos saltados, no para mandar sobre la cobertura.
 
 **La Task 5 es la que hay que revisar con más desconfianza.** Es el único defecto posible de este bloque que expone datos a internet, y es fácil de creer resuelto mirando que la página redirige. Su prueba mide la escritura y va en las dos direcciones por eso.
 
