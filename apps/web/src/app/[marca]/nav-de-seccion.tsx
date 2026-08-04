@@ -2,17 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { mesActual } from '../../calendario.js'
 
 const SECCIONES = [
   { segmento: 'grilla', etiqueta: 'Grilla' },
   { segmento: 'perfil', etiqueta: 'Perfil' },
   { segmento: 'estrategia', etiqueta: 'Estrategia' },
 ] as const
-
-function mesActual(): string {
-  const ahora = new Date()
-  return `${ahora.getUTCFullYear()}-${String(ahora.getUTCMonth() + 1).padStart(2, '0')}`
-}
 
 /**
  * Navegación entre las secciones de una marca. Solo Grilla existe hoy;

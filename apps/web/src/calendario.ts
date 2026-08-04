@@ -66,6 +66,20 @@ function desplazarMes(mes: string, delta: number): string {
   return `${anioResultado}-${mesResultado}`
 }
 
+/**
+ * El mes de hoy en UTC, como `AAAA-MM`.
+ *
+ * Vive acá porque lo necesitan tres lugares que no comparten nada más: la
+ * pantalla raíz para redirigir, la navegación de sección para el enlace a
+ * Grilla, y el selector de marca para armar el destino cuando la ruta actual
+ * no tiene sección. Estaba escrito dos veces con la misma forma; una tercera
+ * copia era lo que faltaba para que se separaran.
+ */
+export function mesActual(): string {
+  const ahora = new Date()
+  return `${ahora.getUTCFullYear()}-${String(ahora.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
 export function mesAnterior(mes: string): string {
   return desplazarMes(mes, -1)
 }

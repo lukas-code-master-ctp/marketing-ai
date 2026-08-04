@@ -1,5 +1,6 @@
 import { guardarPerfil } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
+import { permanente } from '@gc/shared'
 import { leerEstrategiaDelTrimestre, type LecturaDeEstrategia } from '@gc/strategy'
 import { desc, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
@@ -23,8 +24,9 @@ export interface PerfilConHistorial {
  * hablando de parcelas de agrado.
  *
  * Valida a propósito, aunque sea texto de relleno: quien abre el editor de una
- * marca nueva tiene que poder guardar y ver crecer la versión, no recibir una
- * lista de reglas rotas que no escribió.
+ * marca nueva no tiene que pelearse con una lista de reglas rotas que no
+ * escribió para empezar a editar. Lo que sí se rechaza es guardarla **sin
+ * tocar** — ver `cargarPerfilDeObjeto`.
  */
 export const PLANTILLA_DE_PERFIL = {
   posicionamiento: {
@@ -58,12 +60,64 @@ export const PLANTILLA_DE_PERFIL = {
   },
 }
 
+/**
+ * Igualdad estructural sin depender del orden de las claves.
+ *
+ * `JSON.stringify` de los dos lados habría sido más corto y habría fallado
+ * ante lo primero que hace el editor: la persona edita el texto a mano, y
+ * mover una clave de lugar sin cambiar un solo valor bastaba para colarse. En
+ * los arreglos el orden **sí** cuenta: reordenar los pilares o los públicos es
+ * una decisión sobre el contenido, no un detalle de serialización.
+ */
+function mismoContenido(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((elemento, i) => mismoContenido(elemento, b[i]))
+  }
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+
+  const claves = Object.keys(a)
+  if (claves.length !== Object.keys(b).length) return false
+  return claves.every(
+    (clave) =>
+      Object.hasOwn(b, clave) &&
+      mismoContenido((a as Record<string, unknown>)[clave], (b as Record<string, unknown>)[clave]),
+  )
+}
+
+/**
+ * Guarda el perfil, salvo que sea la plantilla sin tocar.
+ *
+ * La plantilla valida —a propósito— y hasta acá eso alcanzaba para que
+ * guardarla creara la versión 1 de una marca cuyo perfil dice "A quién le
+ * habla" y "Qué le promete a quien le compra, en una frase". Desde ahí P1 y P2
+ * le pasan al modelo un contexto de marca de relleno, y con los pilares al
+ * 50/50 la salida no se ve rota: se ve vacía. Y esa corrida **cuesta una
+ * llamada real al modelo**, así que el momento de pararla es este y no cuando
+ * llegue la factura.
+ *
+ * El rechazo va acá y no en el formulario web porque el CLI carga perfiles por
+ * esta misma puerta (`perfil:cargar`), y porque `PLANTILLA_DE_PERFIL` vive de
+ * este lado: la web no la puede comparar contra nada.
+ */
 export async function cargarPerfilDeObjeto(
   db: BaseDeDatos,
   organizationId: string,
   args: { slug: string; perfil: unknown },
 ): Promise<number> {
   const ref = await resolverMarca(db, organizationId, args.slug)
+
+  if (mismoContenido(args.perfil, PLANTILLA_DE_PERFIL)) {
+    throw permanente(
+      `Este perfil es la plantilla sin cambios, así que no se guarda: describiría a ` +
+        `"${args.slug}" con textos de relleno. Reemplaza el posicionamiento, los ` +
+        'públicos, el tono y los pilares por los de la marca antes de guardar — la ' +
+        'estrategia y la grilla se generan a partir de este texto, y cada generación ' +
+        'cuesta una llamada al modelo.',
+    )
+  }
+
   return guardarPerfil(db, ref, args.perfil)
 }
 

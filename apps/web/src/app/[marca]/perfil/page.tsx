@@ -32,7 +32,9 @@ export default async function PaginaDePerfil({
         Sin perfil no se muestra un estado vacío que remita al CLI, sino el
         mismo editor con la plantilla dentro: es el paso siguiente a crear la
         marca, y sin perfil no se genera ni estrategia ni grilla. La plantilla
-        valida, así que guardarla sin tocar nada crea la versión 1.
+        valida contra el esquema —para que editarla no empiece con una lista de
+        reglas rotas—, pero guardarla **sin tocar** se rechaza: un perfil de
+        relleno se le pasa igual al modelo y esa corrida se paga.
       */}
       {!datos && (
         <p className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">

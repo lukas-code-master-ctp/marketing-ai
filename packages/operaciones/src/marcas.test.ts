@@ -196,6 +196,54 @@ describe('crearMarca valida lo que escribe una persona', () => {
     })
   })
 
+  // El slug se validaba sin recortar: " parcelas" fallaba con un mensaje que
+  // entrecomillaba un valor visualmente idéntico a uno válido. El nombre se
+  // validaba recortado y se insertaba crudo, así que los espacios llegaban a
+  // la base y salían en el encabezado de cada pantalla.
+  it('recorta el slug y el nombre antes de validar, y guarda lo recortado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const ref = await crearMarca(db, organizationId, {
+        slug: '  con-espacios  ',
+        nombre: '  Con Espacios  ',
+      })
+
+      expect(ref.brandSlug).toBe('con-espacios')
+      const [marca] = await db.select().from(esquema.brands)
+      expect(marca!.slug).toBe('con-espacios')
+      expect(marca!.name).toBe('Con Espacios')
+    })
+  })
+
+  // La columna es `text`: sin tope, un slug de 300 caracteres entraba y
+  // quedaba dentro de cada dirección del sistema. El comentario de la
+  // validación dice que es un segmento de URL; esto lo hace cumplir.
+  it('rechaza un slug más largo que el tope, y no inserta nada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const error = await crearMarca(db, organizationId, {
+        slug: 'a'.repeat(61),
+        nombre: 'Larga',
+      }).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toMatch(/60/)
+      expect(await db.select().from(esquema.brands)).toHaveLength(0)
+    })
+  })
+
+  it('acepta un slug de exactamente el tope', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const ref = await crearMarca(db, organizationId, { slug: 'a'.repeat(60), nombre: 'Justa' })
+
+      expect(ref.brandSlug).toBe('a'.repeat(60))
+    })
+  })
+
   it('rechaza un nombre en blanco', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const organizationId = await conOrganizacion(db)

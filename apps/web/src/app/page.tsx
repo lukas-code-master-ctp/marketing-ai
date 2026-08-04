@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { mesActual } from '../calendario.js'
 import { FormularioDeMarca } from '../componentes/FormularioDeMarca.js'
 import { conexion, marcasDeLaOrganizacion, organizacionPorDefecto } from '../datos.js'
 
@@ -22,16 +23,18 @@ export const dynamic = 'force-dynamic'
 export default async function Inicio({
   searchParams,
 }: {
-  searchParams: Promise<{ nueva?: string }>
+  // `string | string[]`, que es lo que Next entrega de verdad: con
+  // `?nueva=1&nueva=2` llega un arreglo. Declararlo `string` a secas era
+  // mentira, y el uso siguiente del valor —cualquiera que no sea comparar
+  // contra `undefined`— habría fallado en silencio con el tipo tranquilo.
+  searchParams: Promise<{ nueva?: string | string[] }>
 }) {
   const { nueva } = await searchParams
   const db = conexion()
   const marcas = await marcasDeLaOrganizacion(db, await organizacionPorDefecto(db))
 
   if (marcas.length > 0 && nueva === undefined) {
-    const ahora = new Date()
-    const mes = `${ahora.getUTCFullYear()}-${String(ahora.getUTCMonth() + 1).padStart(2, '0')}`
-    redirect(`/${marcas[0]!.slug}/grilla/${mes}`)
+    redirect(`/${marcas[0]!.slug}/grilla/${mesActual()}`)
   }
 
   return (

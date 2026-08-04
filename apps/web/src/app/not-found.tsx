@@ -12,9 +12,17 @@ export default function NoEncontrado() {
   return (
     <div className="p-6">
       <h1 className="mb-2 text-xl font-semibold text-gray-900">No encontramos esta página</h1>
+      {/*
+        Ni "la marca no existe" ni "el mes no existe" a secas: esta frontera
+        atrapa también direcciones que apuntan a una marca que sí existe pero a
+        una ruta que no —`/parcelas` sin sección, por ejemplo—. Afirmar que la
+        marca no existe cuando existe manda a buscar el problema al lugar
+        equivocado.
+      */}
       <p className="mb-4 text-sm text-gray-600">
-        La marca o el mes de la dirección no existen. Si llegaste desde un marcador, es probable
-        que la marca haya cambiado de slug.
+        Esta dirección no corresponde a ninguna pantalla: puede ser la marca, el mes, o que la
+        ruta esté incompleta. Si llegaste desde un marcador, es probable que la marca haya
+        cambiado de slug.
       </p>
       <Link href="/" className="text-sm text-indigo-600 underline hover:text-indigo-800">
         Volver al inicio

@@ -20,6 +20,10 @@ import { crearMarcaAccion } from '../acciones.js'
  * Al crearla lleva al perfil de la marca nueva: una marca sin perfil no puede
  * generar ni estrategia ni grilla, así que el perfil es literalmente el
  * siguiente paso y no un destino más.
+ *
+ * Un error transitorio ofrece "Reintentar", como en `EditorDePerfil`. Acá es
+ * incluso más seguro que allá: el intento que falló no escribió nada, así que
+ * repetirlo no puede dejar dos marcas ni pisar nada.
  */
 export function FormularioDeMarca() {
   const router = useRouter()
@@ -27,7 +31,7 @@ export function FormularioDeMarca() {
   const [nombre, setNombre] = useState('')
   const [presupuesto, setPresupuesto] = useState('')
   const [ocupado, setOcupado] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
 
   async function crear() {
     setOcupado(true)
@@ -35,16 +39,20 @@ export function FormularioDeMarca() {
 
     const r = await crearMarcaAccion(slug, nombre, presupuesto)
     if (!r.ok) {
-      setError(r.mensaje)
+      setError({ mensaje: r.mensaje, reintentable: r.reintentable })
       setOcupado(false)
       return
     }
 
+    const destino = `/${slug}/perfil`
     setSlug('')
     setNombre('')
     setPresupuesto('')
-    setOcupado(false)
-    router.push(`/${slug}/perfil`)
+    // `ocupado` se queda en `true`: la navegación tarda, y devolver el botón
+    // habilitado mientras tanto deja pasar un segundo clic que pide crear la
+    // misma marca otra vez. Esta pantalla se abandona al navegar, así que no
+    // hay a qué volver a habilitarlo.
+    router.push(destino)
   }
 
   return (
@@ -115,12 +123,22 @@ export function FormularioDeMarca() {
       </button>
 
       {error && (
-        <p
+        <div
           role="alert"
           className="whitespace-pre-wrap rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"
         >
-          {error}
-        </p>
+          <p>{error.mensaje}</p>
+          {error.reintentable && (
+            <button
+              type="button"
+              disabled={ocupado}
+              onClick={() => void crear()}
+              className="mt-1 font-medium underline disabled:opacity-50"
+            >
+              Reintentar
+            </button>
+          )}
+        </div>
       )}
     </form>
   )

@@ -77,4 +77,48 @@ describe('FormularioDeMarca', () => {
 
     expect(empujar).toHaveBeenCalledWith('/tercera/perfil')
   })
+
+  // El botón volvía a habilitarse antes del `router.push`, y la navegación no
+  // es instantánea: durante esos milisegundos un segundo clic pedía crear la
+  // misma marca otra vez.
+  it('el botón sigue deshabilitado mientras navega', async () => {
+    await llenar({ slug: 'tercera', nombre: 'La Tercera' })
+
+    expect(
+      (screen.getByRole('button', { name: 'Crear marca' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
+  // Un error transitorio —la base caída un segundo— es lo único que reintentar
+  // arregla, y acá reintentar es seguro porque el intento que falló no
+  // escribió nada.
+  it('ofrece reintentar cuando el error es transitorio, y el reintento vuelve a llamar', async () => {
+    vi.mocked(crearMarcaAccion).mockResolvedValue({
+      ok: false,
+      mensaje: 'La base no respondió',
+      reintentable: true,
+    })
+
+    await llenar({ slug: 'tercera', nombre: 'La Tercera' })
+    vi.mocked(crearMarcaAccion).mockResolvedValue({ ok: true, datos: null })
+    await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+
+    expect(vi.mocked(crearMarcaAccion).mock.calls).toEqual([
+      ['tercera', 'La Tercera', ''],
+      ['tercera', 'La Tercera', ''],
+    ])
+    expect(empujar).toHaveBeenCalledWith('/tercera/perfil')
+  })
+
+  it('no ofrece reintentar cuando el error es permanente', async () => {
+    vi.mocked(crearMarcaAccion).mockResolvedValue({
+      ok: false,
+      mensaje: 'Ya existe una marca con el slug "tercera" en esta organización',
+      reintentable: false,
+    })
+
+    await llenar({ slug: 'tercera', nombre: 'La Tercera' })
+
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull()
+  })
 })
