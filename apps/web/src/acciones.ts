@@ -6,9 +6,13 @@ import { conexion, organizacionPorDefecto } from './datos.js'
 import {
   aprobarGrilla,
   cargarPerfilDeObjeto,
+  crearMarca,
   descartarSlot,
   editarSlot,
+  encolarEstrategia,
+  encolarGrilla,
   reabrirGrilla,
+  reanudarCorridaEncolada,
 } from '@gc/operaciones'
 
 /**
@@ -43,6 +47,34 @@ async function ejecutar<T = null>(
       reintentable: clasificarError(error) === 'transitorio',
     }
   }
+}
+
+/**
+ * Crea la marca. Es una escritura corta y no pasa por el worker: no hay nada
+ * que generar todavía, solo una fila.
+ *
+ * Revalida `/` porque ahí vive el selector de marcas del layout raíz, que es
+ * lo que cambia al crear una.
+ *
+ * El presupuesto llega como el texto crudo del campo, que viene vacío cuando
+ * la persona no lo llenó: en ese caso no se pasa y manda el valor por omisión
+ * de la columna. Ni el slug ni el nombre ni el monto se validan acá — eso vive
+ * en `crearMarca`, para que el CLI, que escribe por la misma puerta, no tenga
+ * su propia versión de las reglas.
+ */
+export async function crearMarcaAccion(
+  slug: string,
+  nombre: string,
+  presupuestoUsd: string,
+): Promise<Resultado> {
+  return ejecutar('/', async (db, organizationId) => {
+    await crearMarca(db, organizationId, {
+      slug,
+      nombre,
+      ...(presupuestoUsd !== '' ? { presupuesto: presupuestoUsd } : {}),
+    })
+    return null
+  })
 }
 
 export async function descartarSlotAccion(
@@ -87,6 +119,43 @@ export async function aprobarGrillaAccion(
 export async function reabrirGrillaAccion(marca: string, mes: string): Promise<Resultado> {
   return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
     await reabrirGrilla(db, organizationId, { slug: marca, mes })
+    return null
+  })
+}
+
+/**
+ * Encola y devuelve. **No ejecuta**: el worker toma la corrida y la corre. Es
+ * lo que permite que esta acción responda al instante sin romper la regla de
+ * que la web no hace trabajo largo ni llama al modelo.
+ */
+export async function encolarGrillaAccion(marca: string, mes: string): Promise<Resultado> {
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await encolarGrilla(db, organizationId, { slug: marca, mes })
+    return null
+  })
+}
+
+/** La gemela de la anterior para P1. Encola y devuelve, por lo mismo. */
+export async function encolarEstrategiaAccion(
+  marca: string,
+  periodo: string,
+): Promise<Resultado> {
+  return ejecutar(`/${marca}/estrategia`, async (db, organizationId) => {
+    await encolarEstrategia(db, organizationId, { slug: marca, periodo })
+    return null
+  })
+}
+
+/**
+ * Devuelve una corrida fallida (o colgada) a la cola.
+ *
+ * Recibe la ruta a revalidar y no la marca, porque el componente que la llama
+ * sirve a las dos pantallas y la ruta ya lleva la marca dentro. Componer
+ * `/${marca}/...` aquí obligaría a pasar además de qué pantalla se trata.
+ */
+export async function reanudarCorridaAccion(ruta: string, runId: string): Promise<Resultado> {
+  return ejecutar(ruta, async (db, organizationId) => {
+    await reanudarCorridaEncolada(db, organizationId, runId)
     return null
   })
 }

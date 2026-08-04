@@ -1,5 +1,4 @@
-import { perfilConHistorial } from '@gc/operaciones'
-import { ErrorDeDominio } from '@gc/shared'
+import { PLANTILLA_DE_PERFIL, perfilConHistorial } from '@gc/operaciones'
 import { EditorDePerfil } from '../../../componentes/EditorDePerfil.js'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
 
@@ -19,37 +18,38 @@ export default async function PaginaDePerfil({
   // Que la marca no exista ya no llega hasta acá: lo resuelve
   // `[marca]/layout.tsx` con un 404, igual que para grilla y estrategia. Lo
   // único que queda es el estado vacío —una marca real sin perfil todavía—,
-  // que se pinta en la página como el "este mes no tiene grilla" del
-  // calendario, no como un error.
-  const datos = await perfilConHistorial(db, organizationId, marca).catch(
-    (error: unknown) => {
-      if (error instanceof ErrorDeDominio && error.clase === 'permanente') return null
-      throw error
-    },
-  )
+  // y desde que `perfilConHistorial` lo devuelve como `null` no hace falta
+  // atraparlo: antes esto iba envuelto en un `catch` que convertía en "no
+  // tiene perfil" cualquier error `permanente` de la consulta, incluidos los
+  // que no significan eso.
+  const datos = await perfilConHistorial(db, organizationId, marca)
 
   return (
     <div className="p-6">
       <h1 className="mb-4 text-xl font-semibold text-gray-900">Perfil de marca</h1>
 
-      {!datos ? (
-        <div className="rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
-          <p>La marca {marca} todavía no tiene perfil cargado.</p>
-          <p className="mt-2">
-            Cárgalo con{' '}
-            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-gray-800">
-              pnpm cli perfil:cargar --marca {marca} --archivo perfiles/{marca}.json
-            </code>
-          </p>
-        </div>
-      ) : (
-        <EditorDePerfil
-          marca={marca}
-          version={datos.version}
-          perfil={datos.perfil}
-          versiones={datos.versiones}
-        />
+      {/*
+        Sin perfil no se muestra un estado vacío que remita al CLI, sino el
+        mismo editor con la plantilla dentro: es el paso siguiente a crear la
+        marca, y sin perfil no se genera ni estrategia ni grilla. La plantilla
+        valida contra el esquema —para que editarla no empiece con una lista de
+        reglas rotas—, pero guardarla **sin tocar** se rechaza: un perfil de
+        relleno se le pasa igual al modelo y esa corrida se paga.
+      */}
+      {!datos && (
+        <p className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          La marca {marca} todavía no tiene perfil. Reemplaza el texto de la plantilla por
+          el de la marca y guarda: eso crea la versión 1. Sin perfil no se puede generar
+          ni la estrategia ni la grilla.
+        </p>
       )}
+
+      <EditorDePerfil
+        marca={marca}
+        version={datos?.version ?? 0}
+        perfil={datos?.perfil ?? PLANTILLA_DE_PERFIL}
+        versiones={datos?.versiones ?? []}
+      />
     </div>
   )
 }

@@ -31,7 +31,10 @@ const chequeoEnum = (nombreRestriccion: string, columna: string, valores: readon
 export const ESTADOS_STRATEGY = ['borrador', 'aprobada', 'archivada'] as const
 const ESTADOS_CONTENT_PLAN = ['borrador', 'aprobada', 'en_ejecucion', 'cerrada'] as const
 const ESTADOS_PLAN_SLOT = ['planificado', 'descartado'] as const
-const ESTADOS_PIPELINE = ['en_curso', 'completado', 'fallido'] as const
+// `pendiente` es el estado de una corrida encolada por la web y todavía no
+// tomada por el worker. Los pasos comparten la constante por simetría, pero
+// ninguno nace `pendiente`: el motor los crea `en_curso` al empezarlos.
+export const ESTADOS_PIPELINE = ['pendiente', 'en_curso', 'completado', 'fallido'] as const
 
 export const organizations = pgTable('organizations', {
   id: id(),

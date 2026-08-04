@@ -1,10 +1,14 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { grillaDelMes } from '@gc/operaciones'
+import { corridaDe, grillaDelMes } from '@gc/operaciones'
+// Del submódulo: es el mismo predicado que usa la estrategia y no arrastra nada.
+import { corridaViva } from '@gc/operaciones/senales'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 import { BotonAprobarGrilla } from '../../../../componentes/BotonAprobarGrilla.js'
+import { BotonGenerar } from '../../../../componentes/BotonGenerar.js'
 import { BotonReabrirGrilla } from '../../../../componentes/BotonReabrirGrilla.js'
+import { EstadoDeCorrida } from '../../../../componentes/EstadoDeCorrida.js'
 import { RejillaDelMes } from '../../../../componentes/RejillaDelMes.js'
 
 // `[marca]/grilla/[mes]` es un árbol de rutas propio: el `force-dynamic` de
@@ -39,8 +43,31 @@ export default async function PaginaDeGrilla({
   const organizationId = await organizacionPorDefecto(db)
   const grilla = await grillaDelMes(db, organizationId, marca, mes)
 
+  // La corrida más reciente de este mes, si la hay. Va después de
+  // `grillaDelMes` a propósito: las dos resuelven la marca, y así una marca
+  // inexistente sigue fallando por donde ya fallaba.
+  const corrida = await corridaDe(db, organizationId, {
+    slug: marca,
+    flujo: 'p2_grilla',
+    periodo: mes,
+  })
+
+  // Con una corrida en vuelo no se ofrece generar. Nada impedía encolar una
+  // segunda —el botón queda habilitado porque el estado de la grilla no cambia
+  // hasta que el worker persiste—, el worker ejecutaba las dos y **cada una
+  // pagaba el modelo**. El avance se ve en `EstadoDeCorrida`, y cuando termine
+  // el botón vuelve solo.
+  const enVuelo = corridaViva(corrida)
+
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
   const avisos = grilla.problemas.filter((p) => p.severidad === 'aviso')
+
+  // Regenerar borra todos los slots del mes y vuelve a insertarlos desde la
+  // propuesta nueva (`persistir`, en `@gc/flujos/p2.ts`). Los descartes no se
+  // recuentan en cadencia ni en pilares —la propuesta del modelo no los
+  // conoce— pero sí desaparecen, y son lo único destruido que el usuario
+  // puede contar antes de decidir.
+  const descartados = grilla.slots.filter((s) => s.descartado).length
 
   return (
     <div className="p-6">
@@ -80,12 +107,36 @@ export default async function PaginaDeGrilla({
             </div>
           )}
 
-          {grilla.estado === 'borrador' && grilla.contentPlanId && (
-            <BotonAprobarGrilla marca={marca} mes={mes} contentPlanId={grilla.contentPlanId} />
+          {/* Regenerar solo se ofrece en borrador porque es lo único que el
+              motor acepta: P2 rechaza una grilla que ya salió de borrador. */}
+          {grilla.estado === 'borrador' && (
+            <div className="flex flex-wrap items-start justify-end gap-2">
+              {!enVuelo && (
+                <BotonGenerar
+                  marca={marca}
+                  periodo={mes}
+                  que="grilla"
+                  etiqueta="Regenerar grilla"
+                  advertencia={
+                    `Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. ` +
+                    (descartados === 1
+                      ? 'La que descartaste vuelve a aparecer, y las ediciones que hiciste a mano se pierden.'
+                      : descartados > 1
+                        ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
+                        : 'Las ediciones que hayas hecho a mano se pierden.')
+                  }
+                />
+              )}
+              {grilla.contentPlanId && (
+                <BotonAprobarGrilla marca={marca} mes={mes} contentPlanId={grilla.contentPlanId} />
+              )}
+            </div>
           )}
           {grilla.estado === 'aprobada' && <BotonReabrirGrilla marca={marca} mes={mes} />}
         </div>
       </header>
+
+      {corrida && <EstadoDeCorrida corrida={corrida} ruta={`/${marca}/grilla/${mes}`} />}
 
       {/* Bloqueantes y avisos son dos clases distintas de problema y se
           muestran distinto: un pilar que ya no existe en el perfil rompe la
@@ -116,13 +167,17 @@ export default async function PaginaDeGrilla({
 
       {grilla.estado === null ? (
         <div className="rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
-          <p>Este mes todavía no tiene grilla.</p>
-          <p className="mt-2">
-            Genérala con{' '}
-            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-gray-800">
-              pnpm cli grilla:generar --marca {marca} --mes {mes}
-            </code>
-          </p>
+          <p className="mb-3">Este mes todavía no tiene grilla.</p>
+          {/* El botón encola y devuelve; quien la genera es el worker. El
+              avance aparece arriba, en `EstadoDeCorrida`. Mientras esa corrida
+              siga viva no se ofrece de nuevo: la grilla no existe hasta que el
+              worker la persista, así que sin esta guarda el botón invita a
+              encolar una segunda y pagar el modelo dos veces. */}
+          {!enVuelo && (
+            <div className="flex justify-center">
+              <BotonGenerar marca={marca} periodo={mes} que="grilla" etiqueta="Generar grilla" />
+            </div>
+          )}
         </div>
       ) : (
         <RejillaDelMes

@@ -94,26 +94,88 @@ export async function resolverMarca(
   return { organizationId: marca.organizationId, brandId: marca.id, brandSlug: slug }
 }
 
+/**
+ * El slug es un segmento de URL (`/parcelas/grilla/2026-09`) y la clave por la
+ * que el CLI, la web y el worker nombran la marca. Validar con expresión
+ * regular es correcto acá: es entrada de una persona, no salida de un modelo.
+ */
+const SLUG_DE_MARCA = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+/**
+ * Tope de largo del slug. La columna es `text` y acepta lo que sea, así que
+ * sin esto `'a'.repeat(300)` entraba y quedaba dentro de cada dirección del
+ * sistema. 60 es de sobra para un identificador que una persona escribe y que
+ * después tiene que leerse en una URL.
+ */
+const LARGO_MAXIMO_DE_SLUG = 60
+/** `numeric(10, 2)`: dólares con hasta dos decimales y punto, nunca coma. */
+const MONTO_USD = /^\d{1,8}(?:\.\d{1,2})?$/
+
+/**
+ * Crea la marca, validando antes de tocar la base.
+ *
+ * La validación vive acá y no en el formulario web porque el CLI escribe por
+ * esta misma puerta, y porque el error tiene que salir clasificado como
+ * `permanente`: reintentar un slug con espacios no lo arregla. Sin esto, un
+ * presupuesto con coma llegaba a Postgres y volvía como
+ * `invalid input syntax for type numeric` —en inglés y nombrando un tipo de
+ * la base— a una persona que solo escribió "25,50" en un formulario.
+ *
+ * El slug y el nombre se recortan **antes** de validar, y se guarda lo
+ * recortado. Antes el nombre se validaba recortado y se insertaba crudo, así
+ * que `"  Con Espacios  "` quedaba con los espacios en la base; y el slug no
+ * se recortaba nunca, así que `" parcelas"` fallaba con un mensaje que
+ * entrecomillaba un valor visualmente idéntico a uno válido —el peor tipo de
+ * error, porque quien lo lee ve lo que escribió y le parece bien.
+ */
 export async function crearMarca(
   db: BaseDeDatos,
   organizationId: string,
   args: { slug: string; nombre: string; presupuesto?: string },
 ): Promise<ReferenciaResuelta> {
+  const slug = args.slug.trim()
+  const nombre = args.nombre.trim()
+
+  if (slug.length > LARGO_MAXIMO_DE_SLUG) {
+    throw permanente(
+      `El slug tiene ${slug.length} caracteres y el máximo son ${LARGO_MAXIMO_DE_SLUG}: ` +
+        'es lo que aparece en la dirección de cada pantalla, así que tiene que ser corto.',
+    )
+  }
+
+  if (!SLUG_DE_MARCA.test(slug)) {
+    throw permanente(
+      `El slug "${slug}" no sirve como identificador de marca: usa solo ` +
+        'minúsculas, números y guiones, por ejemplo "mi-marca". Es lo que aparece ' +
+        'en la dirección de cada pantalla.',
+    )
+  }
+
+  if (nombre === '') {
+    throw permanente('El nombre de la marca no puede quedar en blanco')
+  }
+
+  if (args.presupuesto !== undefined && !MONTO_USD.test(args.presupuesto)) {
+    throw permanente(
+      `El presupuesto "${args.presupuesto}" no es un monto válido: escríbelo en ` +
+        'dólares, con punto y hasta dos decimales, por ejemplo 25 o 25.50.',
+    )
+  }
+
   try {
     const [marca] = await db
       .insert(esquema.brands)
       .values({
         organizationId,
-        slug: args.slug,
-        name: args.nombre,
+        slug,
+        name: nombre,
         ...(args.presupuesto !== undefined ? { monthlyBudgetUsd: args.presupuesto } : {}),
       })
       .returning()
-    return { organizationId, brandId: marca!.id, brandSlug: args.slug }
+    return { organizationId, brandId: marca!.id, brandSlug: slug }
   } catch (error) {
     if (esViolacionDeUnica(error)) {
       throw permanente(
-        `Ya existe una marca con el slug "${args.slug}" en esta organización`,
+        `Ya existe una marca con el slug "${slug}" en esta organización`,
         error,
       )
     }

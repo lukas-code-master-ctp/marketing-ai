@@ -149,3 +149,145 @@ describe('marcas por organización', () => {
     })
   })
 })
+
+/**
+ * Mientras la marca nacía del CLI, quien escribía el slug lo escribía sabiendo
+ * que iba a ser un segmento de URL. Desde que hay un formulario, el slug lo
+ * llena una persona que no tiene por qué saberlo: "Mi Marca" entraba tal cual
+ * y dejaba la marca en `/Mi Marca/grilla/2026-09`, y un presupuesto con coma
+ * salía como error crudo de Postgres. La validación va acá y no en la web
+ * porque el CLI escribe por la misma puerta.
+ */
+describe('crearMarca valida lo que escribe una persona', () => {
+  async function conOrganizacion(
+    db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  ) {
+    const [org] = await db
+      .insert(esquema.organizations)
+      .values({ name: 'A', slug: 'alfa' })
+      .returning()
+    return org!.id
+  }
+
+  it('rechaza un slug que no sirve como segmento de URL, y no inserta nada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      for (const slug of ['Mi Marca', 'MiMarca', 'con_guion_bajo', '-borde', 'acentuada-ñ', '']) {
+        const error = await crearMarca(db, organizationId, { slug, nombre: 'Nombre' })
+          .catch((e: unknown) => e)
+        expect(error, `debía rechazar el slug ${JSON.stringify(slug)}`).toMatchObject({
+          clase: 'permanente',
+        })
+        expect((error as Error).message).toMatch(/minúsculas/)
+      }
+
+      expect(await db.select().from(esquema.brands)).toHaveLength(0)
+    })
+  })
+
+  it('acepta el slug con minúsculas, números y guiones', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const ref = await crearMarca(db, organizationId, { slug: 'marca-2', nombre: 'Marca 2' })
+
+      expect(ref.brandSlug).toBe('marca-2')
+    })
+  })
+
+  // El slug se validaba sin recortar: " parcelas" fallaba con un mensaje que
+  // entrecomillaba un valor visualmente idéntico a uno válido. El nombre se
+  // validaba recortado y se insertaba crudo, así que los espacios llegaban a
+  // la base y salían en el encabezado de cada pantalla.
+  it('recorta el slug y el nombre antes de validar, y guarda lo recortado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const ref = await crearMarca(db, organizationId, {
+        slug: '  con-espacios  ',
+        nombre: '  Con Espacios  ',
+      })
+
+      expect(ref.brandSlug).toBe('con-espacios')
+      const [marca] = await db.select().from(esquema.brands)
+      expect(marca!.slug).toBe('con-espacios')
+      expect(marca!.name).toBe('Con Espacios')
+    })
+  })
+
+  // La columna es `text`: sin tope, un slug de 300 caracteres entraba y
+  // quedaba dentro de cada dirección del sistema. El comentario de la
+  // validación dice que es un segmento de URL; esto lo hace cumplir.
+  it('rechaza un slug más largo que el tope, y no inserta nada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const error = await crearMarca(db, organizationId, {
+        slug: 'a'.repeat(61),
+        nombre: 'Larga',
+      }).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toMatch(/60/)
+      expect(await db.select().from(esquema.brands)).toHaveLength(0)
+    })
+  })
+
+  it('acepta un slug de exactamente el tope', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const ref = await crearMarca(db, organizationId, { slug: 'a'.repeat(60), nombre: 'Justa' })
+
+      expect(ref.brandSlug).toBe('a'.repeat(60))
+    })
+  })
+
+  it('rechaza un nombre en blanco', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const error = await crearMarca(db, organizationId, { slug: 'valida', nombre: '   ' })
+        .catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toMatch(/nombre/i)
+      expect(await db.select().from(esquema.brands)).toHaveLength(0)
+    })
+  })
+
+  it('rechaza un presupuesto que no es un número, con un mensaje legible', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      const error = await crearMarca(db, organizationId, {
+        slug: 'valida',
+        nombre: 'Válida',
+        presupuesto: '25,50',
+      }).catch((e: unknown) => e)
+
+      expect(error).toMatchObject({ clase: 'permanente' })
+      expect((error as Error).message).toMatch(/presupuesto/i)
+      // Sin validación esto salía como `invalid input syntax for type numeric`,
+      // en inglés y nombrando un tipo de Postgres.
+      expect((error as Error).message).not.toMatch(/numeric|syntax/i)
+      expect(await db.select().from(esquema.brands)).toHaveLength(0)
+    })
+  })
+
+  it('guarda el presupuesto que sí es un número', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await conOrganizacion(db)
+
+      await crearMarca(db, organizationId, {
+        slug: 'valida',
+        nombre: 'Válida',
+        presupuesto: '40.50',
+      })
+
+      const [marca] = await db.select().from(esquema.brands)
+      expect(marca!.monthlyBudgetUsd).toBe('40.50')
+    })
+  })
+})

@@ -16,13 +16,32 @@ Cada bloque de trabajo tiene su spec y su plan en `docs/superpowers/`. Los plane
 ## Comandos
 
 ```bash
-docker compose up -d          # Postgres. Sin esto fallan seis paquetes
+docker compose up -d postgres # la base. Sin esto fallan seis paquetes
+docker compose up -d          # lo anterior más el worker — que exige credenciales, ver abajo
 pnpm test                     # NUNCA `pnpm -r test` — ver abajo
 pnpm -r typecheck
 pnpm --filter @gc/web dev     # http://localhost:3000
 pnpm --filter @gc/web build   # parte de "terminado" para la app web
 pnpm cli                      # ayuda del CLI
+pnpm --filter @gc/worker start   # el worker, si no lo levantaste con docker compose
+pnpm comprobar:aislamiento    # que la web no alcance al modelo
+pnpm comprobar:volumenes      # que el compose tape todos los node_modules del workspace
 ```
+
+Los dos primeros están separados a propósito: para trabajar en los paquetes o
+en la web basta la base, y ese comando no depende de tener credenciales ni
+`.env`. Prometer que `docker compose up -d` "levanta todo" sería falso en
+cuanto falte la clave, y dejaría un servicio en rojo en `docker compose ps` en
+una máquina perfectamente sana.
+
+El worker construye el cliente del modelo al arrancar, así que no levanta sin
+`OPENROUTER_API_KEY` o sin `IA_EN_SECO=true`. Es a propósito: prefiere no
+arrancar antes que arrancar sano y marcar fallida toda la cola. **Esto vale
+también dentro de `docker compose`**: con el `.env` tal como está hoy —clave
+vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
+`Falta OPENROUTER_API_KEY` y queda en `Exited (1)`. No es un problema del
+contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
+worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
 ## Reglas que no son negociables
 
@@ -44,7 +63,9 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **Ninguna salida del modelo se parsea con expresiones regulares.** Toda tarea declara un esquema Zod y valida. Validar entrada de usuario con regex sí es válido.
 
-**La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI. La web lee, edita y aprueba.
+**La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI y del worker. La web lee, edita y aprueba.
+
+**El error de una corrida que ejecutó el motor lo escribe el motor.** `ejecutarFlujo` la marca fallida antes de relanzar, con la clase del error delante (`[permanente] …`). Quien lo llame anota el fallo solo si nadie lo anotó ya — el worker lo hace con un `AND status <> 'fallido'` — porque sobrescribir ese mensaje pierde el diagnóstico bueno. Lo que sí hay que anotar es lo que falla **antes** de entrar al motor: ahí la corrida ya está `en_curso` y nadie más la sacaría de ese estado.
 
 **`@gc/ai` es inalcanzable desde `apps/web`, y lo sostienen `tsc` y una
 comprobación del grafo de dependencias — no el bundler.** Los flujos que llaman
@@ -120,15 +141,16 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 11 tablas, 5 migraciones
+@gc/db          esquema Drizzle, 11 tablas, 6 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
 @gc/strategy    esquemas, validación, derivados, periodos, lectura de estrategia
 @gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
-@gc/operaciones operaciones que comparten CLI y web
+@gc/operaciones operaciones que comparten CLI, web y worker
 apps/cli        comandos de operación
 apps/web        Next.js App Router, Server Components y Server Actions
+apps/worker     toma corridas pendientes y las ejecuta. Lo único que llama al modelo sin que se lo pidan
 ```
 
 `esTransitorio` es el **único** punto donde se decide reintentar, y clasifica por SQLSTATE — por eso cubre toda llamada a la base sin envolverlas una por una.
@@ -152,3 +174,33 @@ Dos hábitos que valen más que el resto:
 Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`. Postgres en Docker, bases `gestor` (desarrollo, con datos de marcha en seco) y `gestor_test`.
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
+
+El worker corre en un contenedor con el repositorio montado en `/app`, y se
+ejecuta con `tsx` sin compilar nada: **un cambio en `apps/worker` o en
+cualquier paquete solo pide `docker compose restart worker`, no reconstruir la
+imagen.** Son unos siete segundos hasta que el worker vuelve a escuchar.
+Reconstruir (`docker compose build worker`) hace falta solo si cambia el
+`Dockerfile`.
+
+Sus `node_modules` no son los del host: pnpm en Windows deja enlaces con rutas
+absolutas y binarios de otra plataforma, así que el contenedor tiene los suyos
+en **volúmenes con nombre** —uno por paquete del workspace, más el almacén de
+pnpm— y los instala al arrancar. Con nombre y no anónimos a propósito: los
+anónimos no se los lleva `docker compose down`, solo `down -v`, que **también
+borra `pgdata`** y con él la base de desarrollo que hay que preservar. O sea
+que con volúmenes anónimos no existía limpieza segura. Los mantiene completos
+`pnpm comprobar:volumenes`, que corre en CI.
+
+Medido el 2026-08-04, con la imagen ya construida: `docker compose up -d`
+tarda unos 14 segundos con los volúmenes vacíos —de los cuales 7 son el
+`pnpm install`, 230 paquetes descargados— y unos 7 con los volúmenes tibios.
+Construir la imagen desde cero suma otros 4. (El comentario de
+`docker-compose.yml` decía «unos dos minutos en el primer arranque de un clon
+nuevo»; no reproduce, y quedó corregido allá.)
+
+**Una dependencia nueva NO la instala sola `docker compose restart worker`.**
+El `command` corre `pnpm install --frozen-lockfile`, que aborta con
+`ERR_PNPM_OUTDATED_LOCKFILE` en cuanto el `package.json` y el `pnpm-lock.yaml`
+no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
+en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
+worker`.

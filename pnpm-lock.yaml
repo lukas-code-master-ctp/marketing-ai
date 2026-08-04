@@ -110,6 +110,37 @@ importers:
         specifier: ^4.0.0
         version: 4.3.3
 
+  apps/worker:
+    dependencies:
+      '@gc/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
+      '@gc/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@gc/flujos':
+        specifier: workspace:*
+        version: link:../../packages/flujos
+      '@gc/operaciones':
+        specifier: workspace:*
+        version: link:../../packages/operaciones
+      '@gc/pipeline':
+        specifier: workspace:*
+        version: link:../../packages/pipeline
+      '@gc/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(@types/react@19.2.18)(postgres@3.4.9)(react@19.2.8)
+    devDependencies:
+      tsx:
+        specifier: ^4.19.1
+        version: 4.23.1
+
   packages/ai:
     dependencies:
       '@gc/db':

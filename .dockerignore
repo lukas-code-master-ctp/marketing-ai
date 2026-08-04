@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.next
+.git
+
+# Hoy el Dockerfile no tiene ningún `COPY`, así que este archivo es inerte:
+# BuildKit ni siquiera transfiere el contexto. Estas dos líneas están de todos
+# modos porque el día que alguien agregue un `COPY . .` para armar una imagen
+# de producción, lo que entraría a la imagen son credenciales (`.env`, con la
+# clave de OpenRouter) y datos reales de operación (`perfiles/`). Los dos están
+# ignorados por git justamente por eso; que se cuelen por Docker sería el mismo
+# escape por otra puerta.
+.env
+.env.local
+perfiles/

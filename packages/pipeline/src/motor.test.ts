@@ -384,6 +384,302 @@ describe('ejecutarFlujo', () => {
     })
   })
 
+  it('reanudar reutiliza la salida de un paso cuya versión calza', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let vecesQueCorrioElPrimero = 0
+      // El segundo paso necesita fallar solo la primera vez, y no puede leerlo
+      // del contador del primero: al reanudar, el primero justamente no se
+      // reejecuta, así que ese contador se queda quieto y el segundo volvería
+      // a caer para siempre.
+      let debeFallarElSegundo = true
+
+      const flujo = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            versionDeSalida: 3,
+            ejecutar: async () => {
+              vecesQueCorrioElPrimero++
+              return { dato: 'a' }
+            },
+          }),
+          definirPaso<{ dato: string }, { visto: string }>({
+            nombre: 'dos',
+            ejecutar: async (entrada) => {
+              if (debeFallarElSegundo) throw transitorio('cae la primera vez')
+              return { visto: entrada.dato }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow(/cae la primera vez/)
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      const r = await ejecutarFlujo(
+        db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA,
+      )
+
+      expect(r.estado).toBe('completado')
+      expect(r.salida).toEqual({ visto: 'a' })
+      // El primero no se reejecutó: su salida se reutilizó.
+      expect(vecesQueCorrioElPrimero).toBe(1)
+    })
+  })
+
+  it('reanudar rechaza una salida de versión incompatible, nombrando el remedio', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const v1 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            versionDeSalida: 1,
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw transitorio('cae')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v1, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow()
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+
+      // Misma corrida, el paso `uno` ahora produce otra forma.
+      const v2 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { otro: string }>({
+            nombre: 'uno',
+            versionDeSalida: 2,
+            ejecutar: async () => ({ otro: 'b' }),
+          }),
+          definirPaso<unknown, { ok: boolean }>({
+            nombre: 'dos',
+            ejecutar: async () => ({ ok: true }),
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v2, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA),
+      ).rejects.toThrow(/genera el contenido de nuevo/i)
+    })
+  })
+
+  it('un rechazo por versión deja la corrida fallida con el motivo, no en curso', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const v1 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            versionDeSalida: 1,
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw permanente('cae la primera vez')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v1, {}, { organizationId }, SIN_ESPERA),
+      ).rejects.toThrow()
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      // La corrida quedó bien diagnosticada: fallida y con su motivo.
+      expect(corrida!.status).toBe('fallido')
+      expect(corrida!.error).toContain('cae la primera vez')
+
+      // Misma corrida, el paso `uno` ahora produce otra forma.
+      const v2 = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { otro: string }>({
+            nombre: 'uno',
+            versionDeSalida: 2,
+            ejecutar: async () => ({ otro: 'b' }),
+          }),
+          definirPaso<unknown, { ok: boolean }>({
+            nombre: 'dos',
+            ejecutar: async () => ({ ok: true }),
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, v2, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA),
+      ).rejects.toThrow(/versión de salida/)
+
+      // Reanudar no puede dejarla peor de como estaba: el rechazo tiene que
+      // pasar por el mismo camino que cualquier otro fallo del paso. Si se
+      // escapa de ese camino, la corrida queda 'en_curso' con `error` NULL
+      // —indistinguible de una que sigue corriendo— y el diagnóstico que este
+      // rechazo existe para producir no se guarda en ninguna parte.
+      const [despues] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, corrida!.id))
+      expect(despues!.status).toBe('fallido')
+      expect(despues!.error).toContain('[permanente]')
+      expect(despues!.error).toContain('versión de salida')
+      expect(despues!.finishedAt).not.toBeNull()
+    })
+  })
+
+  it('no reejecuta un paso completado que devolvió void', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+      let efectos = 0
+      let debeFallarElSegundo = true
+      let recibidoAlReanudar: unknown = 'sin tocar'
+
+      const flujo = {
+        nombre: 'prueba',
+        pasos: [
+          definirPaso<unknown, void>({
+            nombre: 'efecto_void',
+            ejecutar: async () => {
+              efectos++
+            },
+          }),
+          definirPaso<void, { ok: boolean }>({
+            nombre: 'fragil',
+            ejecutar: async (entrada) => {
+              if (debeFallarElSegundo) throw permanente('todavía no')
+              recibidoAlReanudar = entrada
+              return { ok: true }
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, SIN_ESPERA),
+      ).rejects.toThrow()
+      expect(efectos).toBe(1)
+
+      // `JSON.stringify` descarta las claves cuyo valor es `undefined`: el sobre
+      // de un paso void llega a la base sin `datos`.
+      const [uno] = await db
+        .select()
+        .from(esquema.pipelineSteps)
+        .where(eq(esquema.pipelineSteps.name, 'efecto_void'))
+      expect(uno!.output).toEqual({ __v: 1 })
+
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+      debeFallarElSegundo = false
+      const r = await ejecutarFlujo(
+        db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA,
+      )
+
+      // Un paso que devuelve void sigue estando completado: no se repite, y no
+      // se rechaza inventando que su salida no tiene versión.
+      expect(r.estado).toBe('completado')
+      expect(efectos).toBe(1)
+      // Reanudar entrega al paso siguiente lo mismo que la ejecución en vivo.
+      expect(recibidoAlReanudar).toBeUndefined()
+    })
+  })
+
+  it('una salida guardada sin sobre de versión se trata como incompatible', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const flujo = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw transitorio('cae')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow()
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+
+      // Simula una fila escrita antes de que el sobre existiera.
+      await db
+        .update(esquema.pipelineSteps)
+        .set({ output: { dato: 'a' } })
+        .where(eq(esquema.pipelineSteps.name, 'uno'))
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA),
+      ).rejects.toThrow(/no se encontró ninguna/i)
+    })
+  })
+
+  it('una salida con __v de otro tipo se trata como incompatible, sin ensuciar el mensaje', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await sembrarOrg(db)
+
+      const flujo = {
+        nombre: 'prueba_version',
+        pasos: [
+          definirPaso<unknown, { dato: string }>({
+            nombre: 'uno',
+            ejecutar: async () => ({ dato: 'a' }),
+          }),
+          definirPaso<unknown, unknown>({
+            nombre: 'dos',
+            ejecutar: async () => {
+              throw transitorio('cae')
+            },
+          }),
+        ],
+      }
+
+      await expect(
+        ejecutarFlujo(db, flujo, {}, { organizationId }, { ...SIN_ESPERA, maxIntentos: 1 }),
+      ).rejects.toThrow()
+      const [corrida] = await db.select().from(esquema.pipelineRuns)
+
+      // Una fila vieja cuyo `__v` nunca fue el del sobre.
+      await db
+        .update(esquema.pipelineSteps)
+        .set({ output: { __v: { mayor: 1 }, datos: { dato: 'a' } } })
+        .where(eq(esquema.pipelineSteps.name, 'uno'))
+
+      const error = await ejecutarFlujo(
+        db, flujo, {}, { organizationId, runId: corrida!.id }, SIN_ESPERA,
+      ).catch((e: unknown) => e)
+
+      expect((error as Error).message).toContain('no se encontró ninguna')
+      // Sin la comprobación de tipo entra al camino de comparación y el mensaje
+      // sale diciendo "encontrada [object Object]".
+      expect((error as Error).message).not.toContain('[object Object]')
+    })
+  })
+
   it('reintenta un fallo de serialización de Postgres y no una violación de única', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const organizationId = await sembrarOrg(db)

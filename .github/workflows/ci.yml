@@ -29,4 +29,11 @@ jobs:
       # agujero abierto y el único detector depende de que alguien se acuerde.
       - name: Comprobar aislamiento de la web respecto del modelo
         run: pnpm comprobar:aislamiento
+      # Mismo motivo que el paso de arriba, otra fuga: si un paquete nuevo del
+      # workspace no tiene su volumen en docker-compose.yml, el `pnpm install`
+      # del contenedor pisa los node_modules del host. Nada de lo que corre en
+      # CI toca el contenedor, así que sin este paso el olvido no lo ve nadie
+      # hasta que a alguien se le rompe la instalación local.
+      - name: Comprobar volúmenes del worker en docker-compose
+        run: pnpm comprobar:volumenes
       - run: pnpm test
