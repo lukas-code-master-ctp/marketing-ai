@@ -74,6 +74,12 @@ export async function conBaseDeDatosDePrueba(
     await barrerResiduos(db)
     await migrate(db, { migrationsFolder: CARPETA_MIGRACIONES })
     await db.delete(esquema.organizations)
+    // `users` no cuelga de `organization_id` (a propósito: ver el comentario
+    // de la tabla en esquema.ts), así que el borrado de arriba no la alcanza
+    // por cascada. Sin esta línea, una persona que una prueba deja insertada
+    // sobrevive a la siguiente corrida y su correo único choca contra la
+    // próxima prueba que intente crear la misma persona.
+    await db.delete(esquema.users)
     await fn(db)
   } finally {
     await cerrar()
