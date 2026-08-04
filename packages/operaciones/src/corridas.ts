@@ -1,7 +1,7 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, or, sql } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
 
 /**
@@ -247,17 +247,82 @@ export async function corridaDe(
 }
 
 /**
+ * Minutos sin dar señales de vida tras los cuales una corrida `en_curso` se
+ * considera abandonada y se deja reanudar.
+ *
+ * El número sale del peor turno realista del motor: cinco intentos con espera
+ * exponencial de hasta treinta segundos cada uno, más la llamada al modelo de
+ * cada intento. Es el mismo razonamiento con el que `docker-compose.yml` fijó
+ * el `stop_grace_period` del worker en ciento ochenta segundos. Quince minutos
+ * deja margen de sobra por encima de eso, y el reparto de riesgos manda hacia
+ * arriba: pasarse de generoso cuesta que quien mira la pantalla espere un rato
+ * antes de poder reanudar; quedarse corto cuesta que dos workers ejecuten el
+ * mismo paso y **los dos paguen el modelo**, que es justo lo que esta guarda
+ * existe para evitar.
+ */
+const MINUTOS_SIN_SENAL_PARA_ABANDONO = 15
+
+/**
+ * La marca de tiempo más reciente que dejó la corrida: la suya propia o la de
+ * cualquiera de sus pasos. Es una aproximación, no una respuesta: la única
+ * forma correcta de distinguir una corrida viva de una abandonada es un latido
+ * o un arriendo que el worker renueve. Está registrado en `pendientes.md`.
+ *
+ * `greatest` de Postgres ignora los nulos, así que un paso que todavía no
+ * termina aporta su `started_at` sin anular el resto. El `finished_at` cuenta
+ * porque un paso puede pasarse veinte minutos entre reintentos y llamadas al
+ * modelo: mirando solo `started_at`, una corrida que acaba de completar ese
+ * paso parecería abandonada.
+ *
+ * La subconsulta compara también la organización, no solo el `run_id`: es la
+ * misma tenencia que la clave foránea compuesta ya exige, y aquí se escribe
+ * igual que en el resto del paquete.
+ *
+ * Las columnas se escriben con las del esquema y no a mano, y la subconsulta va
+ * sin alias para poder hacerlo: la propiedad se llama `startedAt` en las dos
+ * tablas pero la columna física es `created_at`, así que un `s.started_at`
+ * escrito a mano revienta con «column does not exist». Es el mismo tropiezo que
+ * ya documenta el `ORDER BY` de `tomarCorridaPendiente`.
+ */
+const ultimaSenalDeVida = sql`greatest(
+  ${esquema.pipelineRuns.startedAt},
+  (
+    SELECT max(greatest(
+      ${esquema.pipelineSteps.startedAt},
+      ${esquema.pipelineSteps.finishedAt}
+    ))
+    FROM ${esquema.pipelineSteps}
+    WHERE ${esquema.pipelineSteps.runId} = ${esquema.pipelineRuns.id}
+      AND ${esquema.pipelineSteps.organizationId} = ${esquema.pipelineRuns.organizationId}
+  )
+)`
+
+/** Antigüedad en palabras, para el mensaje que lee una persona. */
+function describirAntiguedad(segundos: number): string {
+  const s = Math.max(0, Math.floor(segundos))
+  if (s < 60) return `${s} segundo${s === 1 ? '' : 's'}`
+  const m = Math.floor(s / 60)
+  return `${m} minuto${m === 1 ? '' : 's'}`
+}
+
+/**
  * Devuelve una corrida a `pendiente` para que el worker la retome.
  *
- * No distingue "falló" de "se colgó": si el worker muere a mitad, la fila queda
- * `en_curso` para siempre; si un paso agota sus reintentos, queda `fallido`. En
- * ambos casos la operación correcta es la misma, porque el pipeline es
- * idempotente por paso y los ya completados no se reejecutan — el modelo no se
- * vuelve a pagar.
+ * Una `fallido` se reanuda siempre: nadie la está ejecutando. Una `en_curso`
+ * solo si lleva `MINUTOS_SIN_SENAL_PARA_ABANDONO` sin dar señales, porque el
+ * estado no distingue "se colgó" de "el worker la está ejecutando ahora
+ * mismo". Reanudar una viva la devuelve a la cola, otro worker la toma, y los
+ * dos ejecutan el mismo paso: el `onConflictDoUpdate` de `ejecutarPaso`
+ * reinicia la fila del primero mientras sigue corriendo, así que **los dos
+ * llaman al modelo**. Hoy no es alcanzable con un worker de bucle secuencial,
+ * pero nada en el código ni en `docker-compose.yml` impone que haya uno solo.
  *
- * Una corrida `completado` sí se rechaza: no hay nada que reanudar, y
- * permitirlo invitaría a usar este botón como "regenerar", que es otra cosa y
- * destruye lo que haya.
+ * Reanudar una abandonada no vuelve a pagar el modelo: el pipeline es
+ * idempotente por paso y los completados no se reejecutan.
+ *
+ * Una corrida `completado` se rechaza: no hay nada que reanudar, y permitirlo
+ * invitaría a usar este botón como "regenerar", que es otra cosa y destruye lo
+ * que haya. Una `pendiente` también: ya está en la cola.
  */
 export async function reanudarCorridaEncolada(
   db: BaseDeDatos,
@@ -271,7 +336,13 @@ export async function reanudarCorridaEncolada(
       and(
         eq(esquema.pipelineRuns.id, runId),
         eq(esquema.pipelineRuns.organizationId, organizationId),
-        inArray(esquema.pipelineRuns.status, ['fallido', 'en_curso']),
+        or(
+          eq(esquema.pipelineRuns.status, 'fallido'),
+          and(
+            eq(esquema.pipelineRuns.status, 'en_curso'),
+            sql`${ultimaSenalDeVida} < now() - ${MINUTOS_SIN_SENAL_PARA_ABANDONO}::int * interval '1 minute'`,
+          ),
+        ),
       ),
     )
     .returning({ id: esquema.pipelineRuns.id })
@@ -279,7 +350,13 @@ export async function reanudarCorridaEncolada(
   if (fila) return
 
   const [actual] = await db
-    .select({ status: esquema.pipelineRuns.status })
+    .select({
+      status: esquema.pipelineRuns.status,
+      // Se calcula en SQL y no restando `Date.now()` por lo mismo que
+      // `encoladaHace`: son dos relojes que hoy son el mismo host y mañana no.
+      segundosSinSenal: sql<number>`extract(epoch from now() - ${ultimaSenalDeVida})`
+        .mapWith(Number),
+    })
     .from(esquema.pipelineRuns)
     .where(
       and(
@@ -289,7 +366,19 @@ export async function reanudarCorridaEncolada(
     )
 
   if (!actual) throw permanente(`No existe la corrida ${runId} en esta organización`)
+
+  // El rechazo de una `en_curso` viva se distingue del resto a propósito: no es
+  // "este estado no se reanuda" sino "espera, alguien la está ejecutando".
+  if (actual.status === 'en_curso') {
+    throw permanente(
+      `La corrida ${runId} parece estar ejecutándose ahora mismo: dio señales de vida ` +
+        `hace ${describirAntiguedad(actual.segundosSinSenal)}. Se puede reanudar recién ` +
+        `cuando lleve ${MINUTOS_SIN_SENAL_PARA_ABANDONO} minutos sin avanzar.`,
+    )
+  }
+
   throw permanente(
-    `La corrida ${runId} está en estado "${actual.status}" y solo se reanuda una fallida o colgada`,
+    `La corrida ${runId} está en estado "${actual.status}" y solo se reanuda una que ` +
+      `haya fallado o que lleve ${MINUTOS_SIN_SENAL_PARA_ABANDONO} minutos colgada`,
   )
 }

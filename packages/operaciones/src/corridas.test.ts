@@ -343,13 +343,15 @@ describe('reanudarCorridaEncolada', () => {
     })
   })
 
-  it('también reanuda una corrida colgada en en_curso', async () => {
+  // La antigüedad se escribe hacia atrás en la base en vez de esperarla: una
+  // prueba que duerme quince minutos no la corre nadie.
+  it('reanuda una corrida colgada en en_curso que hace rato no da señales', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
       const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
       await db
         .update(esquema.pipelineRuns)
-        .set({ status: 'en_curso' })
+        .set({ status: 'en_curso', startedAt: sql`now() - interval '20 minutes'` })
         .where(eq(esquema.pipelineRuns.id, runId))
 
       await reanudarCorridaEncolada(db, ref.organizationId, runId)
@@ -359,6 +361,67 @@ describe('reanudarCorridaEncolada', () => {
         .from(esquema.pipelineRuns)
         .where(eq(esquema.pipelineRuns.id, runId))
       expect(fila!.status).toBe('pendiente')
+    })
+  })
+
+  // El estado `en_curso` no distingue "se colgó" de "el worker la está
+  // ejecutando ahora mismo". Si esta se reanudara, otro worker la tomaría
+  // mientras el primero sigue, y los dos pagarían el mismo paso del modelo.
+  it('no reanuda una corrida en_curso que dio señales hace un momento', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      // El mensaje es distinto del de una completada: no dice "este estado no
+      // se reanuda" sino "espera, alguien la está ejecutando".
+      await expect(
+        reanudarCorridaEncolada(db, ref.organizationId, runId),
+      ).rejects.toThrow(/parece estar ejecutándose/)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('en_curso')
+    })
+  })
+
+  // Mirando solo la marca de tiempo de la corrida, esta parecería abandonada:
+  // se encoló hace veinte minutos. La señal viva está en su paso, que se pasó
+  // ese rato entre reintentos y llamadas al modelo y acaba de terminar. Sin la
+  // subconsulta sobre `pipeline_steps` —o mirando solo el `started_at` del
+  // paso— esta corrida se reanudaría con el worker todavía adentro.
+  it('no reanuda una corrida vieja cuyo paso terminó hace un momento', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso', startedAt: sql`now() - interval '20 minutes'` })
+        .where(eq(esquema.pipelineRuns.id, runId))
+      await db.insert(esquema.pipelineSteps).values({
+        organizationId: ref.organizationId,
+        runId,
+        name: 'proponer_grilla',
+        status: 'completado',
+        idempotencyKey: `${runId}:proponer_grilla`,
+        startedAt: sql`now() - interval '19 minutes'`,
+        finishedAt: sql`now() - interval '5 seconds'`,
+      })
+
+      await expect(
+        reanudarCorridaEncolada(db, ref.organizationId, runId),
+      ).rejects.toThrow(/parece estar ejecutándose/)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('en_curso')
     })
   })
 
@@ -374,6 +437,21 @@ describe('reanudarCorridaEncolada', () => {
       await expect(
         reanudarCorridaEncolada(db, ref.organizationId, runId),
       ).rejects.toThrow(/completado/)
+    })
+  })
+
+  // `encolarGrilla` ya la deja `pendiente`: no hace falta tocarle el estado.
+  // Reanudar aquí no rompería nada, pero el botón mentiría —"la puse en cola"
+  // cuando ya estaba— y taparía el diagnóstico real, que es que el worker no
+  // está tomando corridas. El mensaje nombra el estado para que se vea.
+  it('no reanuda una corrida que ya está pendiente', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+
+      await expect(
+        reanudarCorridaEncolada(db, ref.organizationId, runId),
+      ).rejects.toThrow(/pendiente/)
     })
   })
 
