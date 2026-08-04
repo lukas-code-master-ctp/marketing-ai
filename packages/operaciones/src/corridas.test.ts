@@ -41,6 +41,27 @@ describe('encolarGrilla', () => {
 })
 
 describe('encolarEstrategia', () => {
+  // La gemela de la primera prueba de `encolarGrilla`, y no es simetría
+  // decorativa: la clave del periodo dentro de `input` es la que P1 lee, viaja
+  // como jsonb —o sea que `tsc` no la ve— y es distinta de la de la grilla.
+  it('deja la corrida en pendiente, con la entrada que el flujo espera', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarEstrategia(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4',
+      })
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      expect(fila!.status).toBe('pendiente')
+      expect(fila!.flow).toBe('p1_estrategia')
+      expect(fila!.input).toEqual({ brandId: ref.brandId, period: '2026-Q4' })
+    })
+  })
+
   it('rechaza un periodo mal escrito antes de encolar nada', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
@@ -51,6 +72,112 @@ describe('encolarEstrategia', () => {
 
       const filas = await db.select().from(esquema.pipelineRuns)
       expect(filas).toHaveLength(0)
+    })
+  })
+})
+
+/**
+ * La guarda contra el doble encolado, en el dominio.
+ *
+ * Las dos pantallas ya esconden el botón mientras hay una corrida viva y eso
+ * está probado, pero es un render de servidor: dos pestañas abiertas, o una
+ * pestaña vieja, lo esquivan. Medido antes de esta guarda: dos `encolarGrilla`
+ * seguidos daban dos corridas sin una queja del dominio, el worker ejecutaba
+ * las dos y `ai_calls` terminaba en 2 — y `corridaDe` devuelve solo la más
+ * reciente, así que la otra se paga sin aparecer en pantalla.
+ */
+describe('encolar con una corrida ya viva', () => {
+  it('rechaza la segunda grilla del mismo mes y no inserta nada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+
+      // El mensaje lo lee una persona en pantalla: nombra qué se está
+      // generando, de qué periodo, de qué marca, y qué hacer.
+      await expect(
+        encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' }),
+      ).rejects.toThrow(/Ya se está generando la grilla de 2026-10 para la marca parcelas/)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(1)
+    })
+  })
+
+  it('rechaza la segunda estrategia del mismo trimestre', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' })
+
+      await expect(
+        encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' }),
+      ).rejects.toThrow(/Ya se está generando la estrategia de 2026-Q4/)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(1)
+    })
+  })
+
+  // El caso que de verdad ocurre: el worker ya la tomó —así que la fila pasó a
+  // `en_curso` y el modelo ya se está pagando— y alguien vuelve a la pestaña
+  // vieja y aprieta Generar. Mirar solo `pendiente` dejaría pasar justo este.
+  it('rechaza también cuando el worker ya la tomó', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await expect(
+        encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' }),
+      ).rejects.toThrow(/en curso/)
+    })
+  })
+
+  // El otro lado, y el que impide que la guarda se vuelva una trampa:
+  // regenerar es una operación legítima y frecuente. Una corrida terminada
+  // —bien o mal— no bloquea nada.
+  it('una corrida completada o fallida no impide volver a generar', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const primera = await encolarGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-10',
+      })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'completado' })
+        .where(eq(esquema.pipelineRuns.id, primera))
+
+      const segunda = await encolarGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-10',
+      })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'fallido', error: 'lo que sea' })
+        .where(eq(esquema.pipelineRuns.id, segunda))
+
+      await expect(
+        encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' }),
+      ).resolves.toEqual(expect.any(String))
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(3)
+    })
+  })
+
+  // La guarda es por marca, por flujo y por periodo. Sin cualquiera de los
+  // tres filtros, generar la grilla de noviembre quedaría bloqueada porque
+  // octubre está en la cola, y la marca nueva no podría generar nada mientras
+  // otra estuviera generando.
+  it('no bloquea otro periodo, otro flujo ni otra marca', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await crearMarca(db, ref.organizationId, { slug: 'otra-marca', nombre: 'Otra' })
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-11' })
+      await encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' })
+      await encolarGrilla(db, ref.organizationId, { slug: 'otra-marca', mes: '2026-10' })
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(4)
     })
   })
 })

@@ -2,6 +2,7 @@ import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la grilla y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
 import type { TipoEstrategia } from '@gc/strategy'
+import { mesActual } from '../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
 import { BotonGenerar } from '../../../componentes/BotonGenerar.js'
 import { EstadoDeCorrida } from '../../../componentes/EstadoDeCorrida.js'
@@ -15,11 +16,6 @@ const ETIQUETAS_DE_ESTADO: Record<string, string> = {
   borrador: 'Borrador',
   aprobada: 'Aprobada',
   archivada: 'Archivada',
-}
-
-function mesActual(): string {
-  const ahora = new Date()
-  return `${ahora.getUTCFullYear()}-${String(ahora.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
 export default async function PaginaDeEstrategia({

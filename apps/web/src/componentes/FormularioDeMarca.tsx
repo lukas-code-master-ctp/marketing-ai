@@ -44,7 +44,13 @@ export function FormularioDeMarca() {
       return
     }
 
-    const destino = `/${slug}/perfil`
+    // El slug se recorta para navegar porque `crearMarca` recorta antes de
+    // validar y guarda lo recortado: con el estado crudo, escribir
+    // `"  tercera  "` creaba la marca `tercera` y navegaba a
+    // `/  tercera  /perfil`, o sea un 404 justo después de una operación que
+    // salió bien. Lo que se **envía** sigue siendo el valor crudo, para que las
+    // reglas del identificador vivan en un solo lugar y no en dos.
+    const destino = `/${slug.trim()}/perfil`
     setSlug('')
     setNombre('')
     setPresupuesto('')

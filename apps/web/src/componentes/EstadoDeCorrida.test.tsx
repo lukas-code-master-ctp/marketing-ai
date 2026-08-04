@@ -55,6 +55,20 @@ describe('EstadoDeCorrida', () => {
     expect(screen.queryByText(/docker compose up -d/)).not.toBeNull()
   })
 
+  // El comando que esta pantalla manda a correr **no siempre levanta el
+  // worker**: sin `OPENROUTER_API_KEY` ni `IA_EN_SECO=true`, el contenedor
+  // arranca, falla y queda en `Exited (1)`. El navegador no se entera, así que
+  // sin esta segunda línea el panel repite «levántalo con docker compose up -d»
+  // para siempre a quien ya lo hizo — y es el único modo de falla nuevo que
+  // introduce tener un worker aparte.
+  it('dice qué mirar cuando el worker no arranca por falta de credenciales', () => {
+    render(
+      <EstadoDeCorrida corrida={corrida({ encoladaHace: 45 })} ruta="/parcelas/grilla/2026-10" />,
+    )
+    expect(screen.queryByText(/docker compose logs worker/)).not.toBeNull()
+    expect(screen.queryByText(/sin la clave del modelo/i)).not.toBeNull()
+  })
+
   // El número crudo («en 3600 segundos») es de máquina. `describirAntiguedad`
   // ya resolvía esto en el dominio y no estaba exportada.
   it('dice la espera en palabras y no en segundos crudos', () => {

@@ -1,9 +1,11 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, getTableColumns, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
-import { describirAntiguedad, MINUTOS_SIN_SENAL_PARA_ABANDONO } from './senales.js'
+import {
+  describirAntiguedad, ESTADOS_VIVOS, MINUTOS_SIN_SENAL_PARA_ABANDONO,
+} from './senales.js'
 
 /**
  * Se deriva del enumerado que declara el esquema en vez de repetir la lista:
@@ -54,6 +56,33 @@ export interface CorridaTomada {
 }
 
 /**
+ * Cada flujo guarda su periodo dentro de `input` bajo una clave distinta, y
+ * este es el único sitio donde eso se declara. Antes estaba escrito tres veces
+ * —al encolar la estrategia, al encolar la grilla, y en el selector de rama de
+ * `corridaDe`—, así que la escritura y la lectura podían separarse sin que
+ * nada lo notara: el `input` viaja como jsonb y `tsc` no ve dentro.
+ *
+ * `coincide` devuelve el fragmento con la clave escrita **literal** y no
+ * interpolada: `sql.raw` la metería sin escapar, y pasarla como parámetro
+ * dejaría a Postgres eligiendo entre `jsonb ->> text` y `jsonb ->> integer`
+ * sin datos para decidir. Por eso son dos entradas con su fragmento propio y
+ * no un solo constructor parametrizado.
+ */
+const PERIODO_EN_LA_ENTRADA = {
+  p1_estrategia: {
+    clave: 'period',
+    coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'period' = ${periodo}`,
+    /** Cómo se nombra en pantalla lo que este flujo genera. */
+    genera: 'la estrategia',
+  },
+  p2_grilla: {
+    clave: 'mes',
+    coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
+    genera: 'la grilla',
+  },
+} as const satisfies Record<FlujoEncolable, unknown>
+
+/**
  * Inserta la corrida en `pendiente` y devuelve. **No ejecuta nada**: eso es del
  * worker. Es lo que permite que la Server Action responda al instante sin
  * romper la regla de que la web no hace trabajo largo.
@@ -61,17 +90,66 @@ export interface CorridaTomada {
  * La entrada se valida antes de insertar: una corrida encolada con un mes
  * inválido fallaría recién en el worker, minutos después y lejos del usuario
  * que la pidió.
+ *
+ * **Rechaza si ya hay una corrida viva para esa marca, ese flujo y ese
+ * periodo.** Las dos pantallas ya esconden el botón mientras haya una en
+ * vuelo, pero eso es un render de servidor: dos pestañas abiertas, o una
+ * pestaña vieja, lo esquivan. Medido antes de esta guarda: dos `encolarGrilla`
+ * seguidos daban dos corridas sin una queja, el worker ejecutaba las dos y
+ * `ai_calls` terminaba en 2. Encima `corridaDe` devuelve solo la más reciente,
+ * así que la segunda se paga sin aparecer en ninguna pantalla.
+ *
+ * **Queda una ventana de carrera**, y es a propósito: dos peticiones
+ * simultáneas pueden pasar las dos por el SELECT antes de que ninguna inserte.
+ * Cerrarla exige un índice único parcial sobre `(brand_id, flow, input->>…)`
+ * limitado a los estados vivos, o sea una migración. Está registrado en
+ * `pendientes.md`. Lo que esta guarda sí cierra es el caso real —dos clics
+ * separados por segundos, desde dos pestañas—, que es por donde ocurrió.
+ *
+ * El `input` se arma aquí con la clave que declara `PERIODO_EN_LA_ENTRADA`, y
+ * no en cada sitio de llamada: así la fila que se inserta y la consulta que la
+ * busca no pueden nombrar el periodo distinto.
  */
 async function encolar(
   db: BaseDeDatos,
   organizationId: string,
   flujo: FlujoEncolable,
-  brandId: string,
-  input: Record<string, string>,
+  ref: { brandId: string; slug: string },
+  periodo: string,
 ): Promise<string> {
+  const { clave, coincide, genera } = PERIODO_EN_LA_ENTRADA[flujo]
+
+  const [viva] = await db
+    .select({ status: esquema.pipelineRuns.status })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+        eq(esquema.pipelineRuns.brandId, ref.brandId),
+        eq(esquema.pipelineRuns.flow, flujo),
+        inArray(esquema.pipelineRuns.status, [...ESTADOS_VIVOS]),
+        coincide(periodo),
+      ),
+    )
+    .limit(1)
+
+  if (viva) {
+    throw permanente(
+      `Ya se está generando ${genera} de ${periodo} para la marca ${ref.slug}: ` +
+        `la generación anterior está ${viva.status === 'pendiente' ? 'en cola' : 'en curso'}. ` +
+        'Espera a que termine — pedirla de nuevo no la apura y paga el modelo otra vez.',
+    )
+  }
+
   const [fila] = await db
     .insert(esquema.pipelineRuns)
-    .values({ organizationId, brandId, flow: flujo, status: 'pendiente', input })
+    .values({
+      organizationId,
+      brandId: ref.brandId,
+      flow: flujo,
+      status: 'pendiente',
+      input: { brandId: ref.brandId, [clave]: periodo },
+    })
     .returning({ id: esquema.pipelineRuns.id })
 
   return fila!.id
@@ -84,10 +162,9 @@ export async function encolarEstrategia(
 ): Promise<string> {
   validarPeriodo(args.periodo)
   const ref = await resolverMarca(db, organizationId, args.slug)
-  return encolar(db, organizationId, 'p1_estrategia', ref.brandId, {
-    brandId: ref.brandId,
-    period: args.periodo,
-  })
+  return encolar(
+    db, organizationId, 'p1_estrategia', { brandId: ref.brandId, slug: args.slug }, args.periodo,
+  )
 }
 
 export async function encolarGrilla(
@@ -97,10 +174,9 @@ export async function encolarGrilla(
 ): Promise<string> {
   validarMes(args.mes)
   const ref = await resolverMarca(db, organizationId, args.slug)
-  return encolar(db, organizationId, 'p2_grilla', ref.brandId, {
-    brandId: ref.brandId,
-    mes: args.mes,
-  })
+  return encolar(
+    db, organizationId, 'p2_grilla', { brandId: ref.brandId, slug: args.slug }, args.mes,
+  )
 }
 
 /** Las columnas que devuelve el `RETURNING`, en `snake_case` como salen de la base. */
@@ -242,14 +318,10 @@ export async function corridaDe(
 ): Promise<CorridaEnCurso | null> {
   const ref = await resolverMarca(db, organizationId, args.slug)
 
-  // Las dos ramas son fragmentos con la clave escrita literal: interpolarla
-  // con `sql.raw` la metería sin escapar en la consulta, y pasarla como
-  // parámetro dejaría a Postgres eligiendo entre `jsonb ->> text` y
-  // `jsonb ->> integer` sin datos para decidir.
-  const periodoCoincide =
-    args.flujo === 'p2_grilla'
-      ? sql`${esquema.pipelineRuns.input}->>'mes' = ${args.periodo}`
-      : sql`${esquema.pipelineRuns.input}->>'period' = ${args.periodo}`
+  // La misma declaración con la que `encolar` arma el `input`: la fila que se
+  // escribe y la consulta que la busca no pueden nombrar el periodo distinto
+  // porque el nombre está en un solo lugar.
+  const periodoCoincide = PERIODO_EN_LA_ENTRADA[args.flujo].coincide(args.periodo)
 
   // `encoladaHace` se calcula en SQL, no como `Date.now()` de la aplicación
   // menos `startedAt` de Postgres: si ambos relojes no coinciden exactamente

@@ -125,9 +125,22 @@ export function EstadoDeCorrida({ corrida, ruta }: { corrida: CorridaEnCurso; ru
           Nadie tomó esta generación en {describirAntiguedad(corrida.encoladaHace)}. Lo normal es que
           el worker no esté corriendo.
         </p>
-        <p>
+        <p className="mb-2">
           Levántalo con{' '}
           <code className="rounded bg-amber-100 px-1.5 py-0.5 text-xs">docker compose up -d</code>
+        </p>
+        {/* El worker construye el cliente del modelo al arrancar y prefiere no
+            arrancar antes que marcar fallida toda la cola, así que sin la clave
+            de OpenRouter —o sin marcha en seco— el contenedor sale con
+            `Exited (1)` y esta pantalla repetiría el mismo texto para siempre.
+            Es el único modo de falla nuevo que trae tener un worker aparte, y
+            el comando de arriba no lo resuelve: hay que ir a mirar el log. */}
+        <p>
+          Si ya lo hiciste y sigue igual, mira{' '}
+          <code className="rounded bg-amber-100 px-1.5 py-0.5 text-xs">
+            docker compose logs worker
+          </code>
+          : sin la clave del modelo, o sin marcha en seco, el worker no arranca y se apaga solo.
         </p>
       </div>
     )

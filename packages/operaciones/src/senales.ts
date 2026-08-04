@@ -44,13 +44,27 @@ export function describirAntiguedad(segundos: number): string {
 }
 
 /**
+ * Los estados en los que una corrida sigue viva: nadie sabe todavía que
+ * terminó.
+ *
+ * Lo leen dos, y por eso está declarado una sola vez: la pantalla, para no
+ * ofrecer el botón de generar mientras haya una corrida en vuelo, y la guarda
+ * de `encolar`, que rechaza una segunda generación del mismo periodo. Con dos
+ * listas, la pantalla podría esconder el botón en un caso que el dominio deja
+ * pasar, o al revés.
+ */
+export const ESTADOS_VIVOS = ['pendiente', 'en_curso'] as const
+
+/**
  * Una corrida está viva mientras nadie sepa que terminó: encolada o
  * ejecutándose.
  *
  * Lo usan las dos pantallas para no ofrecer el botón de generar mientras haya
  * una corrida en vuelo. Encolar una segunda no lo impedía nada, el worker
- * ejecutaba las dos, y **cada una paga el modelo**.
+ * ejecutaba las dos, y **cada una paga el modelo**. Desde la revisión final el
+ * dominio también lo rechaza: esto de acá es la mitad amable —no ofrecer lo
+ * que va a fallar— y no la barrera.
  */
 export function corridaViva(corrida: Pick<CorridaEnCurso, 'estado'> | null): boolean {
-  return corrida !== null && (corrida.estado === 'pendiente' || corrida.estado === 'en_curso')
+  return corrida !== null && (ESTADOS_VIVOS as readonly string[]).includes(corrida.estado)
 }

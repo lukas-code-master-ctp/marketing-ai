@@ -78,6 +78,20 @@ describe('FormularioDeMarca', () => {
     expect(empujar).toHaveBeenCalledWith('/tercera/perfil')
   })
 
+  // La costura entre el recorte que hace el dominio y el destino que arma el
+  // formulario. `crearMarca` recorta antes de validar y guarda lo recortado,
+  // así que con el estado crudo la marca se creaba como `tercera` y el destino
+  // era `/  tercera  /perfil`: un 404 justo después de una operación que salió
+  // bien. La prueba de arriba usa un valor ya limpio y por eso no lo veía.
+  it('navega al slug recortado, que es el que el dominio guarda', async () => {
+    await llenar({ slug: '  tercera  ', nombre: 'La Tercera' })
+
+    // Lo que se envía sigue siendo el valor crudo: quien decide qué es un slug
+    // válido es `crearMarca`, no esta pantalla.
+    expect(vi.mocked(crearMarcaAccion).mock.calls[0]![0]).toBe('  tercera  ')
+    expect(empujar).toHaveBeenCalledWith('/tercera/perfil')
+  })
+
   // El botón volvía a habilitarse antes del `router.push`, y la navegación no
   // es instantánea: durante esos milisegundos un segundo clic pedía crear la
   // misma marca otra vez.
