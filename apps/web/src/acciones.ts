@@ -8,7 +8,10 @@ import {
   cargarPerfilDeObjeto,
   descartarSlot,
   editarSlot,
+  encolarEstrategia,
+  encolarGrilla,
   reabrirGrilla,
+  reanudarCorridaEncolada,
 } from '@gc/operaciones'
 
 /**
@@ -87,6 +90,43 @@ export async function aprobarGrillaAccion(
 export async function reabrirGrillaAccion(marca: string, mes: string): Promise<Resultado> {
   return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
     await reabrirGrilla(db, organizationId, { slug: marca, mes })
+    return null
+  })
+}
+
+/**
+ * Encola y devuelve. **No ejecuta**: el worker toma la corrida y la corre. Es
+ * lo que permite que esta acción responda al instante sin romper la regla de
+ * que la web no hace trabajo largo ni llama al modelo.
+ */
+export async function encolarGrillaAccion(marca: string, mes: string): Promise<Resultado> {
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
+    await encolarGrilla(db, organizationId, { slug: marca, mes })
+    return null
+  })
+}
+
+/** La gemela de la anterior para P1. Encola y devuelve, por lo mismo. */
+export async function encolarEstrategiaAccion(
+  marca: string,
+  periodo: string,
+): Promise<Resultado> {
+  return ejecutar(`/${marca}/estrategia`, async (db, organizationId) => {
+    await encolarEstrategia(db, organizationId, { slug: marca, periodo })
+    return null
+  })
+}
+
+/**
+ * Devuelve una corrida fallida (o colgada) a la cola.
+ *
+ * Recibe la ruta a revalidar y no la marca, porque el componente que la llama
+ * sirve a las dos pantallas y la ruta ya lleva la marca dentro. Componer
+ * `/${marca}/...` aquí obligaría a pasar además de qué pantalla se trata.
+ */
+export async function reanudarCorridaAccion(ruta: string, runId: string): Promise<Resultado> {
+  return ejecutar(ruta, async (db, organizationId) => {
+    await reanudarCorridaEncolada(db, organizationId, runId)
     return null
   })
 }

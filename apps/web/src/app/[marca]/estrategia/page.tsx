@@ -1,6 +1,8 @@
-import { estrategiaDelTrimestre } from '@gc/operaciones'
+import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
 import type { TipoEstrategia } from '@gc/strategy'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
+import { BotonGenerar } from '../../../componentes/BotonGenerar.js'
+import { EstadoDeCorrida } from '../../../componentes/EstadoDeCorrida.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
 // no llegan hasta acá. Sin este, Next prerenderiza la estrategia congelada en
@@ -30,19 +32,42 @@ export default async function PaginaDeEstrategia({
   const mes = mesActual()
   const resultado = await estrategiaDelTrimestre(db, organizationId, marca, mes)
 
+  // La corrida más reciente de este trimestre, si la hay. El periodo lo dicta
+  // la lectura y no `mes`: `corridaDe` busca por el trimestre tal como quedó
+  // guardado en la entrada de la corrida.
+  const corrida = await corridaDe(db, organizationId, {
+    slug: marca,
+    flujo: 'p1_estrategia',
+    periodo: resultado.periodo,
+  })
+
+  // El motor solo regenera una estrategia en borrador: P1 rechaza una que ya
+  // salió de ahí, y no hay forma de devolverla. Por eso el botón se ofrece
+  // únicamente en ese estado, en vez de encolar algo que va a fallar en el
+  // worker un minuto después.
+  const regenerable = resultado.tipo !== 'ausente' && resultado.estado === 'borrador'
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Estrategia</h1>
 
+      {corrida && <EstadoDeCorrida corrida={corrida} ruta={`/${marca}/estrategia`} />}
+
       {resultado.tipo === 'ausente' ? (
         <div className="mt-4 rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
-          <p>La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.</p>
-          <p className="mt-2">
-            Genérala con{' '}
-            <code className="rounded bg-gray-100 px-1.5 py-0.5 text-sm text-gray-800">
-              pnpm cli estrategia:generar --marca {marca} --periodo {resultado.periodo}
-            </code>
+          <p className="mb-3">
+            La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.
           </p>
+          {/* El botón encola y devuelve; quien la genera es el worker. El
+              avance aparece arriba, en `EstadoDeCorrida`. */}
+          <div className="flex justify-center">
+            <BotonGenerar
+              marca={marca}
+              periodo={resultado.periodo}
+              que="estrategia"
+              etiqueta="Generar estrategia"
+            />
+          </div>
         </div>
       ) : resultado.tipo === 'invalida' ? (
         <>
@@ -55,20 +80,41 @@ export default async function PaginaDeEstrategia({
               La estrategia guardada para este periodo no valida contra su esquema, así que no se
               puede mostrar.
             </p>
-            <p>
-              Regenérala con{' '}
-              <code className="rounded bg-red-100 px-1.5 py-0.5 text-xs">
-                pnpm cli estrategia:generar --marca {marca} --periodo {resultado.periodo}
-              </code>
-            </p>
+            {regenerable ? (
+              <BotonGenerar
+                marca={marca}
+                periodo={resultado.periodo}
+                que="estrategia"
+                etiqueta="Regenerar estrategia"
+                advertencia={`Regenerar la estrategia de ${resultado.periodo} reemplaza la que hay guardada.`}
+              />
+            ) : (
+              <p>
+                Está en estado «{ETIQUETAS_DE_ESTADO[resultado.estado] ?? resultado.estado}» y el
+                motor solo regenera una que esté en borrador.
+              </p>
+            )}
           </div>
         </>
       ) : (
-        <ContenidoDeEstrategia
-          periodo={resultado.periodo}
-          estado={resultado.estado}
-          estrategia={resultado.estrategia}
-        />
+        <>
+          {regenerable && (
+            <div className="mb-4 flex justify-end">
+              <BotonGenerar
+                marca={marca}
+                periodo={resultado.periodo}
+                que="estrategia"
+                etiqueta="Regenerar estrategia"
+                advertencia={`Regenerar la estrategia de ${resultado.periodo} reemplaza la que hay guardada. Los cambios que le hayas hecho se pierden.`}
+              />
+            </div>
+          )}
+          <ContenidoDeEstrategia
+            periodo={resultado.periodo}
+            estado={resultado.estado}
+            estrategia={resultado.estrategia}
+          />
+        </>
       )}
     </div>
   )
