@@ -116,8 +116,16 @@ services:
     # entera, el install terminaba, el worker arrancaba sin enterarse de que le
     # habían pedido parar, y Docker lo mataba con SIGKILL a los 180 s. Medido:
     # `stop` durante el install colgaba 180.913 ms y salía con 137. La ventana
-    # es **cada arranque** —de 5 a 20 s con el almacén tibio, unos dos minutos
-    # en el primer arranque de un clon nuevo—, justo cuando uno corta.
+    # es **cada arranque**, justo cuando uno corta.
+    #
+    # Cuánto dura esa ventana, remedido el 2026-08-04 en la revisión final:
+    # unos 7 s de arranque total con los volúmenes tibios, y unos 14 s con los
+    # volúmenes vacíos —7 de ellos de `pnpm install`, 230 paquetes
+    # descargados—. Antes esta línea decía «unos dos minutos en el primer
+    # arranque de un clon nuevo», que además contradecía por seis veces lo que
+    # dice CLAUDE.md del mismo evento; no reproduce. La ventana es corta, pero
+    # el `trap` sigue haciendo falta: sin él, cortar dentro de esos segundos
+    # colgaba los 180 s enteros.
     # Con `trap` el mismo `stop` tarda 2.758 ms y sale 143; el `exec` saca a
     # `sh` del medio para el resto de la vida del contenedor, así que el
     # apagado ordenado del worker sigue siendo el de siempre.

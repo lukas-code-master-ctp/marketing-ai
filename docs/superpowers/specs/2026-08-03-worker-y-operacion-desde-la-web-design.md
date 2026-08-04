@@ -79,6 +79,14 @@ WHERE id = (
 RETURNING *
 ```
 
+> **Corrección posterior a la implementación (revisión adversarial de rama).** Este pseudocódigo tiene tres diferencias con lo que quedó escrito, y las tres importan. Se dejan a la vista en vez de reemplazarlo en silencio, porque el spec es el registro.
+>
+> 1. **`ORDER BY started_at` no compila: esa columna no existe.** La propiedad de drizzle se llama `startedAt` pero la columna física es `created_at`, así que escrita a mano revienta con «column does not exist». La implementación ordena con la columna del esquema (`${esquema.pipelineRuns.startedAt}`) y no con su nombre a mano, justamente para que el nombre salga de un solo lado.
+> 2. **Falta el desempate por `id`.** `defaultNow()` es `now()`, que en Postgres marca el *inicio* de la transacción: dos corridas encoladas dentro de una misma transacción comparten `created_at` exacto y sin desempate el orden entre ellas queda arbitrario.
+> 3. **Falta el `WHERE status = 'pendiente'` del UPDATE externo.** Es redundante con el de la subconsulta en el camino feliz, y a propósito: no depende de que la subconsulta se reevalúe tras el bloqueo. Es defensa en profundidad, y resultó ser la que de verdad sostiene la prueba de concurrencia (ver la corrección de la §8).
+>
+> Lo que quedó implementado está en `packages/operaciones/src/corridas.ts`, con esos tres motivos escritos al lado de la consulta.
+
 Si vuelve fila, resuelve el flujo por su nombre y llama:
 
 ```ts
@@ -99,6 +107,13 @@ Un `flow` que no esté en el mapa es un error `permanente` que marca la corrida 
 `ejecutarFlujo` con un `runId` existente **reanuda en vez de crear**, que es exactamente lo que hace falta: la fila ya existe porque la insertó la web.
 
 `SKIP LOCKED` es lo que permite que mañana haya dos workers sin que se pisen. No hace falta hoy y no cuesta nada tenerlo.
+
+> **Corrección posterior a la implementación (revisión adversarial de rama).** Esa frase le atribuye a `SKIP LOCKED` una garantía que no es suya, y la confusión se repite en la §8. Son dos cláusulas con dos trabajos distintos:
+>
+> - **`FOR UPDATE` es la exclusión.** Es lo que impide que dos workers se lleven la misma corrida.
+> - **`SKIP LOCKED` es la vivacidad.** Solo evita la espera: sin él, el segundo worker se queda bloqueado hasta que el primero confirme, en vez de seguir buscando otra corrida o volver a dormir.
+>
+> «Que dos workers no se pisen» son entonces dos propiedades, no una, y por eso son dos pruebas: una de corrección y otra de vivacidad.
 
 ### Toda la lógica fuera del bucle
 
@@ -204,6 +219,12 @@ Hoy no se alcanza porque nadie regenera un mes que ya tuvo descartes. Con el bot
 Lo que de verdad hay que afirmar y hoy nadie afirma:
 
 - **Que dos workers no tomen la misma corrida.** Dos transacciones concurrentes contra Postgres real, y que solo una vuelva con fila. Es lo que `SKIP LOCKED` promete y lo que se rompe al tocarlo.
+
+  > **Corrección posterior a la implementación (revisión adversarial de rama).** La última oración es falsa por partida doble, y se deja escrita porque el error es lo que hay que registrar.
+  >
+  > Primero, la garantía de exclusión la da **`FOR UPDATE`**, no `SKIP LOCKED` (ver la corrección de la §4). Segundo, y medido: quitar `FOR UPDATE SKIP LOCKED` entero deja esa prueba **en verde**. Quien la salva es el `WHERE status = 'pendiente'` del UPDATE externo, que la implementación agregó como defensa en profundidad: al despertar del bloqueo, el segundo revalida ese predicado contra la fila ya actualizada, la ve `en_curso` y no escribe.
+  >
+  > O sea que esa prueba afirma la garantía de punta a punta —dos consumidores, una sola corrida— y no la cláusula de bloqueo. La que sí es falsable por la cláusula es la de vivacidad: sin `SKIP LOCKED`, «no se queda esperando la corrida que otro consumidor tiene bloqueada» se pone roja. Las dos existen y las dos hacen falta; lo que no hay que hacer es leer una como si probara lo de la otra. Está anotado también dentro del archivo de prueba, que es donde lo va a leer quien la toque.
 - **Que la web no ejecute en la petición.** La acción devuelve con la fila en `pendiente` y sin ninguna llamada registrada en `ai_calls`.
 - **Que reanudar no reejecute los pasos completados**, medido en `ai_calls` y no en el resultado: el resultado sale igual de las dos formas, así que medirlo ahí no distingue nada.
 - **Que una salida de versión incompatible se rechace al reanudar**, con el mensaje que nombra el remedio.

@@ -141,7 +141,7 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 11 tablas, 5 migraciones
+@gc/db          esquema Drizzle, 11 tablas, 6 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
@@ -184,8 +184,23 @@ Reconstruir (`docker compose build worker`) hace falta solo si cambia el
 
 Sus `node_modules` no son los del host: pnpm en Windows deja enlaces con rutas
 absolutas y binarios de otra plataforma, así que el contenedor tiene los suyos
-en volúmenes anónimos —uno por paquete del workspace— y los instala al
-arrancar contra un almacén de pnpm con nombre. Por eso `docker compose up -d`
-tarda unos veinte segundos la primera vez y unos pocos después. Si agregas una
-dependencia, `docker compose restart worker` la instala sola: el `pnpm install`
-va en el `command`.
+en **volúmenes con nombre** —uno por paquete del workspace, más el almacén de
+pnpm— y los instala al arrancar. Con nombre y no anónimos a propósito: los
+anónimos no se los lleva `docker compose down`, solo `down -v`, que **también
+borra `pgdata`** y con él la base de desarrollo que hay que preservar. O sea
+que con volúmenes anónimos no existía limpieza segura. Los mantiene completos
+`pnpm comprobar:volumenes`, que corre en CI.
+
+Medido el 2026-08-04, con la imagen ya construida: `docker compose up -d`
+tarda unos 14 segundos con los volúmenes vacíos —de los cuales 7 son el
+`pnpm install`, 230 paquetes descargados— y unos 7 con los volúmenes tibios.
+Construir la imagen desde cero suma otros 4. (El comentario de
+`docker-compose.yml` decía «unos dos minutos en el primer arranque de un clon
+nuevo»; no reproduce, y quedó corregido allá.)
+
+**Una dependencia nueva NO la instala sola `docker compose restart worker`.**
+El `command` corre `pnpm install --frozen-lockfile`, que aborta con
+`ERR_PNPM_OUTDATED_LOCKFILE` en cuanto el `package.json` y el `pnpm-lock.yaml`
+no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
+en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
+worker`.
