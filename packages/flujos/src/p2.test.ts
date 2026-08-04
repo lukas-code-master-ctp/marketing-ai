@@ -239,6 +239,53 @@ describe('flujo P2 · grilla', () => {
     })
   })
 
+  /**
+   * `pendientes.md` registraba que una regeneración recontaría los slots
+   * descartados en cadencia y en distribución de pilares. No puede: lo que
+   * `validarGrilla` y `expandirDerivados` reciben es la propuesta del modelo
+   * —`TipoSlotPropuesto`, que no tiene estado— y `SalidaP2.totalSlots` es
+   * `slots.length + derivados.length` de esa misma propuesta. Ninguna de las
+   * tres lee `plan_slots`.
+   *
+   * Lo que sí pasa es que los descartes desaparecen: `persistir` borra todos
+   * los slots del plan antes de insertar. Esta prueba fija las dos mitades, y
+   * se cae si alguien hace que la regeneración conserve los descartados sin
+   * enseñárselos a la validación —que es justo la forma que tendría el defecto
+   * registrado si llegara a existir.
+   */
+  it('regenerar un mes con descartes no los conserva ni los suma al total', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const entrada = { brandId: ref.brandId, mes: '2026-09' }
+
+      const primera = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      await ejecutarFlujo(db, primera, entrada, ref, SIN_ESPERA)
+
+      // Se descartan los cuatro padres, como haría la web con `descartarSlot`.
+      const descartados = await db
+        .update(esquema.planSlots)
+        .set({ status: 'descartado' })
+        .where(eq(esquema.planSlots.channel, 'blog'))
+        .returning({ id: esquema.planSlots.id })
+      expect(descartados).toHaveLength(4)
+
+      const segunda = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const r = await ejecutarFlujo(db, segunda, entrada, ref, SIN_ESPERA)
+      expect(r.estado).toBe('completado')
+
+      const filas = await db.select().from(esquema.planSlots)
+      expect(filas).toHaveLength(8)
+      expect(filas.filter((f) => f.status === 'descartado')).toHaveLength(0)
+
+      // El total que reporta el flujo describe lo que quedó en la base. Si la
+      // regeneración conservara los descartados, `totalSlots` seguiría contando
+      // solo la propuesta nueva y las dos cifras dejarían de coincidir.
+      const salida = r.salida as { totalSlots: number }
+      expect(salida.totalSlots).toBe(8)
+      expect(salida.totalSlots).toBe(filas.length)
+    })
+  })
+
   it('falla si la marca no tiene estrategia', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()

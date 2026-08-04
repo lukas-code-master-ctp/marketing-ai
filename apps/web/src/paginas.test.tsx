@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import type { CorridaEnCurso, GrillaDelMes } from '@gc/operaciones'
+import type { CorridaEnCurso, GrillaDelMes, SlotDeLaGrilla } from '@gc/operaciones'
 import type { LecturaDeEstrategia } from '@gc/strategy'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { corridaDe, estrategiaDelTrimestre, grillaDelMes, perfilConHistorial } from '@gc/operaciones'
@@ -231,6 +232,69 @@ describe('el botón de generar mientras hay una corrida viva', () => {
     expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
     expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
     expect(screen.queryByText(/no valida contra su esquema/i)).not.toBeNull()
+  })
+})
+
+function slotDeGrilla(id: string, campos: Partial<SlotDeLaGrilla> = {}): SlotDeLaGrilla {
+  return {
+    id,
+    fecha: '2026-10-05',
+    hora: '10:00',
+    canal: 'instagram',
+    formato: 'carrusel',
+    pilar: 'educativo',
+    angulo: `Ángulo de ${id}`,
+    brief: 'Un brief cualquiera con largo suficiente.',
+    descartado: false,
+    esDerivado: false,
+    idDelPadre: null,
+    ...campos,
+  }
+}
+
+/**
+ * Regenerar borra los slots del mes entero y los reinserta desde la propuesta
+ * nueva. Los descartes no se recuentan en las reglas —la propuesta del modelo
+ * no los conoce— pero sí se pierden, y son lo único destruido que se puede
+ * contar antes de confirmar. La advertencia por eso dice cuántos son.
+ */
+describe('la advertencia de regenerar la grilla', () => {
+  async function abrirLaConfirmacion(slots: SlotDeLaGrilla[]) {
+    vi.mocked(grillaDelMes).mockResolvedValue(
+      grilla({ estado: 'borrador', contentPlanId: 'plan-1', slots }),
+    )
+    vi.mocked(corridaDe).mockResolvedValue(null)
+
+    await renderGrilla()
+    await userEvent.click(screen.getByRole('button', { name: 'Regenerar grilla' }))
+  }
+
+  it('dice cuántos descartes se pierden cuando los hay', async () => {
+    await abrirLaConfirmacion([
+      slotDeGrilla('a'),
+      slotDeGrilla('b', { descartado: true }),
+      slotDeGrilla('c', { descartado: true }),
+      slotDeGrilla('d'),
+    ])
+
+    // El número tiene que ser el de descartados (2) y no el de slots (4): con
+    // `grilla.slots.length` la frase sigue siendo gramatical y sigue nombrando
+    // un número, así que sin comprobar cuál la prueba no afirmaría nada.
+    expect(
+      screen.queryByText(/Las 2 que descartaste vuelven a aparecer/),
+    ).not.toBeNull()
+    expect(screen.queryByText(/Las 4 que descartaste/)).toBeNull()
+    expect(screen.queryByText(/Regenerar la grilla de 2026-10/)).not.toBeNull()
+  })
+
+  it('no habla de descartes cuando no hay ninguno', async () => {
+    await abrirLaConfirmacion([slotDeGrilla('a'), slotDeGrilla('b')])
+
+    expect(screen.queryByText(/descartaste/)).toBeNull()
+    // Y sí dice lo que se pierde igual: sin esta mitad, un texto vacío pasaría.
+    expect(
+      screen.queryByText(/Las ediciones que hayas hecho a mano se pierden/),
+    ).not.toBeNull()
   })
 })
 

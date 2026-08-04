@@ -35,6 +35,10 @@ Hoy no está roto porque nada regenera un mes que ya tuvo descartes. El worker d
 
 **Parcialmente cerrado en `feat/app-web-1a`:** `verGrilla` sí selecciona `status` y `FilaDeGrilla` sí expone `descartado`; `grillaDelMes` los excluye de `porCanal` y de los problemas que recalcula. Lo que sigue abierto es el camino de generación, que es el que importa para 1B.
 
+**✅ Cerrado en `feat/worker-y-operacion-web` (Task 9): el recuento no existe, y nunca existió.** El párrafo de arriba estaba equivocado sobre el camino de generación. Lo que `validarGrilla` y `expandirDerivados` reciben en P2 es la propuesta del modelo —`TipoSlotPropuesto`, que no tiene campo de estado— y `SalidaP2.totalSlots` es `slots.length + derivados.length` de esa misma propuesta. Ninguna de las tres consulta `plan_slots`: lo único que P2 lee de la base antes de generar es `content_plans.status`. Y `persistir` borra **todos** los slots del plan antes de insertar los nuevos, así que un descartado ni sobrevive ni se suma. Lo cubre `p2.test.ts` › «regenerar un mes con descartes no los conserva ni los suma al total», que se pone roja si alguien hace que la regeneración conserve los descartados sin enseñárselos a la validación —que es la forma que tendría este defecto si llegara a existir.
+
+Lo que sí es real es que regenerar **destruye** los descartes y las ediciones a mano. Eso no se arregla: es lo que regenerar significa. Se hizo visible antes de que sea irreversible — la confirmación del botón de regenerar en `[marca]/grilla/[mes]/page.tsx` dice cuántos descartes se pierden.
+
 ### 3. La salida entre pasos no está versionada
 
 `SalidaDeLaPropuesta` viaja como jsonb entre los dos pasos de P2, y ahora carga el perfil de marca y la estrategia completos. Ninguna prueba la hace cruzar una reanudación real: el reintento intra-invocación devuelve el objeto en memoria. Todo el contenido es JSON puro, así que hoy el viaje es inofensivo.

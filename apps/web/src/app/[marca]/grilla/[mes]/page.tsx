@@ -62,6 +62,13 @@ export default async function PaginaDeGrilla({
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
   const avisos = grilla.problemas.filter((p) => p.severidad === 'aviso')
 
+  // Regenerar borra todos los slots del mes y vuelve a insertarlos desde la
+  // propuesta nueva (`persistir`, en `@gc/flujos/p2.ts`). Los descartes no se
+  // recuentan en cadencia ni en pilares —la propuesta del modelo no los
+  // conoce— pero sí desaparecen, y son lo único destruido que el usuario
+  // puede contar antes de decidir.
+  const descartados = grilla.slots.filter((s) => s.descartado).length
+
   return (
     <div className="p-6">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -110,7 +117,12 @@ export default async function PaginaDeGrilla({
                   periodo={mes}
                   que="grilla"
                   etiqueta="Regenerar grilla"
-                  advertencia={`Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. Las que hayas descartado o editado se pierden.`}
+                  advertencia={
+                    `Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. ` +
+                    (descartados > 0
+                      ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
+                      : 'Las ediciones que hayas hecho a mano se pierden.')
+                  }
                 />
               )}
               {grilla.contentPlanId && (
