@@ -100,6 +100,20 @@ describe('tomarCorridaPendiente', () => {
       // el mismo id, el segundo espera al primero y al despertar revalida solo
       // su propio `WHERE id = <ese id>`, que sigue siendo cierto: actualiza la
       // fila otra vez y se lleva la misma corrida.
+      //
+      // QUÉ SOSTIENE HOY ESTA PRUEBA, que no es lo que su nombre sugiere.
+      // Medido en la revisión final: quitar `FOR UPDATE SKIP LOCKED` entero de
+      // `tomarCorridaPendiente` la deja **verde**. Quien la salva es el
+      // `WHERE status = 'pendiente'` del UPDATE externo, que se agregó después
+      // como defensa en profundidad y está documentado allá: al despertar, el
+      // segundo revalida ese predicado contra la fila ya actualizada, la ve
+      // `en_curso` y no escribe. O sea que esta prueba afirma la garantía de
+      // punta a punta —dos consumidores, una sola corrida— y no la cláusula de
+      // bloqueo en particular.
+      // Lo que sí es falsable por la cláusula es la prueba de al lado: sin
+      // `SKIP LOCKED`, «no se queda esperando la corrida que otro consumidor
+      // tiene bloqueada» se pone roja. Son dos garantías distintas —corrección
+      // y vivacidad— y por eso son dos pruebas.
       await db.execute(sql`
         create or replace function gc_demorar_toma() returns trigger
         language plpgsql as $$ begin perform pg_sleep(0.3); return new; end; $$
@@ -478,6 +492,56 @@ describe('reanudarCorridaEncolada', () => {
         .from(esquema.pipelineRuns)
         .where(eq(esquema.pipelineRuns.id, runId))
       expect(fila!.status).toBe('en_curso')
+    })
+  })
+
+  // Las dos que siguen clavan el umbral, y son las únicas que lo hacen. Las de
+  // arriba lo rodean cómodamente —veinte minutos de un lado, cero y cinco
+  // segundos del otro— así que bajarlo de quince minutos a dos las dejaba a
+  // todas en verde, con `@gc/operaciones` y `@gc/web` completos. Y el propio
+  // `senales.ts` explica qué cuesta quedarse corto: dos workers en el mismo
+  // paso, **los dos pagando el modelo**.
+  //
+  // Los números van escritos a mano y no importando la constante a propósito:
+  // una prueba que la importe se compara consigo misma y acepta cualquier
+  // valor. Estas dos, juntas, solo aceptan un umbral entre 14 y 16 minutos.
+  it('a los catorce minutos sin señal todavía no se reanuda', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso', startedAt: sql`now() - interval '14 minutes'` })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await expect(
+        reanudarCorridaEncolada(db, ref.organizationId, runId),
+      ).rejects.toThrow(/parece estar ejecutándose/)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('en_curso')
+    })
+  })
+
+  it('a los dieciséis minutos sin señal ya se reanuda', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso', startedAt: sql`now() - interval '16 minutes'` })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await reanudarCorridaEncolada(db, ref.organizationId, runId)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('pendiente')
     })
   })
 
