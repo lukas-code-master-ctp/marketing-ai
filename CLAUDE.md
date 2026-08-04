@@ -16,7 +16,7 @@ Cada bloque de trabajo tiene su spec y su plan en `docs/superpowers/`. Los plane
 ## Comandos
 
 ```bash
-docker compose up -d          # Postgres. Sin esto fallan seis paquetes
+docker compose up -d          # Postgres y el worker. Sin esto fallan seis paquetes y no se genera nada
 pnpm test                     # NUNCA `pnpm -r test` — ver abajo
 pnpm -r typecheck
 pnpm --filter @gc/web dev     # http://localhost:3000
@@ -27,7 +27,12 @@ pnpm --filter @gc/worker start   # el worker, si no lo levantaste con docker com
 
 El worker construye el cliente del modelo al arrancar, así que no levanta sin
 `OPENROUTER_API_KEY` o sin `IA_EN_SECO=true`. Es a propósito: prefiere no
-arrancar antes que arrancar sano y marcar fallida toda la cola.
+arrancar antes que arrancar sano y marcar fallida toda la cola. **Esto vale
+también dentro de `docker compose`**: con el `.env` tal como está hoy —clave
+vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
+`Falta OPENROUTER_API_KEY` y queda en `Exited (1)`. No es un problema del
+contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
+worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
 ## Reglas que no son negociables
 
@@ -160,3 +165,18 @@ Dos hábitos que valen más que el resto:
 Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`. Postgres en Docker, bases `gestor` (desarrollo, con datos de marcha en seco) y `gestor_test`.
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
+
+El worker corre en un contenedor con el repositorio montado en `/app`, y se
+ejecuta con `tsx` sin compilar nada: **un cambio en `apps/worker` o en
+cualquier paquete solo pide `docker compose restart worker`, no reconstruir la
+imagen.** Son unos siete segundos hasta que el worker vuelve a escuchar.
+Reconstruir (`docker compose build worker`) hace falta solo si cambia el
+`Dockerfile`.
+
+Sus `node_modules` no son los del host: pnpm en Windows deja enlaces con rutas
+absolutas y binarios de otra plataforma, así que el contenedor tiene los suyos
+en volúmenes anónimos —uno por paquete del workspace— y los instala al
+arrancar contra un almacén de pnpm con nombre. Por eso `docker compose up -d`
+tarda unos veinte segundos la primera vez y unos pocos después. Si agregas una
+dependencia, `docker compose restart worker` la instala sola: el `pnpm install`
+va en el `command`.

@@ -6,5 +6,83 @@ services:
       POSTGRES_DB: gestor
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    # Sin esto el margen es de 1 segundo (ver el comentario del worker) y
+    # Postgres se va con SIGKILL: seguro, pero arranca recuperando cada vez.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: [.env]
+    # Dentro de la red de compose, Postgres es `postgres` y no `localhost`.
+    # El .env de la raíz apunta al host, así que se sobrescribe aquí.
+    #
+    # `IA_EN_SECO` y `OPENROUTER_API_KEY` NO se tocan aquí a propósito: salen
+    # del .env como en cualquier otra forma de correr el worker. Fijar
+    # `IA_EN_SECO: true` en este archivo dejaría el contenedor en marcha seca
+    # para siempre, incluso después de que alguien cargue la clave, y llenaría
+    # la base con contenido de muestra sin que se note.
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/gestor
+    volumes:
+      - .:/app
+      # Un volumen anónimo por cada `node_modules` del workspace. pnpm en
+      # Windows deja enlaces con rutas absolutas del host (`/c/Users/...`) que
+      # dentro del contenedor no existen, y los binarios nativos —tsx trae
+      # esbuild— son de otra plataforma. Sin cubrirlos todos, el `pnpm install`
+      # de adentro escribiría sobre el montaje y dejaría inservible la
+      # instalación del host, que es la que usan `pnpm test` y la app web.
+      - /app/node_modules
+      - /app/apps/cli/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/worker/node_modules
+      - /app/packages/ai/node_modules
+      - /app/packages/brand/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/flujos/node_modules
+      - /app/packages/operaciones/node_modules
+      - /app/packages/pipeline/node_modules
+      - /app/packages/shared/node_modules
+      - /app/packages/strategy/node_modules
+      # El almacén de pnpm, fuera del montaje y en un volumen con nombre.
+      # pnpm lo pone junto al proyecto cuando la casa del usuario está en otro
+      # sistema de archivos, que es justo lo que pasa aquí: sin `--store-dir`
+      # deja 674 MB en `.pnpm-store/` dentro del repositorio, y encima sobre el
+      # montaje, que es lento. Con nombre sobrevive a recrear el contenedor, y
+      # la instalación baja de dos minutos a unos segundos.
+      - pnpm-store:/pnpm-store
+    # El margen que da `docker compose stop` antes del SIGKILL. **Hay que
+    # ponerlo**: por omisión este Docker deja 1 segundo
+    # (`docker inspect --format '{{.Config.StopTimeout}}'` devuelve 1), y con
+    # eso el apagado ordenado de la Task 4 no sirve de nada. Medido: el worker
+    # ocioso tarda entre 0,3 y 1,1 s en cerrar —porque puede estar a mitad de
+    # su espera de 2 s— así que unas veces alcanzaba y otras se lo llevaba el
+    # SIGKILL a los 1,05 s, sin imprimir "cerrado".
+    #
+    # 180 s es el peor turno realista: cinco intentos del motor con espera
+    # exponencial hasta 30 s, más las llamadas al modelo. Se prefiere esperar a
+    # cortar, porque una corrida cortada queda `en_curso` para siempre y nada
+    # en el repositorio recupera corridas colgadas. Cuando no hay trabajo el
+    # apagado sigue tomando un segundo: el margen es un techo, no una pausa.
+    stop_grace_period: 180s
+    # `--config.confirm-modules-purge=false` no es cosmético. Cuando pnpm decide
+    # que hay que rehacer `node_modules` desde cero —le pasa en cuanto cambia
+    # algún ajuste de la instalación, el almacén sin ir más lejos— pregunta si
+    # puede, y sin terminal que responda **abandona la instalación y sale con
+    # código 0**: el `&&` sigue adelante y el worker arranca sobre lo que
+    # hubiera quedado en el volumen. Comprobado aquí: `pnpm install` terminó sin
+    # instalar nada y sin avisar. Con la bandera purga y reinstala.
+    command: sh -c "pnpm install --frozen-lockfile --store-dir /pnpm-store --config.confirm-modules-purge=false && pnpm --filter @gc/worker start"
+
 volumes:
   pgdata:
+  pnpm-store:
