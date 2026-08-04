@@ -320,6 +320,41 @@ describe('corridaDe', () => {
       expect(c?.pasoActual).toBe('persistir_grilla')
     })
   })
+
+  // `segundosSinSenal` no es `encoladaHace` con otro nombre, y esta es la
+  // diferencia que la pantalla necesita: una corrida que lleva veinte minutos
+  // encolada pero cuyo paso terminó hace un momento **no** está colgada, y
+  // ofrecerle "Reanudar" pondría a dos workers en el mismo paso. Es el mismo
+  // cálculo que usa la guarda de `reanudarCorridaEncolada`, y por eso la
+  // pantalla ofrece el botón exactamente cuando el dominio lo acepta.
+  it('informa los segundos sin señal contando desde el paso, no desde el encolado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso', startedAt: sql`now() - interval '20 minutes'` })
+        .where(eq(esquema.pipelineRuns.id, runId))
+      await db.insert(esquema.pipelineSteps).values({
+        organizationId: ref.organizationId,
+        runId,
+        name: 'proponer_grilla',
+        status: 'completado',
+        idempotencyKey: `${runId}:proponer_grilla`,
+        startedAt: sql`now() - interval '19 minutes'`,
+        finishedAt: sql`now() - interval '5 seconds'`,
+      })
+
+      const c = await corridaDe(db, ref.organizationId, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+
+      // Las dos aserciones juntas: sin la de arriba, devolver `encoladaHace`
+      // en las dos propiedades pasaría la de abajo.
+      expect(c?.encoladaHace).toBeGreaterThan(1_000)
+      expect(c?.segundosSinSenal).toBeLessThan(60)
+    })
+  })
 })
 
 describe('reanudarCorridaEncolada', () => {
@@ -340,6 +375,62 @@ describe('reanudarCorridaEncolada', () => {
         .where(eq(esquema.pipelineRuns.id, runId))
       expect(fila!.status).toBe('pendiente')
       expect(fila!.error).toBeNull()
+    })
+  })
+
+  // Reanudar **es** volver a encolar, así que la antigüedad en la cola cuenta
+  // desde ahora. Sin reiniciar la marca de tiempo, una corrida que llevaba una
+  // hora encolada renace `pendiente` con 3600 segundos encima y la pantalla
+  // anuncia «nadie tomó esta generación… lo normal es que el worker no esté
+  // corriendo» en el instante mismo en que se suelta el botón, con el worker
+  // sano. La hora se escribe hacia atrás en la base en vez de esperarla.
+  it('reanudar deja la antigüedad en la cola en casi cero', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'fallido', error: 'lo que sea', startedAt: sql`now() - interval '1 hour'` })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      // El estado de partida es el que el revisor midió: una corrida vieja.
+      // Sin esto, una prueba que solo mira el final pasaría igual con una
+      // corrida recién encolada, que no puede fallar.
+      const antes = await corridaDe(db, ref.organizationId, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+      expect(antes?.encoladaHace).toBeGreaterThan(3_000)
+
+      await reanudarCorridaEncolada(db, ref.organizationId, runId)
+
+      const despues = await corridaDe(db, ref.organizationId, {
+        slug: 'parcelas', flujo: 'p2_grilla', periodo: '2026-10',
+      })
+      expect(despues?.estado).toBe('pendiente')
+      expect(despues?.encoladaHace).toBeLessThan(30)
+      expect(despues?.segundosSinSenal).toBeLessThan(30)
+    })
+  })
+
+  // Efecto secundario de reiniciar la marca de tiempo, y el correcto:
+  // `tomarCorridaPendiente` ordena por esa misma columna, así que la reanudada
+  // espera su turno en vez de colarse delante de las que ya estaban en la cola.
+  it('la corrida reanudada va al final de la cola, no al principio', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const vieja = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'fallido', error: 'lo que sea', startedAt: sql`now() - interval '1 hour'` })
+        .where(eq(esquema.pipelineRuns.id, vieja))
+      const esperando = await encolarGrilla(db, ref.organizationId, {
+        slug: 'parcelas', mes: '2026-11',
+      })
+
+      await reanudarCorridaEncolada(db, ref.organizationId, vieja)
+
+      expect((await tomarCorridaPendiente(db))?.id).toBe(esperando)
+      expect((await tomarCorridaPendiente(db))?.id).toBe(vieja)
     })
   })
 

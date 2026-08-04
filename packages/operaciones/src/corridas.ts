@@ -3,6 +3,7 @@ import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
 import { and, desc, eq, getTableColumns, or, sql } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
+import { describirAntiguedad, MINUTOS_SIN_SENAL_PARA_ABANDONO } from './senales.js'
 
 /**
  * Se deriva del enumerado que declara el esquema en vez de repetir la lista:
@@ -24,6 +25,17 @@ export interface CorridaEnCurso {
   /** Segundos desde que se encoló. La pantalla lo usa para distinguir "en cola"
    *  de "nadie la tomó porque el worker no está corriendo". */
   encoladaHace: number
+  /**
+   * Segundos desde la última señal de vida de la corrida, que **no** es lo
+   * mismo que `encoladaHace`: una corrida `en_curso` puede llevar una hora
+   * encolada y haber escrito un paso hace cinco segundos.
+   *
+   * Sale del mismo `ultimaSenalDeVida` que usa la guarda de
+   * `reanudarCorridaEncolada`, a propósito: la pantalla ofrece reanudar
+   * exactamente cuando el dominio va a aceptarlo. Dos definiciones de "sin
+   * señal" serían un botón que aparece y después rechaza.
+   */
+  segundosSinSenal: number
 }
 
 export interface CorridaTomada {
@@ -176,6 +188,46 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
 }
 
 /**
+ * La marca de tiempo más reciente que dejó la corrida: la suya propia o la de
+ * cualquiera de sus pasos. Es una aproximación, no una respuesta: la única
+ * forma correcta de distinguir una corrida viva de una abandonada es un latido
+ * o un arriendo que el worker renueve. Está registrado en `pendientes.md`.
+ *
+ * `greatest` de Postgres ignora los nulos, así que un paso que todavía no
+ * termina aporta su `started_at` sin anular el resto. El `finished_at` cuenta
+ * porque un paso puede pasarse veinte minutos entre reintentos y llamadas al
+ * modelo: mirando solo `started_at`, una corrida que acaba de completar ese
+ * paso parecería abandonada.
+ *
+ * La subconsulta compara también la organización, no solo el `run_id`: es la
+ * misma tenencia que la clave foránea compuesta ya exige, y aquí se escribe
+ * igual que en el resto del paquete.
+ *
+ * Las columnas se escriben con las del esquema y no a mano, y la subconsulta va
+ * sin alias para poder hacerlo: la propiedad se llama `startedAt` en las dos
+ * tablas pero la columna física es `created_at`, así que un `s.started_at`
+ * escrito a mano revienta con «column does not exist». Es el mismo tropiezo que
+ * ya documenta el `ORDER BY` de `tomarCorridaPendiente`.
+ *
+ * Lo leen dos: la guarda de `reanudarCorridaEncolada`, que decide si una
+ * `en_curso` se puede devolver a la cola, y `corridaDe`, que se lo pasa a la
+ * pantalla como `segundosSinSenal` para que ofrezca el botón en el mismo
+ * momento. Es una sola definición justamente para que no puedan discrepar.
+ */
+const ultimaSenalDeVida = sql`greatest(
+  ${esquema.pipelineRuns.startedAt},
+  (
+    SELECT max(greatest(
+      ${esquema.pipelineSteps.startedAt},
+      ${esquema.pipelineSteps.finishedAt}
+    ))
+    FROM ${esquema.pipelineSteps}
+    WHERE ${esquema.pipelineSteps.runId} = ${esquema.pipelineRuns.id}
+      AND ${esquema.pipelineSteps.organizationId} = ${esquema.pipelineRuns.organizationId}
+  )
+)`
+
+/**
  * La corrida más reciente de esa marca, ese flujo y ese periodo.
  *
  * El periodo se busca dentro de `input`, que es donde el flujo ya lo guarda:
@@ -208,6 +260,8 @@ export async function corridaDe(
     .select({
       ...getTableColumns(esquema.pipelineRuns),
       encoladaHace: sql<number>`extract(epoch from now() - ${esquema.pipelineRuns.startedAt})`
+        .mapWith(Number),
+      segundosSinSenal: sql<number>`extract(epoch from now() - ${ultimaSenalDeVida})`
         .mapWith(Number),
     })
     .from(esquema.pipelineRuns)
@@ -243,66 +297,8 @@ export async function corridaDe(
     error: fila.error,
     pasoActual: paso?.name ?? null,
     encoladaHace: Math.floor(fila.encoladaHace),
+    segundosSinSenal: Math.floor(fila.segundosSinSenal),
   }
-}
-
-/**
- * Minutos sin dar señales de vida tras los cuales una corrida `en_curso` se
- * considera abandonada y se deja reanudar.
- *
- * El número sale del peor turno realista del motor: cinco intentos con espera
- * exponencial de hasta treinta segundos cada uno, más la llamada al modelo de
- * cada intento. Es el mismo razonamiento con el que `docker-compose.yml` fijó
- * el `stop_grace_period` del worker en ciento ochenta segundos. Quince minutos
- * deja margen de sobra por encima de eso, y el reparto de riesgos manda hacia
- * arriba: pasarse de generoso cuesta que quien mira la pantalla espere un rato
- * antes de poder reanudar; quedarse corto cuesta que dos workers ejecuten el
- * mismo paso y **los dos paguen el modelo**, que es justo lo que esta guarda
- * existe para evitar.
- */
-const MINUTOS_SIN_SENAL_PARA_ABANDONO = 15
-
-/**
- * La marca de tiempo más reciente que dejó la corrida: la suya propia o la de
- * cualquiera de sus pasos. Es una aproximación, no una respuesta: la única
- * forma correcta de distinguir una corrida viva de una abandonada es un latido
- * o un arriendo que el worker renueve. Está registrado en `pendientes.md`.
- *
- * `greatest` de Postgres ignora los nulos, así que un paso que todavía no
- * termina aporta su `started_at` sin anular el resto. El `finished_at` cuenta
- * porque un paso puede pasarse veinte minutos entre reintentos y llamadas al
- * modelo: mirando solo `started_at`, una corrida que acaba de completar ese
- * paso parecería abandonada.
- *
- * La subconsulta compara también la organización, no solo el `run_id`: es la
- * misma tenencia que la clave foránea compuesta ya exige, y aquí se escribe
- * igual que en el resto del paquete.
- *
- * Las columnas se escriben con las del esquema y no a mano, y la subconsulta va
- * sin alias para poder hacerlo: la propiedad se llama `startedAt` en las dos
- * tablas pero la columna física es `created_at`, así que un `s.started_at`
- * escrito a mano revienta con «column does not exist». Es el mismo tropiezo que
- * ya documenta el `ORDER BY` de `tomarCorridaPendiente`.
- */
-const ultimaSenalDeVida = sql`greatest(
-  ${esquema.pipelineRuns.startedAt},
-  (
-    SELECT max(greatest(
-      ${esquema.pipelineSteps.startedAt},
-      ${esquema.pipelineSteps.finishedAt}
-    ))
-    FROM ${esquema.pipelineSteps}
-    WHERE ${esquema.pipelineSteps.runId} = ${esquema.pipelineRuns.id}
-      AND ${esquema.pipelineSteps.organizationId} = ${esquema.pipelineRuns.organizationId}
-  )
-)`
-
-/** Antigüedad en palabras, para el mensaje que lee una persona. */
-function describirAntiguedad(segundos: number): string {
-  const s = Math.max(0, Math.floor(segundos))
-  if (s < 60) return `${s} segundo${s === 1 ? '' : 's'}`
-  const m = Math.floor(s / 60)
-  return `${m} minuto${m === 1 ? '' : 's'}`
 }
 
 /**
@@ -323,15 +319,29 @@ function describirAntiguedad(segundos: number): string {
  * Una corrida `completado` se rechaza: no hay nada que reanudar, y permitirlo
  * invitaría a usar este botón como "regenerar", que es otra cosa y destruye lo
  * que haya. Una `pendiente` también: ya está en la cola.
+ *
+ * La marca de tiempo se reinicia porque reanudar **es** volver a encolar, y la
+ * antigüedad en la cola tiene que contar desde ahora. Sin eso la pantalla
+ * miente en el instante mismo en que se suelta el botón: `encoladaHace` sigue
+ * midiendo desde el encolado original, así que una corrida que llevaba una
+ * hora ahí renace `pendiente` con tres mil seiscientos segundos encima y cruza
+ * de sobra el umbral con el que la pantalla decide anunciar «nadie tomó esta
+ * generación… lo normal es que el worker no esté corriendo», con el worker
+ * sano y la corrida recién encolada. Efecto secundario deseable: como
+ * `tomarCorridaPendiente` ordena por esta misma columna, la reanudada va al
+ * final de la cola en vez de colarse delante de las que ya estaban esperando.
  */
 export async function reanudarCorridaEncolada(
   db: BaseDeDatos,
   organizationId: string,
   runId: string,
 ): Promise<void> {
+  // `startedAt` es la propiedad; la columna física es `created_at`. El `WHERE`
+  // que sigue mira la fila **anterior** al UPDATE —así evalúa Postgres—, así
+  // que reiniciarla aquí no afecta a la guarda de los quince minutos.
   const [fila] = await db
     .update(esquema.pipelineRuns)
-    .set({ status: 'pendiente', error: null, finishedAt: null })
+    .set({ status: 'pendiente', error: null, finishedAt: null, startedAt: sql`now()` })
     .where(
       and(
         eq(esquema.pipelineRuns.id, runId),

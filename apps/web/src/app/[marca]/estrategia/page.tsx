@@ -1,4 +1,6 @@
 import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
+// Del submódulo: es el mismo predicado que usa la grilla y no arrastra nada.
+import { corridaViva } from '@gc/operaciones/senales'
 import type { TipoEstrategia } from '@gc/strategy'
 import { conexion, organizacionPorDefecto } from '../../../datos.js'
 import { BotonGenerar } from '../../../componentes/BotonGenerar.js'
@@ -47,6 +49,15 @@ export default async function PaginaDeEstrategia({
   // worker un minuto después.
   const regenerable = resultado.tipo !== 'ausente' && resultado.estado === 'borrador'
 
+  // Con una corrida en vuelo no se ofrece generar: el botón seguía habilitado
+  // después del primer clic —la estrategia no cambia hasta que el worker
+  // persiste— y encolar una segunda hace que el worker ejecute las dos, cada
+  // una pagando el modelo. Se separa de `regenerable` a propósito: aquel habla
+  // del estado de la estrategia y este de que ya hay algo corriendo, y la rama
+  // de estrategia inválida necesita distinguirlos para no explicar el motivo
+  // equivocado.
+  const enVuelo = corridaViva(corrida)
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Estrategia</h1>
@@ -59,15 +70,18 @@ export default async function PaginaDeEstrategia({
             La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.
           </p>
           {/* El botón encola y devuelve; quien la genera es el worker. El
-              avance aparece arriba, en `EstadoDeCorrida`. */}
-          <div className="flex justify-center">
-            <BotonGenerar
-              marca={marca}
-              periodo={resultado.periodo}
-              que="estrategia"
-              etiqueta="Generar estrategia"
-            />
-          </div>
+              avance aparece arriba, en `EstadoDeCorrida`. Mientras esa corrida
+              siga viva no se ofrece de nuevo. */}
+          {!enVuelo && (
+            <div className="flex justify-center">
+              <BotonGenerar
+                marca={marca}
+                periodo={resultado.periodo}
+                que="estrategia"
+                etiqueta="Generar estrategia"
+              />
+            </div>
+          )}
         </div>
       ) : resultado.tipo === 'invalida' ? (
         <>
@@ -80,7 +94,10 @@ export default async function PaginaDeEstrategia({
               La estrategia guardada para este periodo no valida contra su esquema, así que no se
               puede mostrar.
             </p>
-            {regenerable ? (
+            {/* Con una corrida en vuelo no se ofrece el botón ni se explica
+                por qué no se puede regenerar: el motivo sería el equivocado.
+                Lo que hay que mirar está arriba, en `EstadoDeCorrida`. */}
+            {enVuelo ? null : regenerable ? (
               <BotonGenerar
                 marca={marca}
                 periodo={resultado.periodo}
@@ -98,7 +115,7 @@ export default async function PaginaDeEstrategia({
         </>
       ) : (
         <>
-          {regenerable && (
+          {regenerable && !enVuelo && (
             <div className="mb-4 flex justify-end">
               <BotonGenerar
                 marca={marca}

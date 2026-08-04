@@ -35,6 +35,7 @@ function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
     error: null,
     pasoActual: null,
     encoladaHace: 3,
+    segundosSinSenal: 3,
     ...campos,
   }
 }
@@ -52,6 +53,66 @@ describe('EstadoDeCorrida', () => {
     )
     expect(screen.queryByText(/nadie tom/i)).not.toBeNull()
     expect(screen.queryByText(/docker compose up -d/)).not.toBeNull()
+  })
+
+  // El número crudo («en 3600 segundos») es de máquina. `describirAntiguedad`
+  // ya resolvía esto en el dominio y no estaba exportada.
+  it('dice la espera en palabras y no en segundos crudos', () => {
+    render(
+      <EstadoDeCorrida corrida={corrida({ encoladaHace: 3600 })} ruta="/parcelas/grilla/2026-10" />,
+    )
+    expect(screen.queryByText(/nadie tomó esta generación en 60 minutos/i)).not.toBeNull()
+    expect(screen.queryByText(/3600/)).toBeNull()
+  })
+
+  // Si el worker muere a mitad, la fila queda `en_curso` para siempre:
+  // `tomarCorridaPendiente` solo levanta las `pendiente`, así que ni
+  // reiniciarlo la rescata. Sin este panel el único remedio es la terminal.
+  // El umbral y los segundos son los del dominio, así que el botón aparece
+  // exactamente cuando `reanudarCorridaEncolada` lo va a aceptar.
+  it('una en_curso sin señal por más del umbral dice que se interrumpió y ofrece reanudar', async () => {
+    render(
+      <EstadoDeCorrida
+        corrida={corrida({
+          estado: 'en_curso',
+          pasoActual: 'proponer_grilla',
+          encoladaHace: 3_600,
+          segundosSinSenal: 1_200,
+        })}
+        ruta="/parcelas/grilla/2026-10"
+      />,
+    )
+
+    expect(screen.queryByText(/parece haberse interrumpido/i)).not.toBeNull()
+    expect(screen.queryByText(/no da señales desde hace 20 minutos/i)).not.toBeNull()
+    // No es lo mismo que "falló": la corrida no dio ningún error.
+    expect(screen.queryByText(/la generación falló/i)).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reanudar' }))
+
+    expect(vi.mocked(reanudarCorridaAccion)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(reanudarCorridaAccion)).toHaveBeenCalledWith('/parcelas/grilla/2026-10', 'run-1')
+  })
+
+  // El otro lado del umbral, que es el que importa: una corrida que el worker
+  // está ejecutando ahora mismo no debe ofrecer reanudar. Reanudarla la
+  // devuelve a la cola con el worker todavía adentro, y los dos pagan el paso.
+  it('una en_curso que dio señales hace poco sigue anunciando su paso y no ofrece reanudar', () => {
+    render(
+      <EstadoDeCorrida
+        corrida={corrida({
+          estado: 'en_curso',
+          pasoActual: 'proponer_grilla',
+          encoladaHace: 3_600,
+          segundosSinSenal: 60,
+        })}
+        ruta="/parcelas/grilla/2026-10"
+      />,
+    )
+
+    expect(screen.queryByText(/proponiendo la grilla/i)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reanudar' })).toBeNull()
+    expect(screen.queryByText(/parece haberse interrumpido/i)).toBeNull()
   })
 
   it('traduce el nombre de máquina del paso en curso', () => {

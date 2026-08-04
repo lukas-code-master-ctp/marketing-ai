@@ -1,6 +1,13 @@
 'use client'
 
 import type { CorridaEnCurso } from '@gc/operaciones'
+// Del submódulo y no del barril: `@gc/operaciones` arrastra drizzle y el
+// driver de Postgres, y esto es un componente de cliente. `senales.ts` no
+// importa nada en tiempo de ejecución justamente para poder entrar aquí.
+import {
+  describirAntiguedad,
+  SEGUNDOS_SIN_SENAL_PARA_ABANDONO,
+} from '@gc/operaciones/senales'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { reanudarCorridaAccion } from '../acciones.js'
@@ -49,6 +56,29 @@ export function EstadoDeCorrida({ corrida, ruta }: { corrida: CorridaEnCurso; ru
     setOcupado(false)
   }
 
+  // El mismo control en los dos paneles que lo ofrecen: la promesa de que
+  // reanudar no vuelve a pagar el modelo vale igual para una corrida fallida
+  // que para una que se quedó colgada.
+  function controlDeReanudar(clases: string) {
+    return (
+      <>
+        <p className="mb-2 text-xs">
+          Reanudar retoma donde quedó: los pasos que ya se completaron no se vuelven a ejecutar, así
+          que el modelo no se cobra de nuevo.
+        </p>
+        <button
+          type="button"
+          disabled={ocupado}
+          onClick={() => void reanudar()}
+          className={`rounded border px-2 py-1 text-xs font-medium disabled:opacity-50 ${clases}`}
+        >
+          Reanudar
+        </button>
+        {error && <p className="mt-2 text-xs">{error}</p>}
+      </>
+    )
+  }
+
   // Una corrida completada no tiene nada que anunciar: lo que hay que mirar es
   // el resultado, que ya está en la pantalla.
   if (corrida.estado === 'completado') return null
@@ -58,19 +88,30 @@ export function EstadoDeCorrida({ corrida, ruta }: { corrida: CorridaEnCurso; ru
       <div className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900">
         <p className="mb-2 font-medium">La generación falló.</p>
         <p className="mb-2 whitespace-pre-wrap">{corrida.error}</p>
-        <p className="mb-2 text-xs">
-          Reanudar retoma donde quedó: los pasos que ya se completaron no se vuelven a ejecutar, así
-          que el modelo no se cobra de nuevo.
+        {controlDeReanudar('border-red-400 hover:bg-red-100')}
+      </div>
+    )
+  }
+
+  // Una corrida que se quedó en `en_curso` sin dar señales es el modo de falla
+  // que deja el worker al morir a mitad: `tomarCorridaPendiente` solo levanta
+  // las `pendiente`, así que reiniciarlo no la rescata y la pantalla anunciaría
+  // "Proponiendo la grilla…" para siempre. El umbral es el del dominio y los
+  // segundos salen del mismo cálculo que su guarda, así que el botón aparece
+  // exactamente cuando `reanudarCorridaEncolada` lo va a aceptar.
+  const interrumpida =
+    corrida.estado === 'en_curso' && corrida.segundosSinSenal > SEGUNDOS_SIN_SENAL_PARA_ABANDONO
+
+  if (interrumpida) {
+    return (
+      <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="mb-2 font-medium">Esta generación parece haberse interrumpido.</p>
+        <p className="mb-2">
+          Empezó a ejecutarse pero no da señales desde hace{' '}
+          {describirAntiguedad(corrida.segundosSinSenal)}. Lo normal es que el worker se haya
+          detenido a mitad.
         </p>
-        <button
-          type="button"
-          disabled={ocupado}
-          onClick={() => void reanudar()}
-          className="rounded border border-red-400 px-2 py-1 text-xs font-medium hover:bg-red-100 disabled:opacity-50"
-        >
-          Reanudar
-        </button>
-        {error && <p className="mt-2 text-xs">{error}</p>}
+        {controlDeReanudar('border-amber-400 hover:bg-amber-100')}
       </div>
     )
   }
@@ -81,8 +122,8 @@ export function EstadoDeCorrida({ corrida, ruta }: { corrida: CorridaEnCurso; ru
     return (
       <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <p className="mb-2">
-          Nadie tomó esta generación en {corrida.encoladaHace} segundos. Lo normal es que el worker
-          no esté corriendo.
+          Nadie tomó esta generación en {describirAntiguedad(corrida.encoladaHace)}. Lo normal es que
+          el worker no esté corriendo.
         </p>
         <p>
           Levántalo con{' '}

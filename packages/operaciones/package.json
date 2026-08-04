@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./pruebas": "./src/pruebas/siembra.ts"
+    "./pruebas": "./src/pruebas/siembra.ts",
+    "./senales": "./src/senales.ts"
   },
   "scripts": {
     "test": "vitest run",

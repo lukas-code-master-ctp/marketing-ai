@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { corridaDe, grillaDelMes } from '@gc/operaciones'
+// Del submódulo: es el mismo predicado que usa la estrategia y no arrastra nada.
+import { corridaViva } from '@gc/operaciones/senales'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 import { BotonAprobarGrilla } from '../../../../componentes/BotonAprobarGrilla.js'
@@ -50,6 +52,13 @@ export default async function PaginaDeGrilla({
     periodo: mes,
   })
 
+  // Con una corrida en vuelo no se ofrece generar. Nada impedía encolar una
+  // segunda —el botón queda habilitado porque el estado de la grilla no cambia
+  // hasta que el worker persiste—, el worker ejecutaba las dos y **cada una
+  // pagaba el modelo**. El avance se ve en `EstadoDeCorrida`, y cuando termine
+  // el botón vuelve solo.
+  const enVuelo = corridaViva(corrida)
+
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
   const avisos = grilla.problemas.filter((p) => p.severidad === 'aviso')
 
@@ -95,13 +104,15 @@ export default async function PaginaDeGrilla({
               motor acepta: P2 rechaza una grilla que ya salió de borrador. */}
           {grilla.estado === 'borrador' && (
             <div className="flex flex-wrap items-start justify-end gap-2">
-              <BotonGenerar
-                marca={marca}
-                periodo={mes}
-                que="grilla"
-                etiqueta="Regenerar grilla"
-                advertencia={`Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. Las que hayas descartado o editado se pierden.`}
-              />
+              {!enVuelo && (
+                <BotonGenerar
+                  marca={marca}
+                  periodo={mes}
+                  que="grilla"
+                  etiqueta="Regenerar grilla"
+                  advertencia={`Regenerar la grilla de ${mes} reemplaza todas sus publicaciones. Las que hayas descartado o editado se pierden.`}
+                />
+              )}
               {grilla.contentPlanId && (
                 <BotonAprobarGrilla marca={marca} mes={mes} contentPlanId={grilla.contentPlanId} />
               )}
@@ -144,10 +155,15 @@ export default async function PaginaDeGrilla({
         <div className="rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
           <p className="mb-3">Este mes todavía no tiene grilla.</p>
           {/* El botón encola y devuelve; quien la genera es el worker. El
-              avance aparece arriba, en `EstadoDeCorrida`. */}
-          <div className="flex justify-center">
-            <BotonGenerar marca={marca} periodo={mes} que="grilla" etiqueta="Generar grilla" />
-          </div>
+              avance aparece arriba, en `EstadoDeCorrida`. Mientras esa corrida
+              siga viva no se ofrece de nuevo: la grilla no existe hasta que el
+              worker la persista, así que sin esta guarda el botón invita a
+              encolar una segunda y pagar el modelo dos veces. */}
+          {!enVuelo && (
+            <div className="flex justify-center">
+              <BotonGenerar marca={marca} periodo={mes} que="grilla" etiqueta="Generar grilla" />
+            </div>
+          )}
         </div>
       ) : (
         <RejillaDelMes
