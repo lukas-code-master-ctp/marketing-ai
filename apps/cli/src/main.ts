@@ -4,7 +4,8 @@ import { crearConexion } from '@gc/db'
 import { parseArgs } from 'node:util'
 import { generarEstrategia, generarGrilla } from '@gc/flujos'
 import {
-  cargarPerfilDeArchivo, crearMarca, reabrirGrilla, resolverOrganizacion, verGrilla,
+  cargarPerfilDeArchivo, crearMarca, reabrirGrilla, reanudarCorridaEncolada,
+  resolverOrganizacion, verGrilla,
 } from '@gc/operaciones'
 
 const AYUDA = `
@@ -17,6 +18,7 @@ Comandos:
   grilla:generar      --marca <slug> --mes <2026-09>
   grilla:ver          --marca <slug> --mes <2026-09>
   grilla:reabrir      --marca <slug> --mes <2026-09>
+  corrida:reanudar    --id <uuid>
 
 Opciones globales:
   --seco              usa las muestras locales y no gasta tokens
@@ -25,7 +27,7 @@ Opciones globales:
 
 const COMANDOS = new Set([
   'marca:crear', 'perfil:cargar', 'estrategia:generar', 'grilla:generar', 'grilla:ver',
-  'grilla:reabrir',
+  'grilla:reabrir', 'corrida:reanudar',
 ])
 
 async function principal(): Promise<void> {
@@ -39,6 +41,7 @@ async function principal(): Promise<void> {
       archivo: { type: 'string' },
       periodo: { type: 'string' },
       mes: { type: 'string' },
+      id: { type: 'string' },
       seco: { type: 'boolean', default: false },
       org: { type: 'string' },
     },
@@ -120,6 +123,12 @@ async function principal(): Promise<void> {
         const marca = exigir(values.marca, '--marca')
         await reabrirGrilla(db, organizationId, { slug: marca, mes })
         console.log(`Grilla de ${mes} para ${marca} devuelta a borrador`)
+        break
+      }
+      case 'corrida:reanudar': {
+        const id = exigir(values.id, '--id')
+        await reanudarCorridaEncolada(db, organizationId, id)
+        console.log(`Corrida ${id} devuelta a pendiente`)
         break
       }
     }

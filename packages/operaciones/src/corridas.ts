@@ -1,6 +1,7 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
+import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, getTableColumns, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm'
 import { resolverMarca } from './marcas.js'
 
 /**
@@ -243,4 +244,52 @@ export async function corridaDe(
     pasoActual: paso?.name ?? null,
     encoladaHace: Math.floor(fila.encoladaHace),
   }
+}
+
+/**
+ * Devuelve una corrida a `pendiente` para que el worker la retome.
+ *
+ * No distingue "falló" de "se colgó": si el worker muere a mitad, la fila queda
+ * `en_curso` para siempre; si un paso agota sus reintentos, queda `fallido`. En
+ * ambos casos la operación correcta es la misma, porque el pipeline es
+ * idempotente por paso y los ya completados no se reejecutan — el modelo no se
+ * vuelve a pagar.
+ *
+ * Una corrida `completado` sí se rechaza: no hay nada que reanudar, y
+ * permitirlo invitaría a usar este botón como "regenerar", que es otra cosa y
+ * destruye lo que haya.
+ */
+export async function reanudarCorridaEncolada(
+  db: BaseDeDatos,
+  organizationId: string,
+  runId: string,
+): Promise<void> {
+  const [fila] = await db
+    .update(esquema.pipelineRuns)
+    .set({ status: 'pendiente', error: null, finishedAt: null })
+    .where(
+      and(
+        eq(esquema.pipelineRuns.id, runId),
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+        inArray(esquema.pipelineRuns.status, ['fallido', 'en_curso']),
+      ),
+    )
+    .returning({ id: esquema.pipelineRuns.id })
+
+  if (fila) return
+
+  const [actual] = await db
+    .select({ status: esquema.pipelineRuns.status })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.id, runId),
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+      ),
+    )
+
+  if (!actual) throw permanente(`No existe la corrida ${runId} en esta organización`)
+  throw permanente(
+    `La corrida ${runId} está en estado "${actual.status}" y solo se reanuda una fallida o colgada`,
+  )
 }

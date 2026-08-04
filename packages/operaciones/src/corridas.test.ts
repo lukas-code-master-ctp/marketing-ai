@@ -3,7 +3,7 @@ import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
-  corridaDe, encolarEstrategia, encolarGrilla, tomarCorridaPendiente,
+  corridaDe, encolarEstrategia, encolarGrilla, reanudarCorridaEncolada, tomarCorridaPendiente,
 } from './corridas.js'
 import { crearMarca } from './marcas.js'
 import { sembrarConEstrategia } from './pruebas/siembra.js'
@@ -318,6 +318,90 @@ describe('corridaDe', () => {
       })
 
       expect(c?.pasoActual).toBe('persistir_grilla')
+    })
+  })
+})
+
+describe('reanudarCorridaEncolada', () => {
+  it('devuelve una corrida fallida a pendiente, y limpia su error', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'fallido', error: 'lo que sea' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await reanudarCorridaEncolada(db, ref.organizationId, runId)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('pendiente')
+      expect(fila!.error).toBeNull()
+    })
+  })
+
+  it('también reanuda una corrida colgada en en_curso', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'en_curso' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await reanudarCorridaEncolada(db, ref.organizationId, runId)
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('pendiente')
+    })
+  })
+
+  it('no reanuda una corrida completada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'completado' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+
+      await expect(
+        reanudarCorridaEncolada(db, ref.organizationId, runId),
+      ).rejects.toThrow(/completado/)
+    })
+  })
+
+  it('no reanuda la corrida de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      // Fallida (no pendiente): si la operación no distinguiera tenencia y
+      // reanudara igual, esta prueba lo vería como un cambio de estado, no
+      // como "seguía en el mismo estado en el que ya estaba".
+      await db
+        .update(esquema.pipelineRuns)
+        .set({ status: 'fallido', error: 'lo que sea' })
+        .where(eq(esquema.pipelineRuns.id, runId))
+      const [otra] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Otra', slug: 'otra' })
+        .returning({ id: esquema.organizations.id })
+
+      await expect(
+        reanudarCorridaEncolada(db, otra!.id, runId),
+      ).rejects.toThrow()
+
+      const [fila] = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.id, runId))
+      expect(fila!.status).toBe('fallido')
     })
   })
 })
