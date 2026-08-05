@@ -1,6 +1,6 @@
 import { esViolacionDeUnica } from '@gc/shared'
 import { sql } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { crearConexion } from './cliente.js'
 import { esquema } from './esquema.js'
 import { conBaseDeDatosDePrueba } from './pruebas/entorno.js'
@@ -42,6 +42,14 @@ describe('errores reales del driver', () => {
  * cortar una conexión ociosa. Si `crearConexion` no escuchara `'error'`, este
  * archivo de prueba completo moriría junto con el proceso de Vitest que lo
  * ejecuta, en vez de fallar con una aserción.
+ *
+ * Esa muerte del proceso es justo lo que no queda visible leyendo las
+ * aserciones de abajo: `desaparecio` y `otraVez` pasarían igual si alguien
+ * reemplazara el oyente por uno vacío (`pool.on('error', () => {})`), que ya
+ * no tumba el proceso pero tampoco registra nada. Por eso se espía
+ * `console.error` y se exige que haya quedado constancia de la caída: esa
+ * aserción sí se rompe con esa mutación puntual, sin depender de que Vitest
+ * detecte un proceso muerto.
  */
 describe('conexión ociosa caída', () => {
   it(
@@ -49,6 +57,8 @@ describe('conexión ociosa caída', () => {
     async () => {
       const url = process.env.DATABASE_URL_TEST
       if (!url) throw new Error('Falta DATABASE_URL_TEST')
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const { db, cerrar } = crearConexion(url)
       try {
@@ -91,8 +101,17 @@ describe('conexión ociosa caída', () => {
         // pool —el viejo ya fue descartado— y tiene que funcionar igual.
         const otraVez = await db.execute<{ uno: number }>(sql`select 1 as uno`)
         expect(otraVez.rows[0]?.uno).toBe(1)
+
+        // La garantía en sí: el oyente de 'error' no solo evita la caída, deja
+        // constancia de ella. Esta aserción es la que se rompe si alguien lo
+        // reemplaza por un manejador vacío — la que no depende de que Vitest
+        // note un proceso muerto.
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[db\] una conexión ociosa del pool se cayó/),
+        )
       } finally {
         await cerrar()
+        consoleErrorSpy.mockRestore()
       }
     },
     15000,

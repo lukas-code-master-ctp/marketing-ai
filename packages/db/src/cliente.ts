@@ -19,8 +19,11 @@ export type BaseDeDatos = NodePgDatabase<typeof esquema>
  * la siguiente consulta toma uno nuevo del pool sin intervención.
  *
  * El mensaje se limita al texto del error, sin el objeto completo ni su
- * pila: si la caída se repite —una reconexión masiva tras un corte, por
- * ejemplo— cada línea sigue siendo una sola línea y no ahoga el log.
+ * pila. El motivo fuerte: `pg-pool` le adjunta `err.client = client` al
+ * error antes de emitirlo, así que volcar el objeto completo expondría el
+ * cliente entero —socket, parámetros de conexión— en cada caída. Además, si
+ * la caída se repite —una reconexión masiva tras un corte, por ejemplo—
+ * cada línea sigue siendo una sola línea y no ahoga el log.
  */
 function noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool: pg.Pool): void {
   pool.on('error', (error: unknown) => {
