@@ -36,8 +36,12 @@ export type Resultado<T = null> =
  * Server Action es un endpoint HTTP con identificador estable: cualquiera que
  * lo conozca puede llamarlo sin pasar nunca por la página que lo renderiza, así
  * que proteger el componente de servidor no protege la acción. Al estar en el
- * ayudante por el que pasan las nueve, una acción nueva queda protegida por
- * construcción — y una que no lo use se ve en la revisión.
+ * ayudante por el que pasan las nueve, una acción nueva declarada en este
+ * archivo queda protegida por construcción — y una que no lo use se ve en la
+ * revisión. La garantía es de este archivo, no del proyecto: un `'use server'`
+ * declarado en línea dentro de una página (como en
+ * `src/app/entrar/page.tsx`, que por eso mismo tiene que ser alcanzable sin
+ * sesión) no pasa por aquí y queda fuera de este mecanismo.
  */
 async function ejecutar<T = null>(
   ruta: string,
@@ -182,12 +186,20 @@ export async function reanudarCorridaAccion(ruta: string, runId: string): Promis
 }
 
 /**
- * El JSON se parsea antes de tocar la base: un error de sintaxis nunca llega
- * a `cargarPerfilDeObjeto`. Si parsea, esa función ya valida con
- * `validarPerfil` y ya crea una versión nueva — un perfil que no cumple sus
- * reglas (proporciones que no suman 1, un pilar que no es snake_case, etc.)
- * vuelve como error `permanente` con el detalle de cuál regla falló, y ese
- * mensaje es el que ve el usuario tal cual.
+ * El JSON se parsea dentro del callback de `ejecutar`, después de la guarda de
+ * sesión: parsearlo antes le daría a un llamador anónimo un oráculo trivial
+ * ("JSON inválido" ≠ "sin sesión") y CPU gratis sobre una entrada de tamaño
+ * arbitrario. Un error de sintaxis nunca llega a `cargarPerfilDeObjeto`; se
+ * relanza como `Error` con el mismo mensaje que antes, y `ejecutar` lo
+ * traduce: `clasificarError` clasifica un `Error` genérico como `permanente`,
+ * así que `reintentable` sigue dando `false` igual que cuando se devolvía a
+ * mano.
+ *
+ * Si parsea, `cargarPerfilDeObjeto` ya valida con `validarPerfil` y ya crea
+ * una versión nueva — un perfil que no cumple sus reglas (proporciones que no
+ * suman 1, un pilar que no es snake_case, etc.) vuelve como error
+ * `permanente` con el detalle de cuál regla falló, y ese mensaje es el que ve
+ * el usuario tal cual.
  *
  * `cargarPerfilDeObjeto` ya devuelve la versión que quedó. Devolverla al
  * cliente es lo que permite que el editor anuncie la versión real en vez de
@@ -197,18 +209,17 @@ export async function guardarPerfilAction(
   slug: string,
   textoJson: string,
 ): Promise<Resultado<{ version: number }>> {
-  let perfil: unknown
-  try {
-    perfil = JSON.parse(textoJson)
-  } catch (error) {
-    return {
-      ok: false,
-      mensaje: `El texto no es JSON válido: ${error instanceof Error ? error.message : String(error)}`,
-      reintentable: false,
+  return ejecutar(`/${slug}/perfil`, async (db, organizationId) => {
+    let perfil: unknown
+    try {
+      perfil = JSON.parse(textoJson)
+    } catch (error) {
+      throw new Error(
+        `El texto no es JSON válido: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
-  }
 
-  return ejecutar(`/${slug}/perfil`, (db, organizationId) =>
-    cargarPerfilDeObjeto(db, organizationId, { slug, perfil }).then((version) => ({ version })),
-  )
+    const version = await cargarPerfilDeObjeto(db, organizationId, { slug, perfil })
+    return { version }
+  })
 }
