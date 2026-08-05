@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Neon, hosting en Vercel, autenticación con Google— pero el despliegue en sí todavía no ocurrió. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -43,8 +43,14 @@ vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
 contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
 worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
-La app exige sesión. En local basta `SESION_DE_DESARROLLO=true` en el `.env`,
-que entra como `desarrollo@local` sin pasar por Google. Esa variable **se
+La app exige sesión. `AUTH_SECRET` hace falta **incluso en local con
+`SESION_DE_DESARROLLO=true`**: el middleware llama a `auth()` de verdad en
+cada petición de página para leer la cookie, y `@auth/core` valida la
+configuración —incluido el secreto— antes de mirar si hay cookie o de correr
+ningún callback. Sin `AUTH_SECRET` la respuesta es un 500 con
+`[auth][error] MissingSecret`, con o sin sesión de desarrollo.
+`SESION_DE_DESARROLLO=true` evita pasar por Google —entra como
+`desarrollo@local`— pero no evita esa validación previa. La variable **se
 ignora fuera de `NODE_ENV=development`**, así que dejarla encendida no abre
 nada en producción.
 
@@ -57,6 +63,16 @@ Cada una existe porque romperla ya costó trabajo real.
 **Un solo `.env`, en la raíz.** Ningún paquete tiene el suyo. Las pruebas lo cargan con `setupFiles: ['../../vitest.setup.ts']`; `next.config.ts` y el CLI lo resuelven desde `import.meta.url`. Una copia por paquete rompería cualquier clon nuevo.
 
 **Una migración aplicada es inmutable.** Un error se corrige con otra migración, jamás editando la anterior — el registro de drizzle no la reejecuta y el envoltorio `DO $$ ... EXCEPTION` la descartaría en silencio. Las migraciones nuevas van **sin** ese envoltorio: una que se salta sola es peor que una que falla.
+
+**El agrupador de conexiones de Neon apaga las sentencias preparadas, no al
+revés.** `crearConexion` (`packages/db/src/cliente.ts`) pasa `prepare: false`
+a `postgres-js` cuando `usaAgrupador` (`packages/db/src/agrupador.ts`) detecta
+el sufijo `-pooler` en el anfitrión de la URL — la convención con la que Neon
+marca su cadena agrupada, que corre sobre PgBouncer en modo transacción, y ese
+modo no soporta las sentencias preparadas que `postgres-js` usa por omisión.
+Contra el Postgres local de Docker, sin `-pooler` en el anfitrión, esto nunca
+se activa: un cambio que lo rompa no falla en local ni en `pnpm test`, solo en
+producción, con un error que no dice nada útil.
 
 **Idioma.** Esquema y columnas en inglés `snake_case`. API de dominio, variables, comentarios, prompts y **todo texto que ve el usuario** en español.
 
@@ -78,24 +94,21 @@ componentes de servidor. Una acción que no use ese ayudante nace desprotegida.
 
 **La configuración de Auth.js está partida en dos archivos, y quien edite uno
 tiene que saber que el otro existe.** `apps/web/src/auth.config.ts` es la
-mitad sin Node —sin proveedores, sin nada que toque la base— porque el
-middleware corre en el runtime Edge por omisión y `apps/web/src/auth.ts`
-arrastra `node:fs/promises` hasta ahí (vía `auth/registro.ts` → `datos.ts` →
-`@gc/operaciones`). Apuntar el middleware al `auth.ts` completo falla el build
-con `UnhandledSchemeError: Reading from "node:fs/promises" is not handled by
-plugins`. `auth.ts` extiende `authConfig` con el proveedor de Google y los
-callbacks completos, y el orden del spread es lo que decide cuál gana:
-`callbacks: { ...authConfig.callbacks, signIn: autorizarInicioDeSesion, jwt,
-session }` sobrescribe el `jwt` liviano de `authConfig` con el completo. El
-`jwt` de `auth.config.ts` es un duplicado deliberado del de
-`auth/callbacks.ts` —misma revalidación de `CORREOS_PERMITIDOS`, sin el
-registro en la base—, así que endurecer esa revalidación en un solo archivo
-deja un agujero en el otro.
+mitad que el middleware puede cargar en el runtime Edge; `apps/web/src/auth.ts`
+la extiende con el proveedor de Google y los callbacks completos, para todo lo
+que sí corre en Node. Los dos quedan acoplados por el orden del spread con el
+que `auth.ts` combina sus callbacks con los de `authConfig`: ese orden decide
+cuál versión de cada callback compartido gana. El porqué de la partición —el
+choque con el runtime Edge— y el detalle exacto del spread están comentados en
+la cabecera de `apps/web/src/auth.config.ts`; no se repiten aquí para no
+duplicar una línea de código que se desactualizaría en silencio si alguien la
+reordena.
 
-**El middleware necesita su propio callback `authorized`.** `export { auth as
-middleware }` a secas no bloquea nada: `handleAuth` de Auth.js arranca con
+**El middleware necesita su propio callback `authorized`.** `NextAuth(authConfig)`
+a secas no bloquea nada: `handleAuth` de Auth.js arranca con
 `let authorized = true`, y sin ese callback deja pasar cualquier petición
-aunque no haya sesión. Vive en `apps/web/src/middleware.ts`, no en la raíz del
+aunque no haya sesión. Vive en `apps/web/src/middleware.ts`, como
+`export const { auth: middleware } = NextAuth(authConfig)` — no en la raíz del
 paquete, porque este proyecto usa `src/app`.
 
 **Sacar a alguien de `CORREOS_PERMITIDOS` le quita la sesión de inmediato**,
@@ -213,7 +226,23 @@ Dos hábitos que valen más que el resto:
 
 ## Entorno
 
-Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`. Postgres en Docker, bases `gestor` (desarrollo, con datos de marcha en seco) y `gestor_test`.
+Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`.
+
+**Postgres vive en dos lugares con roles distintos.** En Docker para desarrollo
+y pruebas locales — bases `gestor` (con datos de marcha en seco) y
+`gestor_test`. En Neon para producción. `DATABASE_URL` apunta a uno u otro
+según dónde corras: el `.env` de la raíz la resuelve contra Docker, y Vercel
+la resuelve contra Neon con sus propias variables de entorno — la regla del
+`.env` único no cambia por esto.
+
+Neon entrega dos cadenas de conexión distintas, y confundirlas rompe cosas que
+solo se ven en producción: la **agrupada** (el anfitrión termina en
+`-pooler`) es la que va en Vercel, porque cada invocación de una función
+serverless abre su propia conexión y sin agrupador Postgres se queda sin cupo
+— es también la que activa `prepare: false` (ver arriba). La **directa**, sin
+agrupar, es la que hay que usar para aplicar migraciones a mano, porque
+PgBouncer en modo transacción no maneja bien las sentencias que las
+migraciones necesitan.
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
