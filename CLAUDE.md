@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Neon, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió: hubo una prueba de humo contra la instancia real que confirmó que el conector funciona desde Vercel, pero el proyecto de esa prueba era desechable y se borró. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -77,19 +77,26 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **Una migración aplicada es inmutable.** Un error se corrige con otra migración, jamás editando la anterior — el registro de drizzle no la reejecuta y el envoltorio `DO $$ ... EXCEPTION` la descartaría en silencio. Las migraciones nuevas van **sin** ese envoltorio: una que se salta sola es peor que una que falla.
 
-**El agrupador de conexiones de Neon apaga las sentencias preparadas, no al
-revés.** `crearConexion` (`packages/db/src/cliente.ts`) pasa `prepare: false`
-a `postgres-js` cuando `usaAgrupador` (`packages/db/src/agrupador.ts`) detecta
-que la **primera etiqueta del anfitrión** de la URL —lo que va antes del
-primer punto, en minúsculas— termina en `-pooler`: por ejemplo,
-`ep-cool-name-123456-pooler` en
-`ep-cool-name-123456-pooler.us-east-2.aws.neon.tech`. Es la convención con la
-que Neon marca su cadena agrupada, que corre sobre PgBouncer en modo
-transacción, y ese modo no soporta las sentencias preparadas que
-`postgres-js` usa por omisión. Contra el Postgres local de Docker, sin
-`-pooler` en esa primera etiqueta, esto nunca se activa: un cambio que lo
-rompa no falla en local ni en `pnpm test`, solo en producción, con un error
-que no dice nada útil.
+**El conector de Cloud SQL decide si autentica con un `instanceof`, y eso
+exige una sola copia de `google-auth-library` en el árbol de dependencias.**
+`crearConexion` (`packages/db/src/cliente.ts`) arma un `GoogleAuth` con las
+credenciales de la cuenta de servicio y se lo entrega al `Connector` de
+`@google-cloud/cloud-sql-connector` por su opción `auth`. Adentro, el
+`sqladmin-fetcher` del conector decide si usa esas credenciales con
+`loginAuth instanceof GoogleAuth` — y esa comparación solo da cierto si
+`google-auth-library` resuelve, para `@gc/db` y para el conector, al **mismo
+archivo**. Si pnpm instala dos copias —porque el rango que declara el
+conector deja de coincidir con el que declara `packages/db/package.json`—,
+el objeto cae por la rama equivocada y la petición sale **sin
+credenciales**: un `401 Login Required` que no menciona versiones ni copias.
+Ya mordió una vez, en la prueba de humo contra la instancia real. Ni
+`pnpm test` ni `pnpm -r typecheck` ven qué copia resuelve cada paquete, así
+que lo vigila `packages/db/src/resolucion-google-auth-library.test.ts`, que
+afirma con `require.resolve` en vez de confiar en que los rangos declarados
+coincidan. **Si esa prueba se pone roja:** alinea el rango de
+`google-auth-library` en `packages/db/package.json` con el que exige
+`@google-cloud/cloud-sql-connector` (revisa su `package.json`) y corre
+`pnpm install` para que las dos vuelvan a resolver a una sola copia.
 
 **Idioma.** Esquema y columnas en inglés `snake_case`. API de dominio, variables, comentarios, prompts y **todo texto que ve el usuario** en español.
 
@@ -249,29 +256,73 @@ Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm ins
 
 **Postgres vive en dos lugares con roles distintos.** En Docker para desarrollo
 y pruebas locales — bases `gestor` (con datos de marcha en seco) y
-`gestor_test`. En Neon para producción. `DATABASE_URL` apunta a uno u otro
-según dónde corras: el `.env` de la raíz la resuelve contra Docker, y Vercel
-la resuelve contra Neon con sus propias variables de entorno — la regla del
-`.env` único no cambia por esto.
+`gestor_test`. En Cloud SQL para producción. **En local no se declara ninguna
+variable de Cloud SQL**: sin `CLOUD_SQL_INSTANCIA`, `destinoDeConexion`
+(`packages/db/src/destino.ts`) resuelve por `DATABASE_URL` y va a Docker — así
+en tu máquina, en el CLI, en el worker y en las pruebas. Vercel sí declara
+`CLOUD_SQL_INSTANCIA` y sus cuatro variables acompañantes, y con eso
+`crearConexion` (`packages/db/src/cliente.ts`) resuelve contra Cloud SQL en
+vez de Docker.
 
-Neon entrega dos cadenas de conexión distintas, y confundirlas rompe cosas que
-solo se ven en producción: la **agrupada** —por ejemplo
-`postgres://usuario:clave@ep-cool-name-123456-pooler.us-east-2.aws.neon.tech/gestor`,
-donde la primera etiqueta del anfitrión, `ep-cool-name-123456-pooler`, termina
-en `-pooler`— es la que va en Vercel, porque cada invocación de una función
-serverless abre su propia conexión y sin agrupador Postgres se queda sin cupo
-— es también la que activa `prepare: false` (ver arriba). La **directa**, sin
-ese sufijo en el anfitrión (`ep-cool-name-123456.us-east-2.aws.neon.tech`), es
-la que hay que usar para aplicar migraciones a mano, porque PgBouncer en modo
-transacción no maneja bien las sentencias que las migraciones necesitan.
+**La app en Vercel llega a Cloud SQL por el conector de Node de Google
+(`@google-cloud/cloud-sql-connector`), no por una cadena de conexión.** El
+conector autoriza por IAM —la cuenta de servicio necesita el rol Cloud SQL
+Client— y por eso la lista de redes autorizadas de la instancia queda
+**vacía**. Esa lista vacía es la garantía del diseño, no un detalle de
+configuración: significa que la base no está expuesta a internet por IP, y
+que no hay ningún firewall que mantener sincronizado con las IPs de Vercel.
+Las credenciales viajan como objeto —`GOOGLE_CREDENCIALES_JSON`, el JSON de
+la cuenta de servicio en una variable de entorno— y no por
+`GOOGLE_APPLICATION_CREDENTIALS`, que espera una ruta a archivo: en Vercel no
+hay archivos que poner.
 
-**`packages/db/drizzle.config.ts` distingue las dos.** Lee
-`DATABASE_URL_DIRECTA` con `DATABASE_URL` como respaldo, así que aplicar
-migraciones con solo `DATABASE_URL` exportada corre en silencio contra la
-cadena que toque en ese momento — la agrupada en Neon, si es lo único que
-exportaste para producción. Declara `DATABASE_URL_DIRECTA` (cadena directa de
-Neon, sin `-pooler`) antes de migrar contra producción; en Docker local no
-hace falta, porque hay una sola cadena.
+**`max: 5` en el pool (`packages/db/src/cliente.ts`) es bajo a propósito.**
+Cada invocación de Vercel corre en su propio proceso y abre su propio pool,
+así que el límite de conexiones de la instancia se reparte entre todas las
+invocaciones que estén vivas a la vez.
+
+**El caché de la conexión en `apps/web/src/datos.ts` no es una optimización:
+es lo que hace pagable cada arranque en frío.** Medido en la prueba de humo
+contra la instancia real desde Vercel: un proceso nuevo tarda ~1,6 s
+(construir el conector, ~800 ms, más la primera consulta, ~760 ms); un
+proceso ya tibio, ~123 ms. Perder el caché multiplica por trece el costo de
+cada petición, y no es hipotético: de cinco llamadas seguidas en esa prueba,
+una cayó en un proceso nuevo.
+
+**Aplicar una migración contra Cloud SQL exige el Cloud SQL Auth Proxy**,
+porque `drizzle-kit` corre fuera de la app y no usa el conector de Node —lo
+mismo que arma `crearConexion` no está disponible ahí—. El Auth Proxy es un
+binario aparte que levanta un escucha en `localhost`, tuneliza hacia la
+instancia autenticando por IAM, y deja que cualquier cliente Postgres normal
+—incluido `drizzle-kit`— se conecte como si la base estuviera en la máquina.
+Es una operación que se hace pocas veces y siempre con prisa, así que:
+
+1. Descarga el binario del Cloud SQL Auth Proxy v2 (`cloud-sql-proxy.exe` en
+   Windows) desde la página de releases de `GoogleCloudPlatform/cloud-sql-proxy`
+   en GitHub, o desde la documentación de Cloud SQL de Google — **no el binario
+   viejo `cloud_sql_proxy`, con guion bajo, que es la v1**.
+2. Levántalo apuntando al nombre de conexión de la instancia, en un puerto
+   local que no choque con el Postgres de Docker (que ya ocupa 5432):
+   ```
+   .\cloud-sql-proxy.exe --port 5433 gestor-contenido-ctp:southamerica-east1:gestor-contenido
+   ```
+   Autentica con tus credenciales de `gcloud` (Application Default
+   Credentials) — corre `gcloud auth application-default login` antes si no
+   las tienes configuradas, y necesitas el rol `roles/cloudsql.client` sobre
+   el proyecto.
+3. Queda escuchando en `localhost:5433`, tunelizando hacia la instancia.
+4. **Mientras dure la operación**, apunta `DATABASE_URL` (en el `.env` de la
+   raíz) a ese puerto: `postgres://gestor:<clave>@localhost:5433/gestor`.
+5. Aplica las migraciones con el script real —confirmado en
+   `packages/db/package.json`— `pnpm --filter @gc/db migraciones:aplicar`,
+   que ejecuta `drizzle-kit migrate`.
+6. **Devuelve `DATABASE_URL` a `postgres://postgres:postgres@localhost:5432/gestor`
+   al terminar.** Este paso no es adorno: con el Auth Proxy corriendo y
+   `DATABASE_URL` sin restaurar, cualquier comando de desarrollo —`pnpm
+   --filter @gc/web dev`, el CLI, el worker, `pnpm test`, porque el `.env` es
+   uno solo para todo— trabajaría contra la base de producción sin que nada
+   lo avise. Es el accidente que este procedimiento hace fácil si se salta
+   este paso.
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
@@ -305,9 +356,16 @@ no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
 en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
 worker`.
 
-**Con la base en Neon, el worker no puede quedar encendido.** El plan gratuito
-da unas 190 horas de cómputo al mes y suspende la base cuando nadie la
-consulta; un sondeo cada dos segundos la mantiene despierta las 730 horas del
-mes y se lo come solo, sin que nadie esté usando el sistema. Levanta el worker
-cuando vayas a generar y bájalo al terminar. Resolverlo de verdad es del
-bloque 1C-B: que la web lo despierte en vez de que él pregunte.
+**Con la base en Cloud SQL, el costo ya no depende de que el worker esté
+encendido: depende de que la instancia lo esté.** Con Neon, el plan gratuito
+suspendía la base sola cuando nadie la consultaba, y era el sondeo del worker
+—cada dos segundos— el que la mantenía despierta las 730 horas del mes sin
+que nadie usara el sistema. Cloud SQL no tiene ese mecanismo: **no se apaga
+sola, y una instancia encendida se factura corriendo, la use alguien o no.**
+El sondeo del worker ya no mueve esa factura para nada. Lo que sí hay que
+hacer es detener la instancia cuando nadie vaya a generar contenido y
+encenderla antes de la próxima vez — es exactamente por lo que la instancia
+de `gestor-contenido-ctp` está detenida ahora mismo. Que algo la encienda y
+apague solo, en vez de hacerlo a mano, sigue siendo trabajo pendiente (ver
+`pendientes.md`), del mismo bloque 1C-B que se lleva al worker fuera de una
+máquina local.

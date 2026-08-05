@@ -1412,6 +1412,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ## Task 8: Desplegar — la parte que te toca a ti
 
+> **Obsoleta.** Esta tarea está escrita para Neon, y la base de producción pasó a ser Cloud SQL en el bloque 1C-A2 — el porqué está en [su spec](../specs/2026-08-05-base-en-cloud-sql-design.md), y el "qué hacer en su lugar" en [su plan](2026-08-05-base-en-cloud-sql.md), Task 7 ("crear todo y desplegar"). No la sigas: el Step 1 y el Step 2 de acá crean y migran una base en Neon que ya no es la que usa el sistema. Queda sin borrar porque es el registro de por qué las cosas son como son.
+
 **Esta tarea NO la puede hacer un agente**: exige crear cuentas con tus credenciales. Es una lista de comprobación, en orden, con lo que hay que pedir y dónde pegarlo.
 
 - [ ] **Step 1: Neon**
