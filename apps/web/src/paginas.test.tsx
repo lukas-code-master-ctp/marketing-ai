@@ -406,4 +406,21 @@ describe('la pantalla de entrada', () => {
     expect(screen.queryByText(/no está en la lista/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
   })
+
+  // Hallazgo 4: `Configuration` llega cuando `registrarPersona` falla (una
+  // caída de la base, por ejemplo). No es un rechazo por lista, así que no
+  // puede mostrar el mismo texto ni pasar en silencio: sin esta rama la
+  // pantalla queda muda y la persona reintenta sin saber que el problema es
+  // del sistema.
+  it('la pantalla de entrada avisa de una falla del sistema y no acusa a la cuenta', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: 'Configuration' }) }))
+
+    expect(screen.queryByText(/problema del sistema/i)).not.toBeNull()
+    // No es el mismo aviso que el rechazo por lista: confundirlos manda a
+    // pedir un permiso que ya se tiene.
+    expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
 })

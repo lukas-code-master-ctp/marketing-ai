@@ -1,43 +1,23 @@
 import NextAuth from 'next-auth'
 import Google from 'next-auth/providers/google'
-import { correoPermitido, sesionDeDesarrollo } from './auth/permitidos.js'
+import { jwt, session, signIn as autorizarInicioDeSesion } from './auth/callbacks.js'
+import { sesionDeDesarrollo } from './auth/permitidos.js'
 import { registrarPersona } from './auth/registro.js'
 
+// `signIn` (de `NextAuth(...)`, más abajo) es la función que dispara el flujo
+// de inicio de sesión con un proveedor. El callback del mismo nombre en
+// `./auth/callbacks.js` es la decisión de autorización. Se renombra al
+// importarlo para que no choquen.
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [Google],
   pages: {
     signIn: '/entrar',
     error: '/entrar',
   },
-  callbacks: {
-    /**
-     * La lista de permitidos es la única autorización del sistema. Devolver
-     * `false` manda a la pantalla de entrada con el motivo, en vez de dejar a
-     * la persona en un bucle de redirección.
-     */
-    signIn({ user }) {
-      return correoPermitido(user.email, process.env.CORREOS_PERMITIDOS)
-    },
-
-    /**
-     * El id de la fila de `users` viaja en el token, no se consulta en cada
-     * petición: la sesión va en cookie firmada y este callback solo corre al
-     * entrar o al refrescar el token.
-     */
-    async jwt({ token, user }) {
-      if (user?.email) {
-        token.idDeUsuario = await registrarPersona(user.email, user.name ?? null)
-      }
-      return token
-    },
-
-    session({ session, token }) {
-      if (typeof token.idDeUsuario === 'string') {
-        session.user.id = token.idDeUsuario
-      }
-      return session
-    },
-  },
+  // Los tres callbacks viven en `./auth/callbacks.js`, exportados y con
+  // nombre: es la única forma de invocarlos desde una prueba, porque este
+  // módulo construye NextAuth al cargarse.
+  callbacks: { signIn: autorizarInicioDeSesion, jwt, session },
 })
 
 /**

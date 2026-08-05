@@ -14,6 +14,12 @@ export default async function PaginaDeEntrada({
   // devuelve false, que aquí significa exactamente una cosa: el correo no está
   // en la lista.
   const rechazado = error === 'AccessDenied'
+  // `Configuration` es lo que llega cuando `registrarPersona` falla: `@auth/core`
+  // envuelve cualquier error del callback en `CallbackRouteError`, que no expone
+  // al cliente. No es un rechazo por lista —es una caída del sistema— así que
+  // lleva un color y un mensaje distintos: confundirlo con el rechazo manda a
+  // la persona a pedir un permiso que ya tiene.
+  const fallaDelSistema = error === 'Configuration'
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
@@ -26,6 +32,16 @@ export default async function PaginaDeEntrada({
         >
           Esa cuenta no está en la lista de personas autorizadas. Si crees que debería estarlo,
           pídele a quien administra el sistema que agregue tu correo.
+        </div>
+      )}
+
+      {fallaDelSistema && (
+        <div
+          role="alert"
+          className="max-w-sm rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900"
+        >
+          Hubo un problema del sistema al iniciar tu sesión. No es tu cuenta: intenta de nuevo más
+          tarde.
         </div>
       )}
 
