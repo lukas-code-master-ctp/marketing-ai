@@ -39,6 +39,13 @@ export const signIn: NonNullable<Callbacks['signIn']> = ({ user, profile }) => {
  * `null` aquí invalida el token, y Auth.js limpia la cookie sola en esa misma
  * petición. Esto no exige guardar estado de sesión: sigue siendo la misma
  * variable de entorno, comprobada de nuevo.
+ *
+ * `../auth.config.ts` tiene un `jwt` gemelo para la mitad edge (la que usa el
+ * middleware), con la misma revalidación pero sin `registrarPersona`. Las dos
+ * mitades se prueban por separado (`callbacks.test.ts` acá, `auth.config.test.ts`
+ * allá) porque una cookie firmada tiene que invalidarse en las dos, no solo en
+ * la que llega al servidor completo: si se endurece una revalidación sin la
+ * otra, queda un agujero.
  */
 export const jwt: NonNullable<Callbacks['jwt']> = async ({ token, user }) => {
   const correo = user?.email ?? token.email

@@ -20,5 +20,13 @@ import { authConfig } from './auth.config.js'
 export const { auth: middleware } = NextAuth(authConfig)
 
 export const config = {
-  matcher: ['/((?!api/auth|entrar|_next/static|_next/image|favicon.ico).*)'],
+  // `(?:/|$)` cierra cada alternativa en un límite de segmento completo: sin
+  // eso, la exclusión es por prefijo de cadena y no por segmento de ruta, y
+  // `entrar` como prefijo deja libre también `/entrarme`, igual que
+  // `api/auth` dejaría libre `/api/authz`. Hoy no existe ninguna ruta así,
+  // pero es una trampa puesta para el futuro: la primera ruta nueva que
+  // empiece igual quedaría sin protección en silencio.
+  matcher: [
+    '/((?!api/auth(?:/|$)|entrar(?:/|$)|_next/static(?:/|$)|_next/image(?:/|$)|favicon\\.ico(?:/|$)).*)',
+  ],
 }

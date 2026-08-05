@@ -346,6 +346,12 @@ export async function aprobarGrilla(
  * `borrador` tampoco, para que el comando nunca dé por hecho un cambio que
  * no ocurrió. Se identifica por marca y mes, no por id, porque es la clave
  * con la que trabaja la línea de comandos.
+ *
+ * `approved_by` no se toca acá: conserva a quien aprobó por última vez
+ * mientras el estado vuelve a `borrador`. Es un registro histórico de la
+ * última aprobación, no una marca de "aprobación vigente" — la grilla ya
+ * no está aprobada, lo dice `status`, y quien lea la fila no debería
+ * confundir una cosa con la otra.
  */
 export async function reabrirGrilla(
   db: BaseDeDatos,

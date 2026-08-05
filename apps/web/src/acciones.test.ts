@@ -114,6 +114,36 @@ describe('las Server Actions exigen sesión', () => {
   })
 })
 
+describe('las Server Actions pasan el id de la sesión al dominio', () => {
+  // `ejecutar` le pasa `usuarioId` a `fn`, y `aprobarGrillaAccion`,
+  // `reabrirGrillaAccion` y `guardarPerfilAction` lo reenvían como tercer
+  // argumento a la operación de dominio. Sin esta prueba nada se pone rojo si
+  // alguien quita ese argumento: las pruebas de "exige sesión" de más arriba
+  // solo comprueban que la sesión exista, no que su id llegue hasta la
+  // columna de autoría. Este es el único tramo end-to-end —desde la sesión
+  // simulada hasta la fila en la base— de lo que esta rama entrega.
+  it('aprobar deja approved_by con el id de la sesión activa', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await sembrarConGrilla(db)
+      const [plan] = await db.select().from(esquema.contentPlans)
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+      vi.mocked(sesionActual).mockResolvedValue({ id: persona!.id, email: 'lukas@ejemplo.cl' })
+
+      const r = await aprobarGrillaAccion('parcelas', '2026-09', plan!.id)
+
+      expect(r.ok).toBe(true)
+      const [despues] = await db
+        .select({ approvedBy: esquema.contentPlans.approvedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(despues!.approvedBy).toBe(persona!.id)
+    })
+  })
+})
+
 describe('guardarPerfilAction parsea el JSON dentro de la guarda de sesión', () => {
   it('sin sesión, un JSON inválido rechaza por falta de sesión y no por el JSON', async () => {
     // Si el parseo ocurriera antes de la guarda (como antes de este cambio),

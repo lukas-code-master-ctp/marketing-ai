@@ -442,7 +442,7 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
-  it('aprobar registra quién lo hizo, y sin usuario deja null', async () => {
+  it('aprobar y reabrir registran quién lo hizo, y sin usuario dejan null', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)
       const [plan] = await db.select().from(esquema.contentPlans)
@@ -459,6 +459,27 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
         .where(eq(esquema.contentPlans.id, plan!.id))
       expect(conAutor!.approvedBy).toBe(persona!.id)
 
+      // Reabrir CON usuario: `reopenedBy` tiene que quedar con su id. Esta es
+      // la mitad que la versión anterior de esta prueba nunca ejercitaba, así
+      // que `reopenedBy: usuarioId ?? null` en `reabrirGrilla` no tenía
+      // ninguna cobertura, ni positiva ni negativa.
+      await reabrirGrilla(
+        db,
+        ref.organizationId,
+        { slug: 'parcelas', mes: '2026-09' },
+        persona!.id,
+      )
+
+      const [conReabridor] = await db
+        .select({ reopenedBy: esquema.contentPlans.reopenedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(conReabridor!.reopenedBy).toBe(persona!.id)
+
+      // Vuelve a aprobar (quién lo hace esta vez no importa para esta prueba)
+      // solo para poder reabrir una segunda vez sin usuario.
+      await aprobarGrilla(db, ref.organizationId, plan!.id)
+
       await reabrirGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-09' })
 
       const [sinAutor] = await db
@@ -466,7 +487,9 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
         .from(esquema.contentPlans)
         .where(eq(esquema.contentPlans.id, plan!.id))
       // Sin usuario no falla: `null` significa "lo hizo el sistema", que es lo
-      // que pasa cuando reabre el CLI.
+      // que pasa cuando reabre el CLI. Como la aserción anterior ya probó que
+      // `reopenedBy` SÍ queda escrito cuando hay usuario, este `null` ahora es
+      // una regresión real del `?? null` y no un valor que nunca se tocó.
       expect(sinAutor!.reopenedBy).toBeNull()
     })
   })
