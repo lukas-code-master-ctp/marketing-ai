@@ -2,6 +2,7 @@
 
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
+import { sesionActual } from './auth.js'
 import { conexion, organizacionPorDefecto } from './datos.js'
 import {
   aprobarGrilla,
@@ -26,18 +27,38 @@ export type Resultado<T = null> =
   | { ok: false; mensaje: string; reintentable: boolean }
 
 /**
- * Resuelve la organización, ejecuta la operación de dominio, revalida la
- * ruta afectada y traduce el error. Los mensajes del dominio ya están en
- * español, ya nombran la marca por su slug y ya explican el remedio: se
- * muestran tal cual, sin envolverlos en un texto genérico.
+ * Resuelve la sesión, ejecuta la operación de dominio, revalida la ruta y
+ * traduce el error. Los mensajes del dominio ya están en español, ya nombran
+ * la marca por su slug y ya explican el remedio: se muestran tal cual, sin
+ * envolverlos en un texto genérico.
+ *
+ * **La comprobación de sesión vive aquí y no en las páginas a propósito.** Una
+ * Server Action es un endpoint HTTP con identificador estable: cualquiera que
+ * lo conozca puede llamarlo sin pasar nunca por la página que lo renderiza, así
+ * que proteger el componente de servidor no protege la acción. Al estar en el
+ * ayudante por el que pasan las nueve, una acción nueva queda protegida por
+ * construcción — y una que no lo use se ve en la revisión.
  */
 async function ejecutar<T = null>(
   ruta: string,
-  fn: (db: Awaited<ReturnType<typeof conexion>>, organizationId: string) => Promise<T>,
+  fn: (
+    db: Awaited<ReturnType<typeof conexion>>,
+    organizationId: string,
+    usuarioId: string,
+  ) => Promise<T>,
 ): Promise<Resultado<T>> {
+  const sesion = await sesionActual()
+  if (!sesion) {
+    return {
+      ok: false,
+      mensaje: 'Tu sesión no está activa. Vuelve a entrar para seguir.',
+      reintentable: false,
+    }
+  }
+
   const db = conexion()
   try {
-    const datos = await fn(db, await organizacionPorDefecto(db))
+    const datos = await fn(db, await organizacionPorDefecto(db), sesion.id)
     revalidatePath(ruta)
     return { ok: true, datos }
   } catch (error) {
