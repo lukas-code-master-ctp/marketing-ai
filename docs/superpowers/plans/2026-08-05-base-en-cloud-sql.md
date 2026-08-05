@@ -125,9 +125,25 @@ Esperado: una fila con `uno: 1` y la versión de Postgres.
 
 Lo anterior prueba tu instancia. Esto prueba el supuesto del diseño.
 
-Crea un proyecto nuevo y desechable en Vercel —**no** el del gestor— con una sola ruta de API que haga exactamente lo del Step 3 y devuelva el resultado como JSON. Un `app/api/prueba/route.ts` con `export const runtime = 'nodejs'` alcanza.
+Crea un proyecto nuevo y desechable en Vercel —**no** el del gestor— con una sola ruta de API que devuelva el resultado como JSON. Un `app/api/prueba/route.js` con `export const runtime = 'nodejs'` alcanza.
 
-Carga las cuatro variables más el contenido del JSON de la cuenta de servicio, y despliega.
+**No es exactamente lo del Step 3, y la diferencia es el punto.** Allá las credenciales salen de `GOOGLE_APPLICATION_CREDENTIALS`, que espera **la ruta a un archivo**. En Vercel no hay archivos que poner: el JSON de la cuenta de servicio viaja en una variable de entorno y se le entrega al conector como objeto, por su opción `auth`:
+
+```js
+import { Connector } from '@google-cloud/cloud-sql-connector'
+import { GoogleAuth } from 'google-auth-library'
+
+const conector = new Connector({
+  auth: new GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_CREDENCIALES_JSON),
+    scopes: ['https://www.googleapis.com/auth/sqlservice.admin'],
+  }),
+})
+```
+
+Ese es el camino que va a usar el gestor en producción, así que es el que hay que probar. Un `new Connector()` a secas cae a las credenciales por omisión, que en Vercel no existen.
+
+Carga las cuatro variables más `GOOGLE_CREDENCIALES_JSON` con el contenido del JSON, y despliega.
 
 **Lo que hay que observar, en orden:**
 
@@ -416,7 +432,15 @@ Crea `packages/db/src/destino.ts`:
  */
 export type Destino =
   | { tipo: 'url'; url: string }
-  | { tipo: 'cloud-sql'; instancia: string; usuario: string; clave: string; base: string }
+  | {
+      tipo: 'cloud-sql'
+      instancia: string
+      usuario: string
+      clave: string
+      base: string
+      /** El JSON de la cuenta de servicio, tal cual, sin parsear. */
+      credenciales: string
+    }
 
 export function destinoDeConexion(env: Record<string, string | undefined>): Destino {
   const instancia = env.CLOUD_SQL_INSTANCIA?.trim()
@@ -440,9 +464,17 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
     )
   }
 
-  const faltantes = (['CLOUD_SQL_USUARIO', 'CLOUD_SQL_CLAVE', 'CLOUD_SQL_BASE'] as const).filter(
-    (nombre) => !env[nombre]?.trim(),
-  )
+  const faltantes = (
+    [
+      'CLOUD_SQL_USUARIO',
+      'CLOUD_SQL_CLAVE',
+      'CLOUD_SQL_BASE',
+      // El JSON de la cuenta de servicio. Va como variable y no como archivo
+      // porque en Vercel no hay dónde poner un archivo, y el conector acepta
+      // las credenciales como objeto por su opción `auth`.
+      'GOOGLE_CREDENCIALES_JSON',
+    ] as const
+  ).filter((nombre) => !env[nombre]?.trim())
 
   if (faltantes.length > 0) {
     throw new Error(
@@ -456,9 +488,14 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
     usuario: env.CLOUD_SQL_USUARIO!.trim(),
     clave: env.CLOUD_SQL_CLAVE!,
     base: env.CLOUD_SQL_BASE!.trim(),
+    credenciales: env.GOOGLE_CREDENCIALES_JSON!,
   }
 }
 ```
+
+**Agrega una prueba más a las seis**: que con la instancia y sus datos pero **sin** `GOOGLE_CREDENCIALES_JSON` también falle nombrando la variable. Es el mismo caso peligroso que las otras tres, y sin ella el conector caería a las credenciales por omisión —que en Vercel no existen— y el fallo aparecería recién al desplegar.
+
+Si el JSON viene mal formado, **no lo parsees aquí**: esta función decide el destino, no valida credenciales. Que reviente donde se usa, con el mensaje de `JSON.parse`, es más honesto que un error inventado a medio camino.
 
 La clave **no** lleva `trim()` a propósito: un espacio al final de una contraseña es parte de la contraseña.
 
@@ -477,7 +514,7 @@ Esperado: FAIL en "una instancia incompleta falla en vez de caer a la URL".
 - [ ] **Step 6: Conectar el conector**
 
 ```bash
-pnpm --filter @gc/db add @google-cloud/cloud-sql-connector
+pnpm --filter @gc/db add @google-cloud/cloud-sql-connector google-auth-library
 ```
 
 `packages/db/src/cliente.ts` pasa a resolver el destino:
@@ -485,6 +522,7 @@ pnpm --filter @gc/db add @google-cloud/cloud-sql-connector
 ```ts
 import { Connector } from '@google-cloud/cloud-sql-connector'
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
+import { GoogleAuth } from 'google-auth-library'
 import pg from 'pg'
 import { destinoDeConexion } from './destino.js'
 import { esquema } from './esquema.js'
@@ -509,7 +547,18 @@ export async function crearConexion(): Promise<Conexion> {
     return { db: drizzle(pool, { schema: esquema }), cerrar: () => pool.end() }
   }
 
-  const conector = new Connector()
+  // Las credenciales van como objeto y no por `GOOGLE_APPLICATION_CREDENTIALS`,
+  // que espera una **ruta a un archivo**: en Vercel no hay archivos que poner.
+  // El JSON de la cuenta de servicio viaja en una variable de entorno y se le
+  // entrega al conector por su opción `auth`. Un `new Connector()` a secas cae
+  // a las credenciales por omisión, que en Vercel no existen — y eso solo se
+  // descubre desplegando.
+  const conector = new Connector({
+    auth: new GoogleAuth({
+      credentials: JSON.parse(destino.credenciales),
+      scopes: ['https://www.googleapis.com/auth/sqlservice.admin'],
+    }),
+  })
   const opciones = await conector.getOptions({
     instanceConnectionName: destino.instancia,
     ipType: 'PUBLIC',
@@ -562,6 +611,7 @@ Agrega a `.env.example`:
 # CLOUD_SQL_USUARIO=
 # CLOUD_SQL_CLAVE=
 # CLOUD_SQL_BASE=
+# GOOGLE_CREDENCIALES_JSON=
 ```
 
 **Comentadas, no vacías.** Declararlas vacías es lo que rompió el arranque de un clon nuevo en la rama anterior: una variable vacía no es una variable ausente, y `??` no cae al respaldo con cadena vacía.
@@ -572,7 +622,7 @@ Agrega a `.env.example`:
 pnpm -r typecheck && pnpm test 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'Tests +[0-9]+ (passed|failed)' && pnpm --filter @gc/web build 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E "^[┌├└].*(ƒ|○)"
 ```
 
-Esperado: typecheck limpio, **456 pruebas** —o 457 si la Task 2 sumó la del SQLSTATE—, y las cuatro rutas del dominio en `ƒ`.
+Esperado: typecheck limpio, **452 pruebas** —445 más las 7 de `destino.test.ts`—, y las cuatro rutas del dominio en `ƒ`.
 
 ```bash
 git add -A
