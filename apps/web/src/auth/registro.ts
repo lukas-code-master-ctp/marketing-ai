@@ -14,7 +14,7 @@ import { conexion } from '../datos.js'
  * módulo, y eso exige variables de entorno que en pruebas no existen.
  */
 export async function registrarPersona(email: string, name: string | null): Promise<string> {
-  const db = conexion()
+  const db = await conexion()
 
   const [fila] = await db
     .insert(esquema.users)

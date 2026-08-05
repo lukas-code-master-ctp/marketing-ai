@@ -16,7 +16,9 @@
     "migraciones:aplicar": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@google-cloud/cloud-sql-connector": "^1.11.3",
     "drizzle-orm": "^0.36.0",
+    "google-auth-library": "^10.6.2",
     "pg": "^8.22.0"
   },
   "devDependencies": {

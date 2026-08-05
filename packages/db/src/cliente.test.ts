@@ -1,9 +1,8 @@
 import { esViolacionDeUnica } from '@gc/shared'
 import { sql } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
-import { crearConexion } from './cliente.js'
 import { esquema } from './esquema.js'
-import { conBaseDeDatosDePrueba } from './pruebas/entorno.js'
+import { conBaseDeDatosDePrueba, crearConexionDePrueba } from './pruebas/entorno.js'
 
 /**
  * `clasificarError` —el único punto del sistema donde se decide reintentar—
@@ -60,7 +59,7 @@ describe('conexión ociosa caída', () => {
 
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-      const { db, cerrar } = crearConexion(url)
+      const { db, cerrar } = await crearConexionDePrueba(url)
       try {
         // Fuerza al pool a abrir un cliente y captura el pid de su backend.
         // `pool.query()` —lo que usa drizzle por debajo— libera el cliente al
@@ -71,7 +70,7 @@ describe('conexión ociosa caída', () => {
         const pid = rows[0]?.pg_backend_pid
         expect(typeof pid).toBe('number')
 
-        const admin = crearConexion(url)
+        const admin = await crearConexionDePrueba(url)
         try {
           await admin.db.execute(sql`select pg_terminate_backend(${pid})`)
 

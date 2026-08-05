@@ -53,9 +53,6 @@ async function principal(): Promise<void> {
     return
   }
 
-  const url = process.env.DATABASE_URL
-  if (!url) throw new Error('Falta DATABASE_URL')
-
   const env = values.seco ? { ...process.env, IA_EN_SECO: 'true' } : process.env
   // Las rutas del entorno y de la línea de comandos son relativas a donde el
   // usuario está parado, no a apps/cli.
@@ -65,7 +62,9 @@ async function principal(): Promise<void> {
       ? { carpetaDeMuestras: resolverDesdeInvocacion(env.CARPETA_DE_MUESTRAS) }
       : {}),
   }
-  const { db, cerrar } = crearConexion(url)
+  // El CLI corre siempre local, contra Docker: nunca configura CLOUD_SQL_*, así
+  // que `crearConexion` resuelve por `DATABASE_URL` (ver `destinoDeConexion`).
+  const { db, cerrar } = await crearConexion()
 
   try {
     const organizationId = await resolverOrganizacion(db, {

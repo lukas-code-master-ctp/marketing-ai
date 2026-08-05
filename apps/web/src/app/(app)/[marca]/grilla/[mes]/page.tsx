@@ -39,7 +39,7 @@ export default async function PaginaDeGrilla({
     notFound()
   }
 
-  const db = conexion()
+  const db = await conexion()
   const organizationId = await organizacionPorDefecto(db)
   const grilla = await grillaDelMes(db, organizationId, marca, mes)
 

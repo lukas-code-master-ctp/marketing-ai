@@ -12,7 +12,7 @@ export default async function PaginaDePerfil({
   params: Promise<{ marca: string }>
 }) {
   const { marca } = await params
-  const db = conexion()
+  const db = await conexion()
   const organizationId = await organizacionPorDefecto(db)
 
   // Que la marca no exista ya no llega hasta acá: lo resuelve

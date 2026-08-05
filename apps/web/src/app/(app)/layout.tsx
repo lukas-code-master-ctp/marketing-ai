@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
  * `../layout.tsx` para el resto del razonamiento.
  */
 export default async function LayoutDeApp({ children }: { children: ReactNode }) {
-  const db = conexion()
+  const db = await conexion()
   const marcas = await marcasDeLaOrganizacion(db, await organizacionPorDefecto(db))
 
   return (

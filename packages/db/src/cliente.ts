@@ -1,8 +1,13 @@
+import { Connector, IpAddressTypes } from '@google-cloud/cloud-sql-connector'
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
+import { GoogleAuth } from 'google-auth-library'
 import pg from 'pg'
+import { destinoDeConexion } from './destino.js'
 import { esquema } from './esquema.js'
 
 export type BaseDeDatos = NodePgDatabase<typeof esquema>
+
+export type Conexion = { db: BaseDeDatos; cerrar: () => Promise<void> }
 
 /**
  * `Pool` extiende `EventEmitter`, y su `makeIdleListener` interno emite
@@ -34,11 +39,57 @@ function noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool: pg.Pool): void {
   })
 }
 
-export function crearConexion(url: string): { db: BaseDeDatos; cerrar: () => Promise<void> } {
-  // `pg` es CommonJS: la importación por defecto y después `pg.Pool` es la
-  // forma que funciona desde ESM sin depender de la interoperabilidad de
-  // nombres, que para este paquete no es estable entre versiones de Node.
-  const pool = new pg.Pool({ connectionString: url, max: 5 })
+/**
+ * Abre la conexión que corresponda al entorno. Ver `destinoDeConexion`.
+ *
+ * `max: 5` es bajo a propósito: en Vercel cada invocación corre en su propio
+ * proceso y abre su propio pool, así que el límite de conexiones de la
+ * instancia se reparte entre todas las que estén vivas a la vez. El modo de
+ * falla —agotar las conexiones— no aparece nunca en local.
+ */
+export async function crearConexion(): Promise<Conexion> {
+  const destino = destinoDeConexion(process.env)
+
+  if (destino.tipo === 'url') {
+    // `pg` es CommonJS: la importación por defecto y después `pg.Pool` es la
+    // forma que funciona desde ESM sin depender de la interoperabilidad de
+    // nombres, que para este paquete no es estable entre versiones de Node.
+    const pool = new pg.Pool({ connectionString: destino.url, max: 5 })
+    noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool)
+    return { db: drizzle(pool, { schema: esquema }), cerrar: () => pool.end() }
+  }
+
+  // Las credenciales van como objeto y no por `GOOGLE_APPLICATION_CREDENTIALS`,
+  // que espera una **ruta a un archivo**: en Vercel no hay archivos que poner.
+  // El JSON de la cuenta de servicio viaja en una variable de entorno y se le
+  // entrega al conector por su opción `auth`. Un `new Connector()` a secas cae
+  // a las credenciales por omisión, que en Vercel no existen — y eso solo se
+  // descubre desplegando.
+  const conector = new Connector({
+    auth: new GoogleAuth({
+      credentials: JSON.parse(destino.credenciales),
+      scopes: ['https://www.googleapis.com/auth/sqlservice.admin'],
+    }),
+  })
+  const opciones = await conector.getOptions({
+    instanceConnectionName: destino.instancia,
+    ipType: IpAddressTypes.PUBLIC,
+  })
+
+  const pool = new pg.Pool({
+    ...opciones,
+    user: destino.usuario,
+    password: destino.clave,
+    database: destino.base,
+    max: 5,
+  })
   noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool)
-  return { db: drizzle(pool, { schema: esquema }), cerrar: () => pool.end() }
+
+  return {
+    db: drizzle(pool, { schema: esquema }),
+    cerrar: async () => {
+      await pool.end()
+      conector.close()
+    },
+  }
 }

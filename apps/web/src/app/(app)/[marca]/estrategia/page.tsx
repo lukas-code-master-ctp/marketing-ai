@@ -24,7 +24,7 @@ export default async function PaginaDeEstrategia({
   params: Promise<{ marca: string }>
 }) {
   const { marca } = await params
-  const db = conexion()
+  const db = await conexion()
   const organizationId = await organizacionPorDefecto(db)
 
   const mes = mesActual()

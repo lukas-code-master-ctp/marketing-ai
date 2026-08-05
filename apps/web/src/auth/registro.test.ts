@@ -10,7 +10,7 @@ const { registrarPersona } = await import('./registro.js')
 describe('registrarPersona', () => {
   it('crea la fila en el primer inicio de sesión', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      vi.mocked(conexion).mockReturnValue(db)
+      vi.mocked(conexion).mockResolvedValue(db)
 
       const id = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
 
@@ -23,7 +23,7 @@ describe('registrarPersona', () => {
 
   it('el segundo inicio de sesión no duplica y devuelve el mismo id', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      vi.mocked(conexion).mockReturnValue(db)
+      vi.mocked(conexion).mockResolvedValue(db)
 
       const primero = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
       const segundo = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
@@ -35,7 +35,7 @@ describe('registrarPersona', () => {
 
   it('refresca el nombre sin cambiar la identidad', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      vi.mocked(conexion).mockReturnValue(db)
+      vi.mocked(conexion).mockResolvedValue(db)
 
       const id = await registrarPersona('lukas@ejemplo.cl', 'Lukas')
       const mismo = await registrarPersona('lukas@ejemplo.cl', 'Lukas Rencoret')

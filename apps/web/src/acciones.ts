@@ -61,7 +61,7 @@ async function ejecutar<T = null>(
       }
     }
 
-    const db = conexion()
+    const db = await conexion()
     const datos = await fn(db, await organizacionPorDefecto(db), sesion.id)
     revalidatePath(ruta)
     return { ok: true, datos }

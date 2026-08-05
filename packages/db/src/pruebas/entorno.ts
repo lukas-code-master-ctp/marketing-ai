@@ -1,10 +1,29 @@
 import { sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { fileURLToPath } from 'node:url'
-import { crearConexion, type BaseDeDatos } from '../cliente.js'
+import { crearConexion, type BaseDeDatos, type Conexion } from '../cliente.js'
 import { esquema } from '../esquema.js'
 
 const CARPETA_MIGRACIONES = fileURLToPath(new URL('../../migraciones', import.meta.url))
+
+/**
+ * `crearConexion` ya no recibe una URL: resuelve su destino de
+ * `process.env.DATABASE_URL` (ver `destinoDeConexion`). Las pruebas quieren
+ * conectar a `DATABASE_URL_TEST`, no a esa — así que este ayudante le presta
+ * la variable durante la llamada y la devuelve a su valor original apenas
+ * termina, para no dejarla pisada para el resto del proceso ni para el resto
+ * del archivo de prueba que la haya llamado.
+ */
+export async function crearConexionDePrueba(url: string): Promise<Conexion> {
+  const original = process.env.DATABASE_URL
+  process.env.DATABASE_URL = url
+  try {
+    return await crearConexion()
+  } finally {
+    if (original === undefined) delete process.env.DATABASE_URL
+    else process.env.DATABASE_URL = original
+  }
+}
 
 /**
  * Borra los disparadores y las funciones que dejó viva una corrida anterior.
@@ -67,7 +86,7 @@ export async function conBaseDeDatosDePrueba(
   const url = process.env.DATABASE_URL_TEST
   if (!url) throw new Error('Falta DATABASE_URL_TEST')
 
-  const { db, cerrar } = crearConexion(url)
+  const { db, cerrar } = await crearConexionDePrueba(url)
   try {
     // Antes de migrar: alguna migración rellena columnas con UPDATE y un
     // disparador residual sobre esa tabla la haría fallar.

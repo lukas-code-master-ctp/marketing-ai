@@ -32,7 +32,7 @@ export default async function LayoutDeMarca({
 }) {
   const { marca } = await params
 
-  const db = conexion()
+  const db = await conexion()
   try {
     await resolverMarca(db, await organizacionPorDefecto(db), marca)
   } catch (error) {

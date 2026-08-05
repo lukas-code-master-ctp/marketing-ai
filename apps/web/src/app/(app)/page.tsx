@@ -30,7 +30,7 @@ export default async function Inicio({
   searchParams: Promise<{ nueva?: string | string[] }>
 }) {
   const { nueva } = await searchParams
-  const db = conexion()
+  const db = await conexion()
   const marcas = await marcasDeLaOrganizacion(db, await organizacionPorDefecto(db))
 
   if (marcas.length > 0 && nueva === undefined) {

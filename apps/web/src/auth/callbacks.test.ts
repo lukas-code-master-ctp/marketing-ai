@@ -106,7 +106,7 @@ describe('jwt', () => {
   // el `sub` que entrega Google (aquí, `user.id`).
   it('pone en el token el id de la fila de `users`, no el id que entrega Google', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      vi.mocked(conexion).mockReturnValue(db)
+      vi.mocked(conexion).mockResolvedValue(db)
 
       const resultado = await jwt({
         token: token({ email: 'lukas@ejemplo.cl' }),
