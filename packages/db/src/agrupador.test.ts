@@ -30,4 +30,26 @@ describe('usaAgrupador', () => {
   it('una cadena que no es una URL no revienta', () => {
     expect(usaAgrupador('esto no es una url')).toBe(false)
   })
+
+  it('reconoce el agrupador aunque el anfitrión tenga mayúsculas', () => {
+    // Regresión: postgres:// no es un esquema "especial" para el parser WHATWG
+    // URL, así que Node no normaliza el hostname a minúsculas. Un anfitrión
+    // agrupado con cualquier mayúscula dejaba las sentencias preparadas
+    // encendidas contra PgBouncer, un fallo que solo se ve en producción.
+    expect(
+      usaAgrupador(
+        'postgres://u:p@ep-COOL-NAME-123456-POOLER.us-east-2.aws.neon.tech/gestor',
+      ),
+    ).toBe(true)
+  })
+
+  it('no confunde un anfitrión que contiene "-pooler" como parte de otra palabra', () => {
+    // Regresión: .includes('-pooler') coincide en cualquier posición de la
+    // cadena. Un anfitrión como "db-poolerless..." no es el agrupador de Neon,
+    // pero coincidía igual y apagaba las sentencias preparadas contra un
+    // Postgres que sí las soporta.
+    expect(usaAgrupador('postgres://u:p@db-poolerless.internal.example.com:5432/gestor')).toBe(
+      false,
+    )
+  })
 })
