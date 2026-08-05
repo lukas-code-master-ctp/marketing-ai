@@ -116,10 +116,11 @@ la extiende con el proveedor de Google y los callbacks completos, para todo lo
 que sí corre en Node. Los dos quedan acoplados por el orden del spread con el
 que `auth.ts` combina sus callbacks con los de `authConfig`: ese orden decide
 cuál versión de cada callback compartido gana. El porqué de la partición —el
-choque con el runtime Edge— y el detalle exacto del spread están comentados en
-la cabecera de `apps/web/src/auth.config.ts`; no se repiten aquí para no
-duplicar una línea de código que se desactualizaría en silencio si alguien la
-reordena.
+choque con el runtime Edge— está comentado en la cabecera de
+`apps/web/src/auth.config.ts`; el detalle exacto del spread —qué versión de
+cada callback compartido gana— está comentado en la cabecera de
+`apps/web/src/auth.ts`. No se repiten aquí para no duplicar una línea de
+código que se desactualizaría en silencio si alguien la reordena.
 
 **El middleware necesita su propio callback `authorized`.** `NextAuth(authConfig)`
 a secas no bloquea nada: `handleAuth` de Auth.js arranca con
