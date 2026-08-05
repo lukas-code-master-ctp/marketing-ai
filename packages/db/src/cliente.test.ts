@@ -1,5 +1,7 @@
 import { esViolacionDeUnica } from '@gc/shared'
+import { sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { crearConexion } from './cliente.js'
 import { esquema } from './esquema.js'
 import { conBaseDeDatosDePrueba } from './pruebas/entorno.js'
 
@@ -25,4 +27,74 @@ describe('errores reales del driver', () => {
       expect(esViolacionDeUnica(error)).toBe(true)
     })
   })
+})
+
+/**
+ * `node-postgres` emite `'error'` sobre el `Pool` cuando un cliente OCIOSO se
+ * cae (Postgres reiniciando, un corte de red, o —el caso real, porque la base
+ * se muda a Cloud SQL— el otro extremo cerrando por inactividad). Sin oyente,
+ * ese `'error'` se relanza como excepción no atrapada y tumba el proceso.
+ * `postgres-js`, el driver anterior, no se comportaba así.
+ *
+ * Esta prueba reproduce la caída de verdad: abre una conexión, fuerza al pool
+ * a crear un cliente, lo deja ocioso, y desde OTRA conexión termina ese
+ * backend con `pg_terminate_backend` — exactamente lo que hace un servidor al
+ * cortar una conexión ociosa. Si `crearConexion` no escuchara `'error'`, este
+ * archivo de prueba completo moriría junto con el proceso de Vitest que lo
+ * ejecuta, en vez de fallar con una aserción.
+ */
+describe('conexión ociosa caída', () => {
+  it(
+    'una conexión ociosa terminada por el servidor no tumba el proceso, y la siguiente consulta funciona',
+    async () => {
+      const url = process.env.DATABASE_URL_TEST
+      if (!url) throw new Error('Falta DATABASE_URL_TEST')
+
+      const { db, cerrar } = crearConexion(url)
+      try {
+        // Fuerza al pool a abrir un cliente y captura el pid de su backend.
+        // `pool.query()` —lo que usa drizzle por debajo— libera el cliente al
+        // pool en cuanto la consulta termina, así que queda ocioso de inmediato.
+        const { rows } = await db.execute<{ pg_backend_pid: number }>(
+          sql`select pg_backend_pid()`,
+        )
+        const pid = rows[0]?.pg_backend_pid
+        expect(typeof pid).toBe('number')
+
+        const admin = crearConexion(url)
+        try {
+          await admin.db.execute(sql`select pg_terminate_backend(${pid})`)
+
+          // `pg_terminate_backend` solo pide la señal: no espera a que el
+          // backend termine de verdad. Se sondea `pg_stat_activity` hasta que
+          // desaparece, con un límite, en vez de un `sleep` fijo que sería
+          // escamoso bajo carga.
+          const limite = Date.now() + 5000
+          let desaparecio = false
+          while (Date.now() < limite) {
+            const resultado = await admin.db.execute(
+              sql`select 1 from pg_stat_activity where pid = ${pid}`,
+            )
+            if (resultado.rows.length === 0) {
+              desaparecio = true
+              break
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50))
+          }
+          expect(desaparecio).toBe(true)
+        } finally {
+          await admin.cerrar()
+        }
+
+        // Si el proceso hubiera muerto con la excepción no atrapada, nunca se
+        // llegaría hasta acá. La consulta siguiente toma un cliente nuevo del
+        // pool —el viejo ya fue descartado— y tiene que funcionar igual.
+        const otraVez = await db.execute<{ uno: number }>(sql`select 1 as uno`)
+        expect(otraVez.rows[0]?.uno).toBe(1)
+      } finally {
+        await cerrar()
+      }
+    },
+    15000,
+  )
 })
