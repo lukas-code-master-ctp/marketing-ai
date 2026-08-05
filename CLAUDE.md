@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Neon, hosting en Vercel, autenticación con Google— pero el despliegue en sí todavía no ocurrió. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Neon, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -43,16 +43,29 @@ vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
 contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
 worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
-La app exige sesión. `AUTH_SECRET` hace falta **incluso en local con
-`SESION_DE_DESARROLLO=true`**: el middleware llama a `auth()` de verdad en
-cada petición de página para leer la cookie, y `@auth/core` valida la
-configuración —incluido el secreto— antes de mirar si hay cookie o de correr
-ningún callback. Sin `AUTH_SECRET` la respuesta es un 500 con
-`[auth][error] MissingSecret`, con o sin sesión de desarrollo.
-`SESION_DE_DESARROLLO=true` evita pasar por Google —entra como
-`desarrollo@local`— pero no evita esa validación previa. La variable **se
-ignora fuera de `NODE_ENV=development`**, así que dejarla encendida no abre
-nada en producción.
+La app exige sesión. En local, con `SESION_DE_DESARROLLO=true`, funciona
+**sin** `AUTH_SECRET` — comprobado levantando el servidor con la variable
+vacía: `GET /ruta-inexistente` da 404 y `GET /` da 307 a la grilla, igual que
+con el secreto puesto. Lo que sí queda, en cada petición de página, es
+`[auth][error] MissingSecret` en el log: el middleware llama a `auth()`, que
+internamente pide su propia sesión a `@auth/core` y esa petición interna es
+la que falla por falta de secreto; `parseSessionResponse` traduce esa
+respuesta no-OK en sesión `null` **antes** de llegar al callback
+`authorized`, que con la sesión de desarrollo devuelve `true`
+(`apps/web/src/auth.config.ts`) y deja pasar igual. No hay ningún 500. Con
+`SESION_DE_DESARROLLO=false` tampoco lo hay: el mismo `MissingSecret` queda
+en el log, pero sin sesión real `authorized` deniega y redirige a
+`/entrar?callbackUrl=…`. Y `sesionActual()` (`apps/web/src/auth.ts`)
+cortocircuita antes de llamar a `auth()` cuando hay sesión de desarrollo, así
+que las Server Actions tampoco se ven afectadas.
+
+El costo real de dejar `AUTH_SECRET` vacío en local no es un 500: es ese
+error rojo en el log, en cada petición de página, que quien no sepa esto va a
+perseguir creyendo que algo se rompió. `SESION_DE_DESARROLLO=true` evita
+pasar por Google —entra como `desarrollo@local`— pero no evita esa petición
+interna ni su log. La variable **se ignora fuera de
+`NODE_ENV=development`**, así que dejarla encendida no abre nada en
+producción.
 
 ## Reglas que no son negociables
 
@@ -67,12 +80,16 @@ Cada una existe porque romperla ya costó trabajo real.
 **El agrupador de conexiones de Neon apaga las sentencias preparadas, no al
 revés.** `crearConexion` (`packages/db/src/cliente.ts`) pasa `prepare: false`
 a `postgres-js` cuando `usaAgrupador` (`packages/db/src/agrupador.ts`) detecta
-el sufijo `-pooler` en el anfitrión de la URL — la convención con la que Neon
-marca su cadena agrupada, que corre sobre PgBouncer en modo transacción, y ese
-modo no soporta las sentencias preparadas que `postgres-js` usa por omisión.
-Contra el Postgres local de Docker, sin `-pooler` en el anfitrión, esto nunca
-se activa: un cambio que lo rompa no falla en local ni en `pnpm test`, solo en
-producción, con un error que no dice nada útil.
+que la **primera etiqueta del anfitrión** de la URL —lo que va antes del
+primer punto, en minúsculas— termina en `-pooler`: por ejemplo,
+`ep-cool-name-123456-pooler` en
+`ep-cool-name-123456-pooler.us-east-2.aws.neon.tech`. Es la convención con la
+que Neon marca su cadena agrupada, que corre sobre PgBouncer en modo
+transacción, y ese modo no soporta las sentencias preparadas que
+`postgres-js` usa por omisión. Contra el Postgres local de Docker, sin
+`-pooler` en esa primera etiqueta, esto nunca se activa: un cambio que lo
+rompa no falla en local ni en `pnpm test`, solo en producción, con un error
+que no dice nada útil.
 
 **Idioma.** Esquema y columnas en inglés `snake_case`. API de dominio, variables, comentarios, prompts y **todo texto que ve el usuario** en español.
 
@@ -107,9 +124,10 @@ reordena.
 **El middleware necesita su propio callback `authorized`.** `NextAuth(authConfig)`
 a secas no bloquea nada: `handleAuth` de Auth.js arranca con
 `let authorized = true`, y sin ese callback deja pasar cualquier petición
-aunque no haya sesión. Vive en `apps/web/src/middleware.ts`, como
-`export const { auth: middleware } = NextAuth(authConfig)` — no en la raíz del
-paquete, porque este proyecto usa `src/app`.
+aunque no haya sesión. El callback vive en `apps/web/src/auth.config.ts`,
+compartido con `auth.ts` (ver arriba); `apps/web/src/middleware.ts` solo lo
+consume, con `export const { auth: middleware } = NextAuth(authConfig)` — no
+en la raíz del paquete, porque este proyecto usa `src/app`.
 
 **Sacar a alguien de `CORREOS_PERMITIDOS` le quita la sesión de inmediato**,
 porque el callback `jwt` revalida la lista en cada lectura, no solo al entrar.
@@ -236,13 +254,15 @@ la resuelve contra Neon con sus propias variables de entorno — la regla del
 `.env` único no cambia por esto.
 
 Neon entrega dos cadenas de conexión distintas, y confundirlas rompe cosas que
-solo se ven en producción: la **agrupada** (el anfitrión termina en
-`-pooler`) es la que va en Vercel, porque cada invocación de una función
+solo se ven en producción: la **agrupada** —por ejemplo
+`postgres://usuario:clave@ep-cool-name-123456-pooler.us-east-2.aws.neon.tech/gestor`,
+donde la primera etiqueta del anfitrión, `ep-cool-name-123456-pooler`, termina
+en `-pooler`— es la que va en Vercel, porque cada invocación de una función
 serverless abre su propia conexión y sin agrupador Postgres se queda sin cupo
 — es también la que activa `prepare: false` (ver arriba). La **directa**, sin
-agrupar, es la que hay que usar para aplicar migraciones a mano, porque
-PgBouncer en modo transacción no maneja bien las sentencias que las
-migraciones necesitan.
+ese sufijo en el anfitrión (`ep-cool-name-123456.us-east-2.aws.neon.tech`), es
+la que hay que usar para aplicar migraciones a mano, porque PgBouncer en modo
+transacción no maneja bien las sentencias que las migraciones necesitan.
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
