@@ -2,10 +2,10 @@ import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la grilla y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
 import type { TipoEstrategia } from '@gc/strategy'
-import { mesActual } from '../../../calendario.js'
-import { conexion, organizacionPorDefecto } from '../../../datos.js'
-import { BotonGenerar } from '../../../componentes/BotonGenerar.js'
-import { EstadoDeCorrida } from '../../../componentes/EstadoDeCorrida.js'
+import { mesActual } from '../../../../calendario.js'
+import { conexion, organizacionPorDefecto } from '../../../../datos.js'
+import { BotonGenerar } from '../../../../componentes/BotonGenerar.js'
+import { EstadoDeCorrida } from '../../../../componentes/EstadoDeCorrida.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
 // no llegan hasta acá. Sin este, Next prerenderiza la estrategia congelada en

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
-import { mesActual } from '../calendario.js'
-import { FormularioDeMarca } from '../componentes/FormularioDeMarca.js'
-import { conexion, marcasDeLaOrganizacion, organizacionPorDefecto } from '../datos.js'
+import { mesActual } from '../../calendario.js'
+import { FormularioDeMarca } from '../../componentes/FormularioDeMarca.js'
+import { conexion, marcasDeLaOrganizacion, organizacionPorDefecto } from '../../datos.js'
 
 // Sin esto Next prerenderiza la ruta y congela el mes y la marca en el momento
 // del build: despliegas en agosto y en septiembre sigue redirigiendo a agosto.

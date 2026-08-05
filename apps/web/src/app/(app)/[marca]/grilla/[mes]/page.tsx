@@ -3,13 +3,13 @@ import { notFound } from 'next/navigation'
 import { corridaDe, grillaDelMes } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la estrategia y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
-import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../calendario.js'
-import { conexion, organizacionPorDefecto } from '../../../../datos.js'
-import { BotonAprobarGrilla } from '../../../../componentes/BotonAprobarGrilla.js'
-import { BotonGenerar } from '../../../../componentes/BotonGenerar.js'
-import { BotonReabrirGrilla } from '../../../../componentes/BotonReabrirGrilla.js'
-import { EstadoDeCorrida } from '../../../../componentes/EstadoDeCorrida.js'
-import { RejillaDelMes } from '../../../../componentes/RejillaDelMes.js'
+import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../../calendario.js'
+import { conexion, organizacionPorDefecto } from '../../../../../datos.js'
+import { BotonAprobarGrilla } from '../../../../../componentes/BotonAprobarGrilla.js'
+import { BotonGenerar } from '../../../../../componentes/BotonGenerar.js'
+import { BotonReabrirGrilla } from '../../../../../componentes/BotonReabrirGrilla.js'
+import { EstadoDeCorrida } from '../../../../../componentes/EstadoDeCorrida.js'
+import { RejillaDelMes } from '../../../../../componentes/RejillaDelMes.js'
 
 // `[marca]/grilla/[mes]` es un árbol de rutas propio: el `force-dynamic` de
 // `/` (Task 2) no llega hasta acá. Sin este, Next prerenderiza la grilla y

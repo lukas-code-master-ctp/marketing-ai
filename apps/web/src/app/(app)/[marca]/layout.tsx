@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import { ErrorDeDominio } from '@gc/shared'
 import { resolverMarca } from '@gc/operaciones'
 import type { ReactNode } from 'react'
-import { conexion, organizacionPorDefecto } from '../../datos.js'
+import { conexion, organizacionPorDefecto } from '../../../datos.js'
 import { NavDeSeccion } from './nav-de-seccion.js'
 
 // El layout consulta la base para resolver la marca, así que tampoco puede
@@ -11,8 +11,8 @@ import { NavDeSeccion } from './nav-de-seccion.js'
 export const dynamic = 'force-dynamic'
 
 /**
- * El encabezado con el selector de marca ya vive en el layout raíz
- * (`app/layout.tsx`, Task 2): este layout no lo repite, solo agrega la
+ * El encabezado con el selector de marca ya vive en el layout del grupo
+ * `(app)` (`app/(app)/layout.tsx`): este layout no lo repite, solo agrega la
  * navegación de sección (Grilla / Perfil / Estrategia) por debajo, propia de
  * cualquier ruta bajo `[marca]`.
  *
