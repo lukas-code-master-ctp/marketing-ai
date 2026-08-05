@@ -35,13 +35,13 @@ export type Resultado<T = null> =
  * **La comprobación de sesión vive aquí y no en las páginas a propósito.** Una
  * Server Action es un endpoint HTTP con identificador estable: cualquiera que
  * lo conozca puede llamarlo sin pasar nunca por la página que lo renderiza, así
- * que proteger el componente de servidor no protege la acción. Al estar en el
- * ayudante por el que pasan las nueve, una acción nueva declarada en este
- * archivo queda protegida por construcción — y una que no lo use se ve en la
- * revisión. La garantía es de este archivo, no del proyecto: un `'use server'`
+ * que proteger el componente de servidor no protege la acción. Lo que protege
+ * es **pasar por este ayudante**, no vivir en este archivo: una acción nueva
+ * que lo llame queda protegida por construcción, y una que no lo use se ve en
+ * la revisión — así viva acá mismo o en otro archivo. Un `'use server'`
  * declarado en línea dentro de una página (como en
  * `src/app/entrar/page.tsx`, que por eso mismo tiene que ser alcanzable sin
- * sesión) no pasa por aquí y queda fuera de este mecanismo.
+ * sesión) tampoco pasa por aquí y queda igual de fuera de este mecanismo.
  */
 async function ejecutar<T = null>(
   ruta: string,
@@ -51,17 +51,17 @@ async function ejecutar<T = null>(
     usuarioId: string,
   ) => Promise<T>,
 ): Promise<Resultado<T>> {
-  const sesion = await sesionActual()
-  if (!sesion) {
-    return {
-      ok: false,
-      mensaje: 'Tu sesión no está activa. Vuelve a entrar para seguir.',
-      reintentable: false,
-    }
-  }
-
-  const db = conexion()
   try {
+    const sesion = await sesionActual()
+    if (!sesion) {
+      return {
+        ok: false,
+        mensaje: 'Tu sesión no está activa. Vuelve a entrar para seguir.',
+        reintentable: false,
+      }
+    }
+
+    const db = conexion()
     const datos = await fn(db, await organizacionPorDefecto(db), sesion.id)
     revalidatePath(ruta)
     return { ok: true, datos }

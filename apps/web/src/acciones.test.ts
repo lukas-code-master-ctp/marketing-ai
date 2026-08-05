@@ -112,6 +112,33 @@ describe('las Server Actions exigen sesión', () => {
       expect(r.reintentable).toBe(false)
     })
   })
+
+  // Menor F de la revisión de rama: `sesionActual()` se movió dentro del
+  // `try` de `ejecutar` para que una excepción suya (en desarrollo,
+  // `registrarPersona` puede lanzar si la base está caída) se traduzca a
+  // `{ ok: false, mensaje }` como cualquier otra falla, en vez de propagarse
+  // sin capturar. Antes de este cambio esta prueba no podía escribirse: la
+  // excepción salía de `aprobarGrillaAccion` en vez de resolver.
+  it('si sesionActual() lanza, la acción responde en vez de propagar la excepción', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await sembrarConGrilla(db)
+      const [plan] = await db.select().from(esquema.contentPlans)
+      vi.mocked(sesionActual).mockRejectedValue(new Error('la base no responde'))
+
+      const r = await aprobarGrillaAccion('parcelas', '2026-09', plan!.id)
+
+      expect(r.ok).toBe(false)
+      if (r.ok) throw new Error('inalcanzable')
+      expect(r.mensaje).toBe('la base no responde')
+      expect(r.reintentable).toBe(false)
+
+      const [despues] = await db
+        .select({ status: esquema.contentPlans.status })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(despues!.status).toBe('borrador')
+    })
+  })
 })
 
 describe('las Server Actions pasan el id de la sesión al dominio', () => {
