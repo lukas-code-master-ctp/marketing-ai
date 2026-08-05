@@ -16,5 +16,16 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['../../vitest.setup.ts'],
     fileParallelism: false,
+    server: {
+      // `next-auth` es ESM y hace `import ... from 'next/server'` sin
+      // extensión. Next no declara `exports` en su `package.json`, así que
+      // esa ruta solo resuelve con la resolución permisiva de Vite. Dejarlo
+      // externalizado (el comportamiento por omisión para todo lo que vive en
+      // `node_modules`) entrega esa importación directo al resolutor nativo
+      // de Node, que exige extensión y falla con `ERR_MODULE_NOT_FOUND`.
+      deps: {
+        inline: [/next-auth/],
+      },
+    },
   },
 })

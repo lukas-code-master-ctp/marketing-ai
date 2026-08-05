@@ -386,3 +386,24 @@ describe('la pantalla de inicio', () => {
     expect(screen.queryByRole('button', { name: 'Crear marca' })).not.toBeNull()
   })
 })
+
+describe('la pantalla de entrada', () => {
+  it('la pantalla de entrada explica el rechazo cuando la cuenta no está autorizada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: 'AccessDenied' }) }))
+
+    expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+
+  it('sin error la pantalla de entrada no acusa a nadie de nada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({}) }))
+
+    // Sin esta mitad, una pantalla que mostrara siempre el aviso pasaría.
+    expect(screen.queryByText(/no está en la lista/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+})

@@ -14,6 +14,14 @@
     ],
     "allowJs": true,
     "noEmit": true,
+    // `tsconfig.base.json` pone `declaration: true` porque los paquetes del
+    // workspace lo necesitan. La app no se importa desde ningún otro
+    // paquete, así que no genera nada: sin apagarlo, `tsc` sigue calculando
+    // como si fuera a emitir declaraciones aunque `noEmit` no emita ninguna,
+    // y eso hace fallar con TS2742 (“inferred type … cannot be named without
+    // a reference”) en cualquier tipo de una dependencia cuyo layout de
+    // `node_modules` de pnpm no sea plano — como el `auth` de `next-auth`.
+    "declaration": false,
     "incremental": true,
     "resolveJsonModule": true
   },
