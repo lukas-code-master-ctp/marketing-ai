@@ -863,7 +863,7 @@ Variables de entorno:
 |---|---|
 | `CLOUD_SQL_INSTANCIA` | El nombre de conexión, `proyecto:región:instancia` |
 | `CLOUD_SQL_USUARIO` / `CLOUD_SQL_CLAVE` / `CLOUD_SQL_BASE` | Los de la instancia |
-| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | El contenido del JSON de la cuenta de servicio |
+| `GOOGLE_CREDENCIALES_JSON` | El contenido del JSON de la cuenta de servicio, en **una sola línea**. `vercel env add` lee una línea de la entrada estándar, así que un JSON con saltos se trunca en silencio |
 | `AUTH_SECRET` | Genérala con `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Los del Step 2 |
 | `CORREOS_PERMITIDOS` | Los dos o tres correos, separados por coma |
