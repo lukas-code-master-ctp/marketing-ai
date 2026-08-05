@@ -16,7 +16,7 @@ import { registrarPersona } from './auth/registro.js'
 // `registrarPersona`, seguro acá porque este módulo solo corre en Node
 // (Server Actions, Server Components, el Route Handler de `/api/auth`), nunca
 // en el runtime Edge del middleware.
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn } = NextAuth({
   ...authConfig,
   providers: [Google],
   // Los tres callbacks viven en `./auth/callbacks.js`, exportados y con
