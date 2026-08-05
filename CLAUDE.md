@@ -43,6 +43,11 @@ vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
 contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
 worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
+La app exige sesión. En local basta `SESION_DE_DESARROLLO=true` en el `.env`,
+que entra como `desarrollo@local` sin pasar por Google. Esa variable **se
+ignora fuera de `NODE_ENV=development`**, así que dejarla encendida no abre
+nada en producción.
+
 ## Reglas que no son negociables
 
 Cada una existe porque romperla ya costó trabajo real.
@@ -64,6 +69,41 @@ Cada una existe porque romperla ya costó trabajo real.
 **Ninguna salida del modelo se parsea con expresiones regulares.** Toda tarea declara un esquema Zod y valida. Validar entrada de usuario con regex sí es válido.
 
 **La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI y del worker. La web lee, edita y aprueba.
+
+**Proteger las páginas no protege las Server Actions.** Son endpoints HTTP con
+identificador estable: cualquiera que lo conozca puede llamarlos sin pasar por
+la página. La comprobación de sesión vive en el ayudante `ejecutar` de
+`apps/web/src/acciones.ts`, por el que pasan las nueve acciones, no en los
+componentes de servidor. Una acción que no use ese ayudante nace desprotegida.
+
+**La configuración de Auth.js está partida en dos archivos, y quien edite uno
+tiene que saber que el otro existe.** `apps/web/src/auth.config.ts` es la
+mitad sin Node —sin proveedores, sin nada que toque la base— porque el
+middleware corre en el runtime Edge por omisión y `apps/web/src/auth.ts`
+arrastra `node:fs/promises` hasta ahí (vía `auth/registro.ts` → `datos.ts` →
+`@gc/operaciones`). Apuntar el middleware al `auth.ts` completo falla el build
+con `UnhandledSchemeError: Reading from "node:fs/promises" is not handled by
+plugins`. `auth.ts` extiende `authConfig` con el proveedor de Google y los
+callbacks completos, y el orden del spread es lo que decide cuál gana:
+`callbacks: { ...authConfig.callbacks, signIn: autorizarInicioDeSesion, jwt,
+session }` sobrescribe el `jwt` liviano de `authConfig` con el completo. El
+`jwt` de `auth.config.ts` es un duplicado deliberado del de
+`auth/callbacks.ts` —misma revalidación de `CORREOS_PERMITIDOS`, sin el
+registro en la base—, así que endurecer esa revalidación en un solo archivo
+deja un agujero en el otro.
+
+**El middleware necesita su propio callback `authorized`.** `export { auth as
+middleware }` a secas no bloquea nada: `handleAuth` de Auth.js arranca con
+`let authorized = true`, y sin ese callback deja pasar cualquier petición
+aunque no haya sesión. Vive en `apps/web/src/middleware.ts`, no en la raíz del
+paquete, porque este proyecto usa `src/app`.
+
+**Sacar a alguien de `CORREOS_PERMITIDOS` le quita la sesión de inmediato**,
+porque el callback `jwt` revalida la lista en cada lectura, no solo al entrar.
+El precio es que esa variable pasó a ser obligatoria en cada petición: un
+despliegue con `CORREOS_PERMITIDOS` vacía por descuido no solo bloquea
+entradas nuevas, también tumba las sesiones vivas. Falla cerrado, que es la
+dirección correcta — pero hay que saber que esa es la dirección que toma.
 
 **El error de una corrida que ejecutó el motor lo escribe el motor.** `ejecutarFlujo` la marca fallida antes de relanzar, con la clase del error delante (`[permanente] …`). Quien lo llame anota el fallo solo si nadie lo anotó ya — el worker lo hace con un `AND status <> 'fallido'` — porque sobrescribir ese mensaje pierde el diagnóstico bueno. Lo que sí hay que anotar es lo que falla **antes** de entrar al motor: ahí la corrida ya está `en_curso` y nadie más la sacaría de ese estado.
 
@@ -141,7 +181,7 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 11 tablas, 6 migraciones
+@gc/db          esquema Drizzle, 12 tablas, 7 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
@@ -149,7 +189,9 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 @gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
 @gc/operaciones operaciones que comparten CLI, web y worker
 apps/cli        comandos de operación
-apps/web        Next.js App Router, Server Components y Server Actions
+apps/web        Next.js App Router, Server Components, Server Actions, y
+                autenticación con Auth.js v5 (Google + lista de correos
+                permitidos, sin tabla de sesiones)
 apps/worker     toma corridas pendientes y las ejecuta. Lo único que llama al modelo sin que se lo pidan
 ```
 
@@ -204,3 +246,10 @@ El `command` corre `pnpm install --frozen-lockfile`, que aborta con
 no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
 en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
 worker`.
+
+**Con la base en Neon, el worker no puede quedar encendido.** El plan gratuito
+da unas 190 horas de cómputo al mes y suspende la base cuando nadie la
+consulta; un sondeo cada dos segundos la mantiene despierta las 730 horas del
+mes y se lo come solo, sin que nadie esté usando el sistema. Levanta el worker
+cuando vayas a generar y bájalo al terminar. Resolverlo de verdad es del
+bloque 1C-B: que la web lo despierte en vez de que él pregunte.
