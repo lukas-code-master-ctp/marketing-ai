@@ -442,6 +442,35 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
+  it('aprobar registra quién lo hizo, y sin usuario deja null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const [plan] = await db.select().from(esquema.contentPlans)
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+
+      await aprobarGrilla(db, ref.organizationId, plan!.id, persona!.id)
+
+      const [conAutor] = await db
+        .select({ approvedBy: esquema.contentPlans.approvedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(conAutor!.approvedBy).toBe(persona!.id)
+
+      await reabrirGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-09' })
+
+      const [sinAutor] = await db
+        .select({ reopenedBy: esquema.contentPlans.reopenedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      // Sin usuario no falla: `null` significa "lo hizo el sistema", que es lo
+      // que pasa cuando reabre el CLI.
+      expect(sinAutor!.reopenedBy).toBeNull()
+    })
+  })
+
   it('las tres operaciones ignoran filas de otra organización', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)

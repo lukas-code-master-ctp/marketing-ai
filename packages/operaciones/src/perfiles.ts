@@ -105,6 +105,12 @@ export async function cargarPerfilDeObjeto(
   db: BaseDeDatos,
   organizationId: string,
   args: { slug: string; perfil: unknown },
+  /**
+   * Quién guardó. Opcional y `null` por omisión: el CLI carga perfiles sin
+   * sesión, y ahí `null` significa "lo hizo el sistema". Se pasa tal cual a
+   * `guardarPerfil`.
+   */
+  usuarioId?: string,
 ): Promise<number> {
   const ref = await resolverMarca(db, organizationId, args.slug)
 
@@ -118,7 +124,7 @@ export async function cargarPerfilDeObjeto(
     )
   }
 
-  return guardarPerfil(db, ref, args.perfil)
+  return guardarPerfil(db, ref, args.perfil, usuarioId)
 }
 
 export async function cargarPerfilDeArchivo(

@@ -130,8 +130,8 @@ export async function aprobarGrillaAccion(
   mes: string,
   contentPlanId: string,
 ): Promise<Resultado> {
-  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
-    await aprobarGrilla(db, organizationId, contentPlanId)
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId, usuarioId) => {
+    await aprobarGrilla(db, organizationId, contentPlanId, usuarioId)
     return null
   })
 }
@@ -142,8 +142,8 @@ export async function aprobarGrillaAccion(
  * publicaciones en vuelo o cerradas y reabrir no las deshace.
  */
 export async function reabrirGrillaAccion(marca: string, mes: string): Promise<Resultado> {
-  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
-    await reabrirGrilla(db, organizationId, { slug: marca, mes })
+  return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId, usuarioId) => {
+    await reabrirGrilla(db, organizationId, { slug: marca, mes }, usuarioId)
     return null
   })
 }
@@ -209,7 +209,7 @@ export async function guardarPerfilAction(
   slug: string,
   textoJson: string,
 ): Promise<Resultado<{ version: number }>> {
-  return ejecutar(`/${slug}/perfil`, async (db, organizationId) => {
+  return ejecutar(`/${slug}/perfil`, async (db, organizationId, usuarioId) => {
     let perfil: unknown
     try {
       perfil = JSON.parse(textoJson)
@@ -219,7 +219,7 @@ export async function guardarPerfilAction(
       )
     }
 
-    const version = await cargarPerfilDeObjeto(db, organizationId, { slug, perfil })
+    const version = await cargarPerfilDeObjeto(db, organizationId, { slug, perfil }, usuarioId)
     return { version }
   })
 }

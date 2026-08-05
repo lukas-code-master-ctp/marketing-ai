@@ -19,6 +19,13 @@ export async function guardarPerfil(
   db: BaseDeDatos,
   ref: ReferenciaDeMarca,
   crudo: unknown,
+  /**
+   * Quién guardó esta versión. Opcional y `null` por omisión: el CLI carga
+   * perfiles sin sesión, y ahí `null` significa "lo hizo el sistema". Va como
+   * parámetro explícito porque `@gc/brand` no sabe que existe una sesión web
+   * — el CLI y el worker llaman a esta misma función.
+   */
+  usuarioId?: string,
 ): Promise<number> {
   const perfil = validarPerfil(crudo)
 
@@ -47,6 +54,7 @@ export async function guardarPerfil(
       brandId: ref.brandId,
       version,
       data: perfil,
+      createdBy: usuarioId ?? null,
     })
 
     return version
