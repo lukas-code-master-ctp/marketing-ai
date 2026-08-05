@@ -517,6 +517,36 @@ Esperado: FAIL en "una instancia incompleta falla en vez de caer a la URL".
 pnpm --filter @gc/db add @google-cloud/cloud-sql-connector google-auth-library
 ```
 
+> **La versión de `google-auth-library` no es libre, y equivocarla falla en silencio.**
+>
+> `sqladmin-fetcher.js` del conector decide así qué hacer con lo que le pasas en `auth`:
+>
+> ```js
+> if (loginAuth instanceof GoogleAuth) { auth = loginAuth }
+> else { auth = new GoogleAuth({ authClient: loginAuth, ... }) }
+> ```
+>
+> Es un **`instanceof`**. Si tu `GoogleAuth` sale de una copia distinta de
+> `google-auth-library` que la que resolvió el conector, la comprobación falla,
+> tu objeto cae por la rama `authClient` —donde no es un `AuthClient` válido— y
+> la petición sale **sin credenciales**. El error que llega es un 401 con el
+> texto `Login Required`, que no menciona versiones ni copias duplicadas.
+>
+> Esto se comprobó en la prueba de humo: declarar `^9.15.0` mientras el
+> conector exige `^10.6.2` instaló dos copias, y la conexión falló contra una
+> instancia que desde la misma máquina funcionaba perfecto.
+>
+> **Declara el rango que el conector pide** —míralo en su `package.json`, no lo
+> supongas— y **comprueba que resuelven a la misma copia** antes de dar la
+> tarea por buena:
+>
+> ```bash
+> node -e "console.log(require.resolve('google-auth-library') === require.resolve('google-auth-library',{paths:['./node_modules/@google-cloud/cloud-sql-connector']}))"
+> ```
+>
+> Tiene que imprimir `true`. En pnpm, que aísla dependencias por diseño, esto
+> merece una comprobación explícita y no un supuesto.
+
 `packages/db/src/cliente.ts` pasa a resolver el destino:
 
 ```ts
@@ -588,6 +618,15 @@ export async function crearConexion(): Promise<Conexion> {
 - `apps/worker/src/main.ts` (línea 29)
 - `packages/db/src/pruebas/entorno.ts` (línea 70)
 - `apps/web/src/datos.ts` (línea 21) — **este es el delicado**: hoy cachea la conexión en `globalThis` de forma perezosa y síncrona. Con una conexión asíncrona hay que cachear **la promesa**, no el resultado, o dos peticiones simultáneas abren dos pools. Mira ese archivo antes de tocarlo y dilo en el informe si te obliga a algo que este plan no anticipa.
+
+  **Que ese caché siga funcionando no es un detalle de rendimiento, y hay números.** Medido en la prueba de humo, contra la instancia real desde Vercel:
+
+  | | construir el conector | primera consulta | total |
+  |---|---|---|---|
+  | Proceso nuevo | ~800 ms | ~760 ms | **~1,6 s** |
+  | Proceso ya tibio | 0 ms | ~123 ms | **~123 ms** |
+
+  O sea que perder el caché multiplica por trece el costo de cada petición. Y no es hipotético: en cinco llamadas seguidas, una cayó en un proceso nuevo — con tres personas usando el sistema, los arranques en frío son frecuentes, no raros.
 
 Agrega a `packages/db/src/index.ts`, en orden alfabético:
 
