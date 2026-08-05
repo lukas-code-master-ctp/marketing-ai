@@ -110,8 +110,11 @@ describe('conexión ociosa caída', () => {
           expect.stringMatching(/^\[db\] una conexión ociosa del pool se cayó/),
         )
       } finally {
-        await cerrar()
+        // El espía se restaura ANTES de cerrar: si `cerrar()` rechazara, el
+        // `finally` se corta ahí y el espía quedaría puesto, envenenando las
+        // pruebas siguientes del archivo con un `console.error` silenciado.
         consoleErrorSpy.mockRestore()
+        await cerrar()
       }
     },
     15000,
