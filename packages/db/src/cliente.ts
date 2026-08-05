@@ -51,12 +51,15 @@ function noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool: pg.Pool): void {
  * (`crearConexionDePrueba`, en `pruebas/entorno.ts`): necesita apuntar a
  * `gestor_test` sin depender de `process.env.DATABASE_URL`, que durante toda
  * la suite apunta a `gestor` —la base de desarrollo— porque `vitest.setup.ts`
- * carga el `.env` de la raíz. Los cuatro llamadores reales (CLI, worker,
- * `apps/web/src/datos.ts` y el propio ayudante de pruebas) llaman sin
- * argumentos y resuelven del entorno como siempre.
+ * carga el `.env` de la raíz. Los tres llamadores de producción —el CLI, el
+ * worker y `apps/web/src/datos.ts`— llaman sin argumentos y resuelven del
+ * entorno como siempre; el único que pasa la URL es ese ayudante.
  */
 export async function crearConexion(urlDePrueba?: string): Promise<Conexion> {
-  const destino = urlDePrueba !== undefined ? { tipo: 'url' as const, url: urlDePrueba } : destinoDeConexion(process.env)
+  const destino =
+    urlDePrueba !== undefined
+      ? { tipo: 'url' as const, url: urlDePrueba }
+      : destinoDeConexion(process.env)
 
   if (destino.tipo === 'url') {
     // `pg` es CommonJS: la importación por defecto y después `pg.Pool` es la
