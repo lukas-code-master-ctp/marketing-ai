@@ -265,6 +265,14 @@ ese sufijo en el anfitrión (`ep-cool-name-123456.us-east-2.aws.neon.tech`), es
 la que hay que usar para aplicar migraciones a mano, porque PgBouncer en modo
 transacción no maneja bien las sentencias que las migraciones necesitan.
 
+**`packages/db/drizzle.config.ts` distingue las dos.** Lee
+`DATABASE_URL_DIRECTA` con `DATABASE_URL` como respaldo, así que aplicar
+migraciones con solo `DATABASE_URL` exportada corre en silencio contra la
+cadena que toque en ese momento — la agrupada en Neon, si es lo único que
+exportaste para producción. Declara `DATABASE_URL_DIRECTA` (cadena directa de
+Neon, sin `-pooler`) antes de migrar contra producción; en Docker local no
+hace falta, porque hay una sola cadena.
+
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
 El worker corre en un contenedor con el repositorio montado en `/app`, y se
