@@ -729,7 +729,7 @@ describe('catálogo de restricciones compuestas', () => {
   ]
 
   const leer = async (db: BaseDeDatos, tipo: 'f' | 'u') => {
-    const filas = await db.execute(sql`
+    const { rows: filas } = await db.execute(sql`
       select conrelid::regclass::text as tabla, conname, pg_get_constraintdef(oid) as definicion
       from pg_constraint
       where contype = ${tipo}
@@ -737,7 +737,7 @@ describe('catálogo de restricciones compuestas', () => {
         and array_length(conkey, 1) > 1
       order by conrelid::regclass::text, conname
     `)
-    return [...filas] as unknown as FilaDeRestriccion[]
+    return filas as unknown as FilaDeRestriccion[]
   }
 
   it('declara exactamente las doce foráneas compuestas esperadas', async () => {

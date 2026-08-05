@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { fileURLToPath } from 'node:url'
 import { crearConexion, type BaseDeDatos } from '../cliente.js'
 import { esquema } from '../esquema.js'

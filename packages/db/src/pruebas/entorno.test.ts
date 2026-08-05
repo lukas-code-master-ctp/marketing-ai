@@ -42,7 +42,8 @@ describe('conBaseDeDatosDePrueba', () => {
     })
 
     await conBaseDeDatosDePrueba(async (db) => {
-      const [conteo] = (await db.execute(RESIDUOS)) as unknown as Conteo[]
+      const { rows } = await db.execute(RESIDUOS)
+      const [conteo] = rows as unknown as Conteo[]
       expect(conteo).toEqual({ disparadores: 0, funciones: 0 })
 
       // Lo que de verdad importa: el primer insert de la corrida siguiente no
