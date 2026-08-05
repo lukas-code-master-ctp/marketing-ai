@@ -78,8 +78,9 @@ async function ejecutar<T = null>(
  * Crea la marca. Es una escritura corta y no pasa por el worker: no hay nada
  * que generar todavía, solo una fila.
  *
- * Revalida `/` porque ahí vive el selector de marcas del layout raíz, que es
- * lo que cambia al crear una.
+ * Revalida `/` porque ahí vive el selector de marcas, en el layout del grupo
+ * de rutas `(app)` (`apps/web/src/app/(app)/layout.tsx`), que es lo que
+ * cambia al crear una.
  *
  * El presupuesto llega como el texto crudo del campo, que viene vacío cuando
  * la persona no lo llenó: en ese caso no se pasa y manda el valor por omisión
