@@ -7,22 +7,16 @@ import { esquema } from '../esquema.js'
 const CARPETA_MIGRACIONES = fileURLToPath(new URL('../../migraciones', import.meta.url))
 
 /**
- * `crearConexion` ya no recibe una URL: resuelve su destino de
- * `process.env.DATABASE_URL` (ver `destinoDeConexion`). Las pruebas quieren
- * conectar a `DATABASE_URL_TEST`, no a esa — así que este ayudante le presta
- * la variable durante la llamada y la devuelve a su valor original apenas
- * termina, para no dejarla pisada para el resto del proceso ni para el resto
- * del archivo de prueba que la haya llamado.
+ * `crearConexion` resuelve su destino de `process.env.DATABASE_URL` por
+ * omisión (ver `destinoDeConexion`), pero acepta una URL explícita para el
+ * caso de las pruebas, que quieren conectar a `DATABASE_URL_TEST` y no a
+ * `DATABASE_URL` —que durante toda la suite apunta a `gestor`, la base de
+ * desarrollo, porque `vitest.setup.ts` carga el `.env` de la raíz—. Pasarla
+ * como parámetro evita tener que mutar `process.env` para prestársela: nada
+ * que restaurar, nada que se corrompa si dos llamadas se solapan.
  */
 export async function crearConexionDePrueba(url: string): Promise<Conexion> {
-  const original = process.env.DATABASE_URL
-  process.env.DATABASE_URL = url
-  try {
-    return await crearConexion()
-  } finally {
-    if (original === undefined) delete process.env.DATABASE_URL
-    else process.env.DATABASE_URL = original
-  }
+  return crearConexion(url)
 }
 
 /**

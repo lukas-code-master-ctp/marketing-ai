@@ -28,7 +28,7 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
     const url = env.DATABASE_URL?.trim()
     if (!url) {
       throw new Error(
-        'Falta DATABASE_URL. En local apunta al Postgres de Docker; en Vercel configura CLOUD_SQL_INSTANCIA y sus tres variables.',
+        'Falta DATABASE_URL. En local apunta al Postgres de Docker; en Vercel configura CLOUD_SQL_INSTANCIA y sus cuatro variables.',
       )
     }
     return { tipo: 'url', url }
@@ -37,7 +37,12 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
   // Si la instancia está pero le faltan datos, se falla acá. Caer en silencio
   // al camino de URL daría un error sobre `localhost` en producción, y eso
   // manda a diagnosticar la red equivocada.
-  if (instancia.split(':').length !== 3) {
+  //
+  // No basta con contar las partes: 'proyecto:us-central1:' y '::' también
+  // tienen tres al partir por ':', y las dos dejarían pasar una parte vacía
+  // hasta el conector, que responde con un mensaje mucho más oscuro que este.
+  const partesDeInstancia = instancia.split(':')
+  if (partesDeInstancia.length !== 3 || partesDeInstancia.some((parte) => parte.length === 0)) {
     throw new Error(
       `CLOUD_SQL_INSTANCIA tiene que ser "proyecto:región:instancia", y llegó "${instancia}".`,
     )

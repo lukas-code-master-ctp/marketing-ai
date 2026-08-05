@@ -46,9 +46,17 @@ function noDejarQueUnaConexionOciosaCaidaTumbeElProceso(pool: pg.Pool): void {
  * proceso y abre su propio pool, así que el límite de conexiones de la
  * instancia se reparte entre todas las que estén vivas a la vez. El modo de
  * falla —agotar las conexiones— no aparece nunca en local.
+ *
+ * `urlDePrueba` es opcional y solo existe para el arnés de pruebas
+ * (`crearConexionDePrueba`, en `pruebas/entorno.ts`): necesita apuntar a
+ * `gestor_test` sin depender de `process.env.DATABASE_URL`, que durante toda
+ * la suite apunta a `gestor` —la base de desarrollo— porque `vitest.setup.ts`
+ * carga el `.env` de la raíz. Los cuatro llamadores reales (CLI, worker,
+ * `apps/web/src/datos.ts` y el propio ayudante de pruebas) llaman sin
+ * argumentos y resuelven del entorno como siempre.
  */
-export async function crearConexion(): Promise<Conexion> {
-  const destino = destinoDeConexion(process.env)
+export async function crearConexion(urlDePrueba?: string): Promise<Conexion> {
+  const destino = urlDePrueba !== undefined ? { tipo: 'url' as const, url: urlDePrueba } : destinoDeConexion(process.env)
 
   if (destino.tipo === 'url') {
     // `pg` es CommonJS: la importación por defecto y después `pg.Pool` es la

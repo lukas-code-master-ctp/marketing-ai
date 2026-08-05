@@ -56,4 +56,18 @@ describe('destinoDeConexion', () => {
       /proyecto:región:instancia/,
     )
   })
+
+  it('rechaza una instancia con una parte vacía al final', () => {
+    // 'proyecto:us-central1:' tiene tres partes al partir por ':', pero la
+    // última está vacía. Contar partes no alcanza para atrapar esto.
+    expect(() =>
+      destinoDeConexion({ ...CLOUD, CLOUD_SQL_INSTANCIA: 'proyecto:us-central1:' }),
+    ).toThrow(/proyecto:región:instancia/)
+  })
+
+  it('rechaza una instancia con las tres partes vacías', () => {
+    expect(() => destinoDeConexion({ ...CLOUD, CLOUD_SQL_INSTANCIA: '::' })).toThrow(
+      /proyecto:región:instancia/,
+    )
+  })
 })
