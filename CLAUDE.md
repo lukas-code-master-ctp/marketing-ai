@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió: hubo una prueba de humo contra la instancia real que confirmó que el conector funciona desde Vercel, pero el proyecto de esa prueba era desechable y se borró. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió: hubo una prueba de humo contra la instancia real que confirmó que el conector funciona desde Vercel, pero el proyecto de esa prueba, aunque se pensó desechable, **sigue existiendo**: no se borró, y todavía tiene la clave privada de la cuenta de servicio cargada en sus variables de entorno (ver `pendientes.md`). Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -89,11 +89,13 @@ archivo**. Si pnpm instala dos copias —porque el rango que declara el
 conector deja de coincidir con el que declara `packages/db/package.json`—,
 el objeto cae por la rama equivocada y la petición sale **sin
 credenciales**: un `401 Login Required` que no menciona versiones ni copias.
-Ya mordió una vez, en la prueba de humo contra la instancia real. Ni
-`pnpm test` ni `pnpm -r typecheck` ven qué copia resuelve cada paquete, así
-que lo vigila `packages/db/src/resolucion-google-auth-library.test.ts`, que
-afirma con `require.resolve` en vez de confiar en que los rangos declarados
-coincidan. **Si esa prueba se pone roja:** alinea el rango de
+Ya mordió una vez, en la prueba de humo contra la instancia real. Ni el
+resto de la suite ni `pnpm -r typecheck` ven qué copia resuelve cada
+paquete —eso exige mirar el árbol de `node_modules`, no los tipos ni el
+comportamiento normal—, así que hace falta una prueba dedicada, que sí
+corre dentro de `pnpm test`: `packages/db/src/resolucion-google-auth-library.test.ts`,
+que afirma con `require.resolve` en vez de confiar en que los rangos
+declarados coincidan. **Si esa prueba se pone roja:** alinea el rango de
 `google-auth-library` en `packages/db/package.json` con el que exige
 `@google-cloud/cloud-sql-connector` (revisa su `package.json`) y corre
 `pnpm install` para que las dos vuelvan a resolver a una sola copia.
@@ -297,6 +299,22 @@ instancia autenticando por IAM, y deja que cualquier cliente Postgres normal
 —incluido `drizzle-kit`— se conecte como si la base estuviera en la máquina.
 Es una operación que se hace pocas veces y siempre con prisa, así que:
 
+**Nadie corrió este procedimiento de punta a punta todavía** — la instancia
+está detenida la mayor parte del tiempo (ver más abajo) y ninguna migración
+real se aplicó aún por este camino. El binario, sus argumentos y los
+comandos de `gcloud` de abajo salen de la documentación de Google, no de una
+prueba propia. Si algo no calza, no es necesariamente un error tuyo.
+
+0. **Enciende la instancia.** Cloud SQL no se despierta sola, y el Auth Proxy
+   contra una instancia apagada falla de un modo que no menciona que está
+   apagada — lleva a diagnosticar IAM, puertos o red antes de sospechar de
+   esto:
+   ```
+   gcloud sql instances patch gestor-contenido --project gestor-contenido-ctp --activation-policy=ALWAYS
+   ```
+   Espera a que quede lista antes de seguir (`gcloud sql instances describe
+   gestor-contenido --project gestor-contenido-ctp --format="value(state)"`
+   tiene que decir `RUNNABLE`).
 1. Descarga el binario del Cloud SQL Auth Proxy v2 (`cloud-sql-proxy.exe` en
    Windows) desde la página de releases de `GoogleCloudPlatform/cloud-sql-proxy`
    en GitHub, o desde la documentación de Cloud SQL de Google — **no el binario
@@ -318,11 +336,24 @@ Es una operación que se hace pocas veces y siempre con prisa, así que:
    que ejecuta `drizzle-kit migrate`.
 6. **Devuelve `DATABASE_URL` a `postgres://postgres:postgres@localhost:5432/gestor`
    al terminar.** Este paso no es adorno: con el Auth Proxy corriendo y
-   `DATABASE_URL` sin restaurar, cualquier comando de desarrollo —`pnpm
-   --filter @gc/web dev`, el CLI, el worker, `pnpm test`, porque el `.env` es
-   uno solo para todo— trabajaría contra la base de producción sin que nada
-   lo avise. Es el accidente que este procedimiento hace fácil si se salta
-   este paso.
+   `DATABASE_URL` sin restaurar, `pnpm --filter @gc/web dev` y el CLI
+   trabajarían contra la base de producción sin que nada lo avise — los dos
+   resuelven la conexión con `crearConexion()` sin argumentos, que lee
+   `DATABASE_URL` del entorno (`destinoDeConexion`, en
+   `packages/db/src/destino.ts`). El worker corre el mismo riesgo **solo si lo
+   levantas en el host**: dentro de `docker compose` no le pasa nada, porque
+   `DATABASE_URL` queda fijada en el bloque `environment:` de
+   `docker-compose.yml`, que gana sobre el `env_file:` y apunta siempre al
+   Postgres de Docker. `pnpm test` tampoco corre este riesgo: la suite conecta
+   por `DATABASE_URL_TEST` (`packages/db/src/pruebas/entorno.ts`), una
+   variable distinta, y `apps/web/src/acciones.test.ts` la fija explícitamente
+   antes de que nada la lea. Es el accidente que este procedimiento hace
+   fácil, para lo que sí queda expuesto, si se salta este paso.
+7. **Apaga la instancia cuando termines**, para no dejarla facturando sin que
+   nadie la use:
+   ```
+   gcloud sql instances patch gestor-contenido --project gestor-contenido-ctp --activation-policy=NEVER
+   ```
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 

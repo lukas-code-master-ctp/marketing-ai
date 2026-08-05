@@ -863,7 +863,7 @@ Variables de entorno:
 |---|---|
 | `CLOUD_SQL_INSTANCIA` | El nombre de conexión, `proyecto:región:instancia` |
 | `CLOUD_SQL_USUARIO` / `CLOUD_SQL_CLAVE` / `CLOUD_SQL_BASE` | Los de la instancia |
-| `GOOGLE_CREDENCIALES_JSON` | El contenido del JSON de la cuenta de servicio, en **una sola línea**. `vercel env add` lee una línea de la entrada estándar, así que un JSON con saltos se trunca en silencio |
+| `GOOGLE_CREDENCIALES_JSON` | El contenido del JSON de la cuenta de servicio. En la prueba de humo se cargó compactado a una línea y funcionó — no se comprobó que la forma con saltos de línea falle. La secuencia real fue: JSON de varias líneas → falló; compactado a una línea → siguió fallando igual; alinear la versión de `google-auth-library` (ver Task 3) → funcionó. O sea que compactarlo no fue lo que arregló nada |
 | `AUTH_SECRET` | Genérala con `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Los del Step 2 |
 | `CORREOS_PERMITIDOS` | Los dos o tres correos, separados por coma |
