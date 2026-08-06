@@ -68,10 +68,18 @@ async function principal(): Promise<void> {
   // mismo proceso y las dos vías llaman a `drenarCola`, que es segura de
   // ejecutar en paralelo porque `tomarCorridaPendiente` toma con
   // `FOR UPDATE SKIP LOCKED` — dos drenados nunca se llevan la misma corrida.
+  //
+  // La promesa que devuelve esta IIFE se guarda en `sondeoEnCurso`: es lo que
+  // `detener()` espera antes de cerrar la conexión. `servidor.close()` solo
+  // depende de las conexiones HTTP abiertas, sin ninguna relación con este
+  // bucle — sin esperar esta promesa, `cerrar()` (`pool.end()`) podía correr
+  // en paralelo con las consultas que le quedan a una corrida a mitad de
+  // `drenarCola`, tumbándolas a mitad de camino.
   const sondeoMs = Number(process.env.SONDEO_MS ?? 0)
+  let sondeoEnCurso: Promise<void> | undefined
   if (sondeoMs > 0) {
     console.log(`[worker] sondeo local cada ${sondeoMs} ms (sustituto de Cloud Scheduler)`)
-    void (async () => {
+    sondeoEnCurso = (async () => {
       while (!terminando) {
         try {
           await drenarCola(db, deps)
@@ -91,10 +99,22 @@ async function principal(): Promise<void> {
   // que sigue ejecutándose: nada en el repositorio recupera corridas colgadas.
   // En Cloud Run el papel es el mismo, con la diferencia de que allá la señal
   // solo llega a una instancia ociosa.
+  let deteniendo = false
   const detener = () => {
+    // Idempotente: si llegan dos señales antes de que termine el primer
+    // cierre —SIGTERM seguido de SIGINT, o dos SIGTERM—, la segunda no vuelve
+    // a llamar a `servidor.close()` ni a `cerrar()`.
+    if (deteniendo) return
+    deteniendo = true
     terminando = true
     console.log('[worker] señal recibida, se deja de aceptar peticiones')
     servidor.close(async () => {
+      // Si el bucle de sondeo está a mitad de una iteración —incluyendo un
+      // `drenarCola` con varias escrituras a la base—, hay que esperar a que
+      // termine antes de cerrar el pool. Si no hay sondeo (Cloud Run, donde
+      // `SONDEO_MS` no está), `sondeoEnCurso` es `undefined` y no se espera
+      // nada.
+      await sondeoEnCurso
       await cerrar()
       console.log('[worker] cerrado')
     })

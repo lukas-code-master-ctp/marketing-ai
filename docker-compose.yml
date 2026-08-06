@@ -69,9 +69,17 @@ services:
       WORKER_TOKEN: "local"
     # Publicado para poder golpear la ruta a mano desde el host mientras se
     # desarrolla (`curl -X POST -H "x-token-worker: local"
-    # http://localhost:8080/trabajar`). No hace falta para que el sondeo
+    # http://localhost:8090/trabajar`). No hace falta para que el sondeo
     # funcione.
-    ports: ["8080:8080"]
+    #
+    # El puerto del host es 8090 y no 8080 a propósito: en la máquina de este
+    # proyecto el 8080 del host ya está ocupado de forma permanente por un
+    # contenedor de otro proyecto (`smartprop-local-wordpress-1`), y publicar
+    # ahí hace fallar `docker compose up -d worker` por conflicto de puerto.
+    # Adentro del contenedor sigue siendo 8080, que es lo que Cloud Run espera
+    # y el valor por omisión que lee el worker (`PORT` en `main.ts`) — no lo
+    # "corrijas" de vuelta a 8080:8080.
+    ports: ["8090:8080"]
     volumes:
       - .:/app
       # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en
