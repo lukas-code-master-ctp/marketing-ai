@@ -58,6 +58,20 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/gestor
       CLOUD_SQL_INSTANCIA: ""
+      # En local no hay Cloud Tasks ni Cloud Scheduler, así que el worker se
+      # despierta solo. Este es el sustituto de la red de seguridad de la nube,
+      # y por eso en Cloud Run la variable NO se declara.
+      SONDEO_MS: "2000"
+      # El token compartido. En local vale cualquier cosa: aquí nadie llama al
+      # worker por HTTP. Se fija igual porque sin él el proceso no arranca, y
+      # dejarlo al `.env` haría fallar un clon nuevo por una razón que no tiene
+      # nada que ver con lo que esa persona vino a hacer.
+      WORKER_TOKEN: "local"
+    # Publicado para poder golpear la ruta a mano desde el host mientras se
+    # desarrolla (`curl -X POST -H "x-token-worker: local"
+    # http://localhost:8080/trabajar`). No hace falta para que el sondeo
+    # funcione.
+    ports: ["8080:8080"]
     volumes:
       - .:/app
       # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en
