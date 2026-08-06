@@ -114,6 +114,15 @@ async function principal(): Promise<void> {
       // termine antes de cerrar el pool. Si no hay sondeo (Cloud Run, donde
       // `SONDEO_MS` no está), `sondeoEnCurso` es `undefined` y no se espera
       // nada.
+      //
+      // Cuánto puede durar esta espera, que no es obvio: `drenarCola` atiende
+      // hasta `LIMITE_POR_PETICION` corridas seguidas sin mirar la bandera de
+      // apagado entre una y otra, así que esperar «la iteración en curso» puede
+      // significar esperar un lote entero. El margen de `stop_grace_period` en
+      // `docker-compose.yml` está calculado sobre el peor turno de **una** corrida,
+      // así que con varias encoladas y lentas la espera podría pasarse y terminar
+      // en el SIGKILL que esto viene a evitar. Solo afecta al camino local: en
+      // Cloud Run no hay sondeo, y allá el drenado ocurre dentro de la petición.
       await sondeoEnCurso
       await cerrar()
       console.log('[worker] cerrado')
