@@ -60,9 +60,18 @@ async function principal(): Promise<void> {
   })
 
   const deps = { cliente }
-  const servidor = crearServidor({ db, deps, token })
 
+  // La bandera de apagado, y la función con la que `drenarCola` la consulta
+  // entre corrida y corrida. Se declara antes del servidor porque el servidor
+  // la recibe: los dos caminos que drenan —la petición HTTP y el sondeo
+  // local— tienen que mirar la misma bandera. Antes solo la miraba el bucle
+  // de sondeo, y en Cloud Run, donde el drenado ocurre dentro de la petición,
+  // un `SIGTERM` no podía acortar un turno en absoluto: el proceso seguía
+  // tomando corridas nuevas hasta que lo mataran.
   let terminando = false
+  const debeParar = () => terminando
+
+  const servidor = crearServidor({ db, deps, token, debeParar })
 
   // El sondeo local. Se lanza sin esperarlo: convive con el servidor en el
   // mismo proceso y las dos vías llaman a `drenarCola`, que es segura de
@@ -82,7 +91,7 @@ async function principal(): Promise<void> {
     sondeoEnCurso = (async () => {
       while (!terminando) {
         try {
-          await drenarCola(db, deps)
+          await drenarCola(db, deps, { debeParar })
         } catch (error) {
           // La base caída, típicamente. Se registra y se sigue: un worker que
           // muere por esto deja de atender cuando la base vuelva.
@@ -115,14 +124,17 @@ async function principal(): Promise<void> {
       // `SONDEO_MS` no está), `sondeoEnCurso` es `undefined` y no se espera
       // nada.
       //
-      // Cuánto puede durar esta espera, que no es obvio: `drenarCola` atiende
-      // hasta `LIMITE_POR_PETICION` corridas seguidas sin mirar la bandera de
-      // apagado entre una y otra, así que esperar «la iteración en curso» puede
-      // significar esperar un lote entero. El margen de `stop_grace_period` en
-      // `docker-compose.yml` está calculado sobre el peor turno de **una** corrida,
-      // así que con varias encoladas y lentas la espera podría pasarse y terminar
-      // en el SIGKILL que esto viene a evitar. Solo afecta al camino local: en
-      // Cloud Run no hay sondeo, y allá el drenado ocurre dentro de la petición.
+      // Cuánto puede durar esta espera: **una corrida, no un lote.** Este
+      // comentario decía lo contrario, y era cierto cuando se escribió:
+      // `drenarCola` atendía hasta `LIMITE_POR_PETICION` corridas seguidas sin
+      // mirar la bandera de apagado entre una y otra, así que esperar «la
+      // iteración en curso» podía significar esperar diez generaciones y
+      // pasarse del `stop_grace_period` de `docker-compose.yml`, que está
+      // calculado sobre el peor turno de **una**. Ya no: `drenarCola` recibe
+      // `debeParar` y consulta esta misma bandera entre corrida y corrida, así
+      // que en cuanto llega la señal el turno corta en el primer punto donde
+      // cortar es inofensivo y esta espera se reduce a la corrida que estaba
+      // en vuelo. El margen de 180 s vuelve a ser el margen correcto.
       await sondeoEnCurso
       await cerrar()
       console.log('[worker] cerrado')

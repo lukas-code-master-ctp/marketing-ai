@@ -27,12 +27,33 @@ config({ path: join(aqui, '.env') })
 // del lado de `destino.ts` sin tocar la precedencia deliberada; se neutraliza
 // acá, borrando las cinco variables de Cloud SQL del proceso de pruebas antes
 // de que ningún archivo de prueba corra.
+//
+// Las del **despertador** se borran por la misma simetría, y por el mismo
+// escenario: `.env.example` invita a cargarlas para depurar el camino de la
+// nube, y con las seis presentes cualquier prueba que llame a las Server
+// Actions que encolan —`encolarGrillaAccion` y sus dos hermanas, que llaman a
+// `despertarWorker`— crearía una tarea de verdad contra la cola de producción,
+// que a su vez despertaría al worker de Cloud Run para que ejecute corridas de
+// la base de pruebas. Hoy ninguna prueba llega ahí, así que es latente; deja
+// de serlo el día que alguien pruebe esas acciones, y ese día el daño no lo
+// avisaría nada. `WORKER_TOKEN` va en la lista aunque sola no configure
+// ningún destino (ver `packages/despertador/src/destino.ts`): borrarla
+// mantiene el entorno de pruebas parejo con el de un clon nuevo.
+//
+// `GOOGLE_CREDENCIALES_JSON` aparece una sola vez porque la comparten los dos
+// caminos: es la misma cuenta de servicio para la base y para Cloud Tasks.
 for (const nombre of [
   'CLOUD_SQL_INSTANCIA',
   'CLOUD_SQL_USUARIO',
   'CLOUD_SQL_CLAVE',
   'CLOUD_SQL_BASE',
   'GOOGLE_CREDENCIALES_JSON',
+  'CLOUD_TASKS_PROYECTO',
+  'CLOUD_TASKS_REGION',
+  'CLOUD_TASKS_COLA',
+  'WORKER_URL',
+  'WORKER_CUENTA_DE_SERVICIO',
+  'WORKER_TOKEN',
 ]) {
   delete process.env[nombre]
 }

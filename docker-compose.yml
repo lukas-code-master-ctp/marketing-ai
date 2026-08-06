@@ -79,7 +79,14 @@ services:
     # Adentro del contenedor sigue siendo 8080, que es lo que Cloud Run espera
     # y el valor por omisión que lee el worker (`PORT` en `main.ts`) — no lo
     # "corrijas" de vuelta a 8080:8080.
-    ports: ["8090:8080"]
+    #
+    # El `127.0.0.1:` delante tampoco es adorno: sin él Docker publica en
+    # `0.0.0.0`, o sea que cualquiera en la misma red —un café, una oficina—
+    # puede hacer `POST /trabajar` con el token `local`, que está escrito aquí
+    # abajo en claro, y poner al worker a drenar la cola gastando el saldo de
+    # OpenRouter. Con la interfaz de bucle local el `curl` de arriba funciona
+    # exactamente igual, porque se hace desde esta misma máquina.
+    ports: ["127.0.0.1:8090:8080"]
     volumes:
       - .:/app
       # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en

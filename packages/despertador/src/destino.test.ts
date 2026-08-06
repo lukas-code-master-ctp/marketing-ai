@@ -30,6 +30,17 @@ describe('destinoDelDespertador', () => {
     })
   })
 
+  it('con solo WORKER_TOKEN no hay a quién despertar, y es silencioso', () => {
+    // `WORKER_TOKEN` es la única de las seis con un consumidor local: el
+    // worker no arranca sin ella, así que quien levante `pnpm --filter
+    // @gc/worker start` la va a poner en el `.env` de la raíz —el único que
+    // este proyecto permite—. Si contara para decidir si el despertador está
+    // configurado, esa configuración correcta se leería como «a medias» y cada
+    // encolado desde la web y cada `corrida:reanudar` del CLI imprimirían un
+    // error rojo por algo que no está roto.
+    expect(destinoDelDespertador({ WORKER_TOKEN: 'local' })).toEqual({ tipo: 'ninguno' })
+  })
+
   it('una configuración a medias falla nombrando lo que falta', () => {
     // El caso peligroso, y la razón de que esto sea una función y no tres
     // `if`: quedarse callado ante una configuración incompleta deja la web
@@ -60,6 +71,14 @@ describe('destinoDelDespertador', () => {
     // que el servidor responde con 404 — y el síntoma sería «Cloud Tasks
     // reintenta para siempre», lejos de la causa.
     const d = destinoDelDespertador({ ...COMPLETO, WORKER_URL: 'https://worker-abc.run.app/' })
+    expect(d).toMatchObject({ urlDelWorker: 'https://worker-abc.run.app' })
+  })
+
+  it('quita varias barras finales, no solo una', () => {
+    // El regex es `/\/+$/`, o sea que recorta todas las que haya. La prueba de
+    // arriba, con una sola barra, pasa igual con `/\/$/`: no discrimina entre
+    // las dos formas. Esta sí.
+    const d = destinoDelDespertador({ ...COMPLETO, WORKER_URL: 'https://worker-abc.run.app///' })
     expect(d).toMatchObject({ urlDelWorker: 'https://worker-abc.run.app' })
   })
 })

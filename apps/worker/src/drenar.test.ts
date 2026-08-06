@@ -96,4 +96,87 @@ describe('drenarCola', () => {
       expect(pendientes).toHaveLength(1)
     })
   })
+
+  it('una señal de apagado corta el turno y deja el resto en pendiente', async () => {
+    // El límite por cantidad no alcanza para acotar un turno: diez corridas
+    // pueden tardar más que el tiempo de espera de Cloud Run, y allá el
+    // drenado ocurre **dentro** de la petición, así que un SIGTERM no podía
+    // acortarlo de ninguna forma — el proceso seguía tomando corridas nuevas
+    // hasta que lo mataran. Lo que esta prueba afirma es que la señal se mira
+    // entre corrida y corrida, que es el único punto donde cortar es
+    // inofensivo: la corrida que ya empezó termina, y las que no empezaron
+    // quedan `pendiente` para que la red de seguridad las levante.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await db.insert(esquema.brands).values({
+        organizationId: ref.organizationId, slug: 'dos', name: 'Dos',
+      })
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await encolarGrilla(db, ref.organizationId, { slug: 'dos', mes: '2026-10' })
+
+      // Se enciende después de la primera consulta, para que el turno atienda
+      // una corrida y corte antes de la segunda. Si `drenarCola` no mirara la
+      // bandera, se llevaría las dos y no quedaría ninguna pendiente.
+      let señal = false
+      const debeParar = () => {
+        const antes = señal
+        señal = true
+        return antes
+      }
+
+      const r = await drenarCola(db, { cliente: new ClienteFalso([]), env: ENV }, { debeParar })
+
+      expect(r).toMatchObject({ completadas: 0, fallidas: 1, quedaTrabajo: true })
+      const pendientes = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.status, 'pendiente'))
+      expect(pendientes).toHaveLength(1)
+    })
+  })
+
+  it('agotado el presupuesto de tiempo el turno corta y deja el resto en la cola', async () => {
+    // El presupuesto se cuenta **desde que arranca el turno**, así que con un
+    // milisegundo la primera corrida sí se atiende: la condición se comprueba
+    // antes de cada una, y al entrar no ha pasado tiempo todavía. El corte
+    // llega antes de la segunda, que es lo que esta prueba mide.
+    //
+    // Que atienda al menos una es lo correcto y no un defecto: un turno que
+    // cortara sin hacer nada no serviría para nada, y el motivo del corte
+    // —Cloud Run cortando la petición a mitad de una generación— solo aparece
+    // a partir de la segunda.
+    //
+    // Las dos corridas van a meses de 2026-Q4, que `sembrarConEstrategia` no
+    // cubre, así que fallan en el primer paso sin llamar al modelo: lo que se
+    // mide acá es el corte, no lo que hace cada corrida.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-11' })
+
+      const r = await drenarCola(
+        db,
+        { cliente: new ClienteFalso([]), env: ENV },
+        { presupuestoMs: 1 },
+      )
+
+      expect(r).toEqual({ completadas: 0, fallidas: 1, quedaTrabajo: true })
+      const pendientes = await db
+        .select()
+        .from(esquema.pipelineRuns)
+        .where(eq(esquema.pipelineRuns.status, 'pendiente'))
+      expect(pendientes).toHaveLength(1)
+    })
+  })
+
+  it('un límite o un presupuesto no positivos son un error de quien llama', async () => {
+    // Sin la guarda, el bucle no daba ni una vuelta y la función devolvía
+    // `quedaTrabajo: true` —afirmando que queda trabajo **sin haber consultado
+    // la cola**— más un log diciendo que el turno cortó por llegar al tope.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const deps = { cliente: new ClienteFalso([]), env: ENV }
+      await expect(drenarCola(db, deps, 0)).rejects.toThrow(/límite=0/)
+      await expect(drenarCola(db, deps, { presupuestoMs: 0 })).rejects.toThrow(/presupuesto=0/)
+    })
+  })
 })

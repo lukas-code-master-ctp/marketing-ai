@@ -8,6 +8,14 @@ export interface OpcionesDelServidor {
   db: BaseDeDatos
   deps: DependenciasDelWorker
   token: string
+  /**
+   * Se le pasa tal cual a `drenarCola`, que la consulta entre corrida y
+   * corrida. Es lo que permite que un `SIGTERM` acorte un turno en Cloud Run,
+   * donde el drenado ocurre dentro de la petición y no hay bucle de sondeo que
+   * mire la bandera por su cuenta. Opcional para que las pruebas del servidor
+   * no tengan que inventar una.
+   */
+  debeParar?: () => boolean
 }
 
 const CABECERA_DEL_TOKEN = 'x-token-worker'
@@ -63,9 +71,9 @@ function responder(res: ServerResponse, codigo: number, cuerpo: unknown): void {
  * proceso. En Cloud Run, cuya única función es sobrevivir para drenar la
  * cola, eso tumbaba la instancia entera en vez de responder 500.
  */
-export function crearServidor({ db, deps, token }: OpcionesDelServidor): Server {
+export function crearServidor(opciones: OpcionesDelServidor): Server {
   return createServer((req: IncomingMessage, res: ServerResponse) => {
-    manejarPeticion(req, res, { db, deps, token }).catch((error: unknown) => {
+    manejarPeticion(req, res, opciones).catch((error: unknown) => {
       manejarErrorNoCapturado(res, error)
     })
   })
@@ -74,7 +82,7 @@ export function crearServidor({ db, deps, token }: OpcionesDelServidor): Server 
 async function manejarPeticion(
   req: IncomingMessage,
   res: ServerResponse,
-  { db, deps, token }: OpcionesDelServidor,
+  { db, deps, token, debeParar }: OpcionesDelServidor,
 ): Promise<void> {
   const recibido = req.headers[CABECERA_DEL_TOKEN]
   if (!tokenValido(typeof recibido === 'string' ? recibido : undefined, token)) {
@@ -88,7 +96,7 @@ async function manejarPeticion(
     return
   }
 
-  responder(res, 200, await drenarCola(db, deps))
+  responder(res, 200, await drenarCola(db, deps, debeParar !== undefined ? { debeParar } : {}))
 }
 
 /**
@@ -103,13 +111,28 @@ async function manejarPeticion(
  * `drenarCola`— antes de que la excepción ocurriera en otra parte; escribir
  * una segunda respuesta sobre una ya enviada vuelve a lanzar. En ese caso
  * solo cierra la conexión y deja constancia en el log.
+ *
+ * Y lleva su propio `try/catch` porque es **el último eslabón**: esta función
+ * corre dentro del `.catch()` de arriba, así que si `responder()` o `res.end()`
+ * lanzaran —la respuesta ya cerrada por el otro extremo, un socket destruido—
+ * el rechazo volvería a quedar flotante y Node ≥ 15 termina el proceso, que es
+ * justo lo que este manejador vino a evitar. `res.destroy()` en el catch no
+ * puede fallar de la misma forma: es síncrono y tolera un socket ya muerto.
  */
 function manejarErrorNoCapturado(res: ServerResponse, error: unknown): void {
   const texto = error instanceof Error ? error.message : String(error)
   console.error('[worker] fallo de infraestructura al atender la petición:', texto)
-  if (res.headersSent) {
-    res.end()
-    return
+  try {
+    if (res.headersSent) {
+      res.end()
+      return
+    }
+    responder(res, 500, { error: texto })
+  } catch (fallo: unknown) {
+    console.error(
+      '[worker] tampoco se pudo responder el error; se corta la conexión:',
+      fallo instanceof Error ? fallo.message : String(fallo),
+    )
+    res.destroy()
   }
-  responder(res, 500, { error: texto })
 }

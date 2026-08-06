@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const requerir = createRequire(import.meta.url)
@@ -45,6 +46,35 @@ describe('copia única de google-auth-library', () => {
         'packages/db/package.json con el que exige ' +
         '@google-cloud/cloud-sql-connector (revisa su package.json), y corre ' +
         'pnpm install para que las dos vuelvan a resolver a una sola copia.',
+    ).toBe(true)
+  })
+
+  it('@gc/despertador resuelve el mismo archivo que @gc/db', () => {
+    // `@gc/despertador` importa `GoogleAuth` para firmar contra la API REST de
+    // Cloud Tasks. Ese uso no depende del `instanceof` —solo pide un token—,
+    // pero el paquete es un tercer declarante del mismo rango, y si el suyo se
+    // despega del de `packages/db/package.json`, pnpm instala otra copia y esa
+    // copia vuelve a poner en riesgo el `instanceof` del conector: basta con
+    // que el hoisting cambie de mano. Se afirma por `require.resolve` y no
+    // comparando los rangos declarados, por lo mismo que la prueba de arriba.
+    //
+    // Se llega por ruta del sistema de archivos y no por el nombre del
+    // paquete: `@gc/db` no declara `@gc/despertador` —ni debe—, así que
+    // `require.resolve('@gc/despertador')` no resolvería.
+    const propia = requerir.resolve('google-auth-library')
+
+    const delDespertador = requerir.resolve('google-auth-library', {
+      paths: [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../despertador/src')],
+    })
+
+    expect(
+      delDespertador === propia,
+      `google-auth-library resolvió a DOS copias distintas:\n` +
+        `  @gc/db:          ${propia}\n` +
+        `  @gc/despertador: ${delDespertador}\n\n` +
+        'Arreglo: alinea el rango de "google-auth-library" en ' +
+        'packages/despertador/package.json con el de packages/db/package.json, y corre ' +
+        'pnpm install.',
     ).toBe(true)
   })
 })
