@@ -25,6 +25,16 @@ const nextConfig: NextConfig = {
   transpilePackages: [
     '@gc/brand', '@gc/db', '@gc/operaciones', '@gc/shared', '@gc/strategy',
   ],
+  // Acá vivían un `outputFileTracingIncludes` y, antes que él, un
+  // `serverExternalPackages`, los dos para que `@google-cloud/tasks` llegara
+  // entero a la función de Vercel. Ya no hacen falta: el despertador
+  // (`packages/despertador/src/despertar.ts`) habla con la API REST de Cloud
+  // Tasks por `fetch`, así que ese paquete —y `google-gax`, gRPC y protobuf
+  // detrás— salió del árbol de dependencias de la web. Lo que se midió de
+  // cada intento, y por qué ninguno de los dos servía, quedó en
+  // `docs/superpowers/specs/pendientes.md`; no se repite acá porque ya no
+  // describe ninguna línea de este archivo.
+  //
   // Todo el código del proyecto importa con extensión .js apuntando a
   // archivos .ts (estilo ESM/NodeNext). Vitest lo resuelve solo; el webpack
   // de Next necesita este alias explícito o falla con "Module not found".

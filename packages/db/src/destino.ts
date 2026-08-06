@@ -17,8 +17,16 @@ export type Destino =
       usuario: string
       clave: string
       base: string
-      /** El JSON de la cuenta de servicio, tal cual, sin parsear. */
-      credenciales: string
+      /**
+       * El JSON de la cuenta de servicio, tal cual, sin parsear — o `null`
+       * para que el conector tome las credenciales del entorno.
+       *
+       * `null` solo ocurre dentro de Cloud Run, que adhiere una cuenta de
+       * servicio al servicio y la expone por su servidor de metadatos. En
+       * Vercel no existe esa identidad, y por eso allá la variable sigue
+       * siendo obligatoria: ver la comprobación de `K_SERVICE` más abajo.
+       */
+      credenciales: string | null
     }
 
 export function destinoDeConexion(env: Record<string, string | undefined>): Destino {
@@ -48,17 +56,20 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
     )
   }
 
-  const faltantes = (
-    [
-      'CLOUD_SQL_USUARIO',
-      'CLOUD_SQL_CLAVE',
-      'CLOUD_SQL_BASE',
-      // El JSON de la cuenta de servicio. Va como variable y no como archivo
-      // porque en Vercel no hay dónde poner un archivo, y el conector acepta
-      // las credenciales como objeto por su opción `auth`.
-      'GOOGLE_CREDENCIALES_JSON',
-    ] as const
-  ).filter((nombre) => !env[nombre]?.trim())
+  // `K_SERVICE` la define Cloud Run en toda revisión, y no la define ningún
+  // otro entorno de los que este repositorio usa. Es la señal de que hay una
+  // cuenta de servicio adherida al proceso, y por lo tanto de que el JSON
+  // sobra. Donde no está —Vercel, tu máquina— el JSON sigue siendo la única
+  // forma de autenticar, así que su ausencia se reporta como error legible en
+  // vez de dejar que el conector caiga a unas credenciales por omisión que no
+  // existen: ese fallo aparecería recién al desplegar y no menciona variables.
+  const dentroDeCloudRun = Boolean(env.K_SERVICE?.trim())
+  const credenciales = env.GOOGLE_CREDENCIALES_JSON?.trim() ? env.GOOGLE_CREDENCIALES_JSON! : null
+
+  const requeridas = ['CLOUD_SQL_USUARIO', 'CLOUD_SQL_CLAVE', 'CLOUD_SQL_BASE']
+  if (!dentroDeCloudRun) requeridas.push('GOOGLE_CREDENCIALES_JSON')
+
+  const faltantes = requeridas.filter((nombre) => !env[nombre]?.trim())
 
   if (faltantes.length > 0) {
     throw new Error(
@@ -72,6 +83,6 @@ export function destinoDeConexion(env: Record<string, string | undefined>): Dest
     usuario: env.CLOUD_SQL_USUARIO!.trim(),
     clave: env.CLOUD_SQL_CLAVE!,
     base: env.CLOUD_SQL_BASE!.trim(),
-    credenciales: env.GOOGLE_CREDENCIALES_JSON!,
+    credenciales,
   }
 }

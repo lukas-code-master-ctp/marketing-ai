@@ -3,13 +3,15 @@ node_modules
 .next
 .git
 
-# Hoy el Dockerfile no tiene ningún `COPY`, así que este archivo es inerte:
-# BuildKit ni siquiera transfiere el contexto. Estas dos líneas están de todos
-# modos porque el día que alguien agregue un `COPY . .` para armar una imagen
-# de producción, lo que entraría a la imagen son credenciales (`.env`, con la
-# clave de OpenRouter) y datos reales de operación (`perfiles/`). Los dos están
-# ignorados por git justamente por eso; que se cuelen por Docker sería el mismo
-# escape por otra puerta.
+# Ya no es inerte: `apps/worker/Dockerfile.produccion` hace `COPY . .`, así que
+# esta lista es lo único que impide que entren a la imagen las credenciales
+# (`.env`, con la clave de OpenRouter) y los datos reales de operación
+# (`perfiles/`). Los dos están ignorados por git justamente por eso; que se
+# cuelen por Docker sería el mismo escape por otra puerta. En Cloud Run las
+# variables vienen del servicio y los secretos de Secret Manager.
 .env
 .env.local
 perfiles/
+**/.next
+docs
+.pnpm-store

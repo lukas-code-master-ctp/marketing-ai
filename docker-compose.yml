@@ -58,6 +58,35 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/gestor
       CLOUD_SQL_INSTANCIA: ""
+      # En local no hay Cloud Tasks ni Cloud Scheduler, así que el worker se
+      # despierta solo. Este es el sustituto de la red de seguridad de la nube,
+      # y por eso en Cloud Run la variable NO se declara.
+      SONDEO_MS: "2000"
+      # El token compartido. En local vale cualquier cosa: aquí nadie llama al
+      # worker por HTTP. Se fija igual porque sin él el proceso no arranca, y
+      # dejarlo al `.env` haría fallar un clon nuevo por una razón que no tiene
+      # nada que ver con lo que esa persona vino a hacer.
+      WORKER_TOKEN: "local"
+    # Publicado para poder golpear la ruta a mano desde el host mientras se
+    # desarrolla (`curl -X POST -H "x-token-worker: local"
+    # http://localhost:8090/trabajar`). No hace falta para que el sondeo
+    # funcione.
+    #
+    # El puerto del host es 8090 y no 8080 a propósito: en la máquina de este
+    # proyecto el 8080 del host ya está ocupado de forma permanente por un
+    # contenedor de otro proyecto (`smartprop-local-wordpress-1`), y publicar
+    # ahí hace fallar `docker compose up -d worker` por conflicto de puerto.
+    # Adentro del contenedor sigue siendo 8080, que es lo que Cloud Run espera
+    # y el valor por omisión que lee el worker (`PORT` en `main.ts`) — no lo
+    # "corrijas" de vuelta a 8080:8080.
+    #
+    # El `127.0.0.1:` delante tampoco es adorno: sin él Docker publica en
+    # `0.0.0.0`, o sea que cualquiera en la misma red —un café, una oficina—
+    # puede hacer `POST /trabajar` con el token `local`, que está escrito aquí
+    # abajo en claro, y poner al worker a drenar la cola gastando el saldo de
+    # OpenRouter. Con la interfaz de bucle local el `curl` de arriba funciona
+    # exactamente igual, porque se hace desde esta misma máquina.
+    ports: ["127.0.0.1:8090:8080"]
     volumes:
       - .:/app
       # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en
@@ -85,6 +114,7 @@ services:
       - nm-ai:/app/packages/ai/node_modules
       - nm-brand:/app/packages/brand/node_modules
       - nm-db:/app/packages/db/node_modules
+      - nm-despertador:/app/packages/despertador/node_modules
       - nm-flujos:/app/packages/flujos/node_modules
       - nm-operaciones:/app/packages/operaciones/node_modules
       - nm-pipeline:/app/packages/pipeline/node_modules
@@ -153,6 +183,7 @@ volumes:
   nm-ai:
   nm-brand:
   nm-db:
+  nm-despertador:
   nm-flujos:
   nm-operaciones:
   nm-pipeline:

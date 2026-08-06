@@ -29,6 +29,9 @@ importers:
       '@gc/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@gc/despertador':
+        specifier: workspace:*
+        version: link:../../packages/despertador
       '@gc/flujos':
         specifier: workspace:*
         version: link:../../packages/flujos
@@ -57,6 +60,9 @@ importers:
       '@gc/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@gc/despertador':
+        specifier: workspace:*
+        version: link:../../packages/despertador
       '@gc/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
@@ -204,6 +210,12 @@ importers:
       drizzle-kit:
         specifier: ^0.28.0
         version: 0.28.1
+
+  packages/despertador:
+    dependencies:
+      google-auth-library:
+        specifier: ^10.6.2
+        version: 10.9.1
 
   packages/flujos:
     dependencies:
