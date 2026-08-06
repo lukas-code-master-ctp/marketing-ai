@@ -41,3 +41,55 @@ jobs:
       - name: Comprobar volúmenes del worker en docker-compose
         run: pnpm comprobar:volumenes
       - run: pnpm test
+
+  # El despliegue va como trabajo de este mismo workflow y no como uno aparte
+  # encadenado por `workflow_run`: con `needs: test` la dependencia queda
+  # escrita donde se lee, y desplegar una imagen que no pasó las pruebas sería
+  # peor que no desplegar.
+  #
+  # Sin filtro de rutas a propósito. Un cambio en `packages/shared` sí afecta
+  # al worker, y una lista de rutas mantenida a mano es una forma conocida de
+  # equivocarse en eso. Un despliegue redundante cuesta un par de minutos.
+  desplegar-worker:
+    needs: test
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Sin esto, la federación de identidad no funciona: `id-token: write` es lo
+    # que permite a Actions pedir su token OIDC, que es lo que Google canjea
+    # por credenciales efímeras. Es lo que evita guardar una clave de cuenta de
+    # servicio en los secretos del repositorio.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVEEDOR }}
+          service_account: desplegador-worker@gestor-contenido-ctp.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Autorizar docker contra Artifact Registry
+        run: gcloud auth configure-docker southamerica-east1-docker.pkg.dev --quiet
+      # La imagen se construye acá y no en Cloud Build: el repositorio es
+      # público, así que estos minutos son gratis, y evita depender de un
+      # servicio más.
+      #
+      # Dos etiquetas: el SHA para poder volver a una revisión concreta, y
+      # `latest` para que quien mire el repositorio de imágenes sepa cuál es la
+      # última sin cruzar con el historial de git.
+      - name: Construir y empujar la imagen
+        run: |
+          IMAGEN=southamerica-east1-docker.pkg.dev/gestor-contenido-ctp/gestor/worker
+          docker build -f apps/worker/Dockerfile.produccion -t "$IMAGEN:${{ github.sha }}" -t "$IMAGEN:latest" .
+          docker push "$IMAGEN:${{ github.sha }}"
+          docker push "$IMAGEN:latest"
+      # Solo la imagen. Las variables, los secretos, la cuenta de servicio y
+      # los límites de instancias los fijó la Task 8 y siguen puestos: un
+      # `--set-env-vars` acá los pisaría, y con ellos el token compartido y la
+      # clave de la base.
+      - name: Desplegar la revisión
+        run: |
+          gcloud run deploy worker \
+            --image southamerica-east1-docker.pkg.dev/gestor-contenido-ctp/gestor/worker:${{ github.sha }} \
+            --region southamerica-east1 \
+            --project gestor-contenido-ctp
