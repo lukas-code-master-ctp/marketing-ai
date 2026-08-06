@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió: hubo una prueba de humo contra la instancia real que confirmó que el conector funciona desde Vercel, pero el proyecto de esa prueba, aunque se pensó desechable, **sigue existiendo**: no se borró, y todavía tiene la clave privada de la cuenta de servicio cargada en sus variables de entorno (ver `pendientes.md`). Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. **Ya está desplegada** en `https://marketing-ai-web.vercel.app`, contra la base de Cloud SQL: las siete migraciones aplicadas, el inicio de sesión con Google funcionando de punta a punta, y la organización `principal` con la marca `parcelas` creadas desde el CLI apuntado a la base remota. La lista de redes autorizadas de la instancia sigue **vacía**. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
