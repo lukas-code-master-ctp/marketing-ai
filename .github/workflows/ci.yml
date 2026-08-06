@@ -16,14 +16,14 @@ jobs:
     env:
       DATABASE_URL_TEST: postgres://postgres:postgres@localhost:5432/gestor_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Sin `version:` a propósito. La acción lee `packageManager` de
       # `package.json` (`pnpm@9.15.9`) y se niega a arrancar si la versión
       # está declarada en los dos lados: prefiere fallar antes que instalar
       # una y resolver con otra. Una sola fuente de verdad, y es la del
       # repositorio.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
