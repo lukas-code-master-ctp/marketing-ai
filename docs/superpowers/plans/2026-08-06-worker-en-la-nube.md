@@ -189,14 +189,10 @@ Reemplaza el bloque `faltantes` (líneas 51-67) por:
   const dentroDeCloudRun = Boolean(env.K_SERVICE?.trim())
   const credenciales = env.GOOGLE_CREDENCIALES_JSON?.trim() ? env.GOOGLE_CREDENCIALES_JSON! : null
 
-  const faltantes = (
-    [
-      'CLOUD_SQL_USUARIO',
-      'CLOUD_SQL_CLAVE',
-      'CLOUD_SQL_BASE',
-      ...(dentroDeCloudRun ? [] : (['GOOGLE_CREDENCIALES_JSON'] as const)),
-    ] as const
-  ).filter((nombre) => !env[nombre]?.trim())
+  const requeridas = ['CLOUD_SQL_USUARIO', 'CLOUD_SQL_CLAVE', 'CLOUD_SQL_BASE']
+  if (!dentroDeCloudRun) requeridas.push('GOOGLE_CREDENCIALES_JSON')
+
+  const faltantes = requeridas.filter((nombre) => !env[nombre]?.trim())
 
   if (faltantes.length > 0) {
     throw new Error(
@@ -353,9 +349,8 @@ describe('drenarCola', () => {
   it('una corrida que falla no detiene a las siguientes', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
-      await db.insert(esquema.brands).values({
-        organizationId: ref.organizationId, slug: 'dos', name: 'Dos',
-      })
+      // Una sola marca alcanza: la guarda contra el doble encolado es por
+      // marca **y mes**, así que dos meses distintos dan dos corridas vivas.
       // La primera en entrar es la que falla: sin estrategia para 2026-Q4.
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: MES })
