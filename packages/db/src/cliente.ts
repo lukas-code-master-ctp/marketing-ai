@@ -82,10 +82,25 @@ export async function crearConexion(urlDePrueba?: string): Promise<Conexion> {
       scopes: ['https://www.googleapis.com/auth/sqlservice.admin'],
     }),
   })
-  const opciones = await conector.getOptions({
-    instanceConnectionName: destino.instancia,
-    ipType: IpAddressTypes.PUBLIC,
-  })
+
+  // Si `getOptions` rechaza, el `conector` recién construido no se cierra
+  // solo. Hoy no hay fuga real —revisado en el paquete: el intervalo de
+  // refresco interno solo se arma cuando hay `domainName`, y ese refresco no
+  // se rearma si falla antes de establecer conexión—, pero eso es un detalle
+  // interno de `@google-cloud/cloud-sql-connector` que `crearConexion` no
+  // debería dar por sentado sin decirlo: una versión futura del paquete
+  // puede armar el intervalo en otro punto. Cerrarlo explícitamente ante
+  // cualquier falla no depende de que ese detalle siga siendo cierto.
+  let opciones: Awaited<ReturnType<typeof conector.getOptions>>
+  try {
+    opciones = await conector.getOptions({
+      instanceConnectionName: destino.instancia,
+      ipType: IpAddressTypes.PUBLIC,
+    })
+  } catch (error) {
+    conector.close()
+    throw error
+  }
 
   const pool = new pg.Pool({
     ...opciones,
