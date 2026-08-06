@@ -38,7 +38,20 @@ export async function despertarWorker(
     // configuración) nunca lo toca, y si igual truena en producción, cae dentro
     // del mismo `catch` que ya trata cualquier otro fallo de Google como no
     // fatal.
-    const { CloudTasksClient } = await import('@google-cloud/tasks')
+    //
+    // Pero el import dinámico por sí solo no basta: comprobado empaquetando
+    // la web (ver el comentario largo sobre `outputFileTracingIncludes` en
+    // `apps/web/next.config.ts`), webpack igual metía el `CloudTasksClient`
+    // completo —con el mismo `require(path.join(...))` roto— dentro de un
+    // chunk aparte que este `import()` cargaba en tiempo de ejecución. O sea
+    // que en producción, con las seis variables del despertador presentes,
+    // el import sí llegaba a evaluarse y el mismo error de siempre habría
+    // saltado — atrapado por este `catch`, pero saltado igual. El comentario
+    // mágico `webpackIgnore` dejaba a webpack sin tocar el import — y con eso
+    // el paquete deja de estar en el bundle, pero también deja de estar en el
+    // rastreo de archivos que Vercel sube: `outputFileTracingIncludes`, en el
+    // config de la web, es lo que fuerza esa inclusión de vuelta.
+    const { CloudTasksClient } = await import(/* webpackIgnore: true */ '@google-cloud/tasks')
     const cliente = new CloudTasksClient(
       destino.credenciales !== null ? { credentials: JSON.parse(destino.credenciales) } : {},
     )
