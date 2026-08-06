@@ -73,12 +73,21 @@ export async function crearConexion(urlDePrueba?: string): Promise<Conexion> {
   // Las credenciales van como objeto y no por `GOOGLE_APPLICATION_CREDENTIALS`,
   // que espera una **ruta a un archivo**: en Vercel no hay archivos que poner.
   // El JSON de la cuenta de servicio viaja en una variable de entorno y se le
-  // entrega al conector por su opción `auth`. Un `new Connector()` a secas cae
-  // a las credenciales por omisión, que en Vercel no existen — y eso solo se
-  // descubre desplegando.
+  // entrega al conector por su opción `auth`.
+  //
+  // Con `credenciales === null` —o sea, dentro de Cloud Run— se construye el
+  // `GoogleAuth` **sin** `credentials`, y la librería resuelve por el servidor
+  // de metadatos la cuenta adherida al servicio. Lo que NO se puede hacer es
+  // saltarse el `GoogleAuth` y pasar `new Connector()` a secas: el conector
+  // decide si usa lo que le dan con `loginAuth instanceof GoogleAuth`, así que
+  // sin ese objeto la petición sale sin credenciales y responde
+  // `401 Login Required` sin mencionar nada de esto. Ver la regla no
+  // negociable de `CLAUDE.md` sobre la copia única de `google-auth-library`.
   const conector = new Connector({
     auth: new GoogleAuth({
-      credentials: JSON.parse(destino.credenciales),
+      ...(destino.credenciales !== null
+        ? { credentials: JSON.parse(destino.credenciales) }
+        : {}),
       scopes: ['https://www.googleapis.com/auth/sqlservice.admin'],
     }),
   })

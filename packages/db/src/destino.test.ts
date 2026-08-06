@@ -37,12 +37,28 @@ describe('destinoDeConexion', () => {
     )
   })
 
-  it('con la instancia y sus datos pero sin GOOGLE_CREDENCIALES_JSON también falla nombrando la variable', () => {
-    // Mismo caso peligroso que las otras tres: sin esto, el conector caería
-    // a las credenciales por omisión, que en Vercel no existen, y el fallo
-    // aparecería recién al desplegar.
+  it('sin GOOGLE_CREDENCIALES_JSON y sin identidad adherida sigue fallando nombrando la variable', () => {
+    // La garantía original, intacta para Vercel: allá NO hay cuenta de
+    // servicio adherida al entorno, así que caer a las credenciales por
+    // omisión daría un fallo oscuro recién al desplegar. Este error se lee.
     const { GOOGLE_CREDENCIALES_JSON: _omitida, ...sinCredenciales } = CLOUD
     expect(() => destinoDeConexion(sinCredenciales)).toThrow(/GOOGLE_CREDENCIALES_JSON/)
+  })
+
+  it('sin GOOGLE_CREDENCIALES_JSON pero dentro de Cloud Run usa las credenciales del entorno', () => {
+    // `K_SERVICE` la define Cloud Run en toda revisión y no la define nadie
+    // más. Ahí sí hay una cuenta de servicio adherida al servicio, así que
+    // exigir el JSON obligaría a copiar la clave a una variable más.
+    const { GOOGLE_CREDENCIALES_JSON: _omitida, ...sinCredenciales } = CLOUD
+    const d = destinoDeConexion({ ...sinCredenciales, K_SERVICE: 'worker' })
+    expect(d).toMatchObject({ tipo: 'cloud-sql', credenciales: null })
+  })
+
+  it('con GOOGLE_CREDENCIALES_JSON manda el JSON aunque esté en Cloud Run', () => {
+    // La variable explícita gana: si alguien la carga a propósito, es porque
+    // quiere esa identidad y no la del servicio.
+    const d = destinoDeConexion({ ...CLOUD, K_SERVICE: 'worker' })
+    expect(d).toMatchObject({ credenciales: '{"type":"service_account"}' })
   })
 
   it('sin nada configurado dice qué falta', () => {
