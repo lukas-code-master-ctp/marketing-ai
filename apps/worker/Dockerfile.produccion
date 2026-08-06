@@ -17,6 +17,12 @@ RUN corepack enable pnpm || npm install -g pnpm@9
 
 WORKDIR /app
 COPY . .
+
+# Tampoco lleva `--prod`, y esa omisión es deliberada: el `CMD` de abajo corre
+# el worker con `tsx`, que está declarado como **devDependency** de
+# `@gc/worker`. Con `--prod` no se instalaría y el contenedor no arrancaría.
+# Se dice acá porque la imagen pesa más de un giga y la reacción natural de
+# quien la vea es agregar esa bandera para achicarla.
 RUN pnpm install --frozen-lockfile
 
 ENV NODE_ENV=production
