@@ -107,6 +107,7 @@ services:
       - nm-ai:/app/packages/ai/node_modules
       - nm-brand:/app/packages/brand/node_modules
       - nm-db:/app/packages/db/node_modules
+      - nm-despertador:/app/packages/despertador/node_modules
       - nm-flujos:/app/packages/flujos/node_modules
       - nm-operaciones:/app/packages/operaciones/node_modules
       - nm-pipeline:/app/packages/pipeline/node_modules
@@ -175,6 +176,7 @@ volumes:
   nm-ai:
   nm-brand:
   nm-db:
+  nm-despertador:
   nm-flujos:
   nm-operaciones:
   nm-pipeline:
