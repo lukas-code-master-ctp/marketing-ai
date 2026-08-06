@@ -1,10 +1,23 @@
 import { sql } from 'drizzle-orm'
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { fileURLToPath } from 'node:url'
-import { crearConexion, type BaseDeDatos } from '../cliente.js'
+import { crearConexion, type BaseDeDatos, type Conexion } from '../cliente.js'
 import { esquema } from '../esquema.js'
 
 const CARPETA_MIGRACIONES = fileURLToPath(new URL('../../migraciones', import.meta.url))
+
+/**
+ * `crearConexion` resuelve su destino de `process.env.DATABASE_URL` por
+ * omisión (ver `destinoDeConexion`), pero acepta una URL explícita para el
+ * caso de las pruebas, que quieren conectar a `DATABASE_URL_TEST` y no a
+ * `DATABASE_URL` —que durante toda la suite apunta a `gestor`, la base de
+ * desarrollo, porque `vitest.setup.ts` carga el `.env` de la raíz—. Pasarla
+ * como parámetro evita tener que mutar `process.env` para prestársela: nada
+ * que restaurar, nada que se corrompa si dos llamadas se solapan.
+ */
+export async function crearConexionDePrueba(url: string): Promise<Conexion> {
+  return crearConexion(url)
+}
 
 /**
  * Borra los disparadores y las funciones que dejó viva una corrida anterior.
@@ -67,13 +80,19 @@ export async function conBaseDeDatosDePrueba(
   const url = process.env.DATABASE_URL_TEST
   if (!url) throw new Error('Falta DATABASE_URL_TEST')
 
-  const { db, cerrar } = crearConexion(url)
+  const { db, cerrar } = await crearConexionDePrueba(url)
   try {
     // Antes de migrar: alguna migración rellena columnas con UPDATE y un
     // disparador residual sobre esa tabla la haría fallar.
     await barrerResiduos(db)
     await migrate(db, { migrationsFolder: CARPETA_MIGRACIONES })
     await db.delete(esquema.organizations)
+    // `users` no cuelga de `organization_id` (a propósito: ver el comentario
+    // de la tabla en esquema.ts), así que el borrado de arriba no la alcanza
+    // por cascada. Sin esta línea, una persona que una prueba deja insertada
+    // sobrevive a la siguiente corrida y su correo único choca contra la
+    // próxima prueba que intente crear la misma persona.
+    await db.delete(esquema.users)
     await fn(db)
   } finally {
     await cerrar()

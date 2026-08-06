@@ -295,10 +295,17 @@ export async function aprobarGrilla(
   db: BaseDeDatos,
   organizationId: string,
   contentPlanId: string,
+  /**
+   * Quién aprobó. Opcional y `null` por omisión: el CLI aprueba sin sesión, y
+   * ahí `null` significa "lo hizo el sistema". Va como parámetro explícito y
+   * no leído de un contexto porque `@gc/operaciones` no sabe que existe una
+   * sesión web — el CLI y el worker llaman a esta misma función.
+   */
+  usuarioId?: string,
 ): Promise<void> {
   const [fila] = await db
     .update(esquema.contentPlans)
-    .set({ status: 'aprobada' })
+    .set({ status: 'aprobada', approvedBy: usuarioId ?? null })
     .where(
       and(
         eq(esquema.contentPlans.id, contentPlanId),
@@ -339,11 +346,23 @@ export async function aprobarGrilla(
  * `borrador` tampoco, para que el comando nunca dé por hecho un cambio que
  * no ocurrió. Se identifica por marca y mes, no por id, porque es la clave
  * con la que trabaja la línea de comandos.
+ *
+ * `approved_by` no se toca acá: conserva a quien aprobó por última vez
+ * mientras el estado vuelve a `borrador`. Es un registro histórico de la
+ * última aprobación, no una marca de "aprobación vigente" — la grilla ya
+ * no está aprobada, lo dice `status`, y quien lea la fila no debería
+ * confundir una cosa con la otra.
  */
 export async function reabrirGrilla(
   db: BaseDeDatos,
   organizationId: string,
   args: { slug: string; mes: string },
+  /**
+   * Quién reabrió. Opcional y `null` por omisión, por el mismo motivo que
+   * `aprobarGrilla`: el CLI reabre sin sesión, y ahí `null` significa "lo
+   * hizo el sistema".
+   */
+  usuarioId?: string,
 ): Promise<void> {
   const ref = await resolverMarca(db, organizationId, args.slug)
   validarMes(args.mes)
@@ -356,7 +375,7 @@ export async function reabrirGrilla(
 
   const [fila] = await db
     .update(esquema.contentPlans)
-    .set({ status: 'borrador' })
+    .set({ status: 'borrador', reopenedBy: usuarioId ?? null })
     .where(and(delMes, eq(esquema.contentPlans.status, 'aprobada')))
     .returning({ id: esquema.contentPlans.id })
 

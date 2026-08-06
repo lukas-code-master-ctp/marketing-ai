@@ -217,8 +217,8 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
   // dentro de la misma transacción comparten el mismo `created_at` exacto, y
   // sin desempate el orden entre ellas queda arbitrario.
   //
-  // `db.execute` con el driver postgres-js devuelve el arreglo de filas
-  // directamente —no un `{ rows }`—, igual que en `esquema.test.ts`.
+  // `db.execute` con `node-postgres` devuelve un `QueryResult` con las filas
+  // adentro, no el arreglo directamente: hay que desestructurar `rows`.
   //
   // El `WHERE status = 'pendiente'` del UPDATE externo es redundante con el
   // de la subconsulta en el camino feliz —Postgres ya filtró por eso al
@@ -234,7 +234,7 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
   // caso y deja el UPDATE intacto. La organización también se compara porque
   // es la tenencia que la clave foránea compuesta ya exige: aquí solo se
   // escribe igual que en el resto del paquete.
-  const filas = (await db.execute(sql`
+  const { rows } = await db.execute(sql`
     UPDATE pipeline_runs SET status = 'en_curso'
     WHERE status = 'pendiente' AND id = (
       SELECT id FROM pipeline_runs
@@ -248,7 +248,8 @@ export async function tomarCorridaPendiente(db: BaseDeDatos): Promise<CorridaTom
       WHERE b.id = pipeline_runs.brand_id
         AND b.organization_id = pipeline_runs.organization_id
     ) AS brand_slug
-  `)) as unknown as FilaTomada[]
+  `)
+  const filas = rows as unknown as FilaTomada[]
 
   const fila = filas[0]
   if (!fila) return null

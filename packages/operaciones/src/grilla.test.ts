@@ -442,6 +442,58 @@ describe('descartarSlot, editarSlot y aprobarGrilla', () => {
     })
   })
 
+  it('aprobar y reabrir registran quién lo hizo, y sin usuario dejan null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConGrilla(db)
+      const [plan] = await db.select().from(esquema.contentPlans)
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+
+      await aprobarGrilla(db, ref.organizationId, plan!.id, persona!.id)
+
+      const [conAutor] = await db
+        .select({ approvedBy: esquema.contentPlans.approvedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(conAutor!.approvedBy).toBe(persona!.id)
+
+      // Reabrir CON usuario: `reopenedBy` tiene que quedar con su id. Esta es
+      // la mitad que la versión anterior de esta prueba nunca ejercitaba, así
+      // que `reopenedBy: usuarioId ?? null` en `reabrirGrilla` no tenía
+      // ninguna cobertura, ni positiva ni negativa.
+      await reabrirGrilla(
+        db,
+        ref.organizationId,
+        { slug: 'parcelas', mes: '2026-09' },
+        persona!.id,
+      )
+
+      const [conReabridor] = await db
+        .select({ reopenedBy: esquema.contentPlans.reopenedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      expect(conReabridor!.reopenedBy).toBe(persona!.id)
+
+      // Vuelve a aprobar (quién lo hace esta vez no importa para esta prueba)
+      // solo para poder reabrir una segunda vez sin usuario.
+      await aprobarGrilla(db, ref.organizationId, plan!.id)
+
+      await reabrirGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-09' })
+
+      const [sinAutor] = await db
+        .select({ reopenedBy: esquema.contentPlans.reopenedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+      // Sin usuario no falla: `null` significa "lo hizo el sistema", que es lo
+      // que pasa cuando reabre el CLI. Como la aserción anterior ya probó que
+      // `reopenedBy` SÍ queda escrito cuando hay usuario, este `null` ahora es
+      // una regresión real del `?? null` y no un valor que nunca se tocó.
+      expect(sinAutor!.reopenedBy).toBeNull()
+    })
+  })
+
   it('las tres operaciones ignoran filas de otra organización', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConGrilla(db)

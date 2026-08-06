@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { mesActual } from '../../calendario.js'
+import { mesActual } from '../../../calendario.js'
 
 const SECCIONES = [
   { segmento: 'grilla', etiqueta: 'Grilla' },

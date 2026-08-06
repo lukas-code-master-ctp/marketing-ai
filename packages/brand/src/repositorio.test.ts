@@ -1,5 +1,6 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { and, eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { PERFIL_VALIDO } from './perfil.fixture.js'
 import { cargarPerfilVigente, guardarPerfil } from './repositorio.js'
@@ -85,6 +86,35 @@ describe('repositorio de perfiles', () => {
 
       expect((error as Error).message).toContain('parcelas')
       expect((error as Error).message).not.toContain(inexistente.brandId)
+    })
+  })
+
+  it('guardar el perfil registra quién lo hizo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+
+      const version = await guardarPerfil(db, ref, PERFIL_VALIDO, persona!.id)
+
+      // `brandId` además de `version`: con una sola marca sembrada por prueba
+      // `version` ya identifica la fila sin ambigüedad, pero eso deja de ser
+      // cierto en cuanto la siembra crezca a dos marcas — dos filas podrían
+      // compartir número de versión y esta consulta traería una fila
+      // cualquiera de las dos sin que nada lo señale.
+      const [fila] = await db
+        .select({ createdBy: esquema.brandProfiles.createdBy })
+        .from(esquema.brandProfiles)
+        .where(
+          and(
+            eq(esquema.brandProfiles.brandId, ref.brandId),
+            eq(esquema.brandProfiles.version, version),
+          ),
+        )
+
+      expect(fila!.createdBy).toBe(persona!.id)
     })
   })
 

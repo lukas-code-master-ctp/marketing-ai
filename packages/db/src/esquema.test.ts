@@ -729,7 +729,7 @@ describe('catálogo de restricciones compuestas', () => {
   ]
 
   const leer = async (db: BaseDeDatos, tipo: 'f' | 'u') => {
-    const filas = await db.execute(sql`
+    const { rows: filas } = await db.execute(sql`
       select conrelid::regclass::text as tabla, conname, pg_get_constraintdef(oid) as definicion
       from pg_constraint
       where contype = ${tipo}
@@ -737,7 +737,7 @@ describe('catálogo de restricciones compuestas', () => {
         and array_length(conkey, 1) > 1
       order by conrelid::regclass::text, conname
     `)
-    return [...filas] as unknown as FilaDeRestriccion[]
+    return filas as unknown as FilaDeRestriccion[]
   }
 
   it('declara exactamente las doce foráneas compuestas esperadas', async () => {
@@ -749,6 +749,62 @@ describe('catálogo de restricciones compuestas', () => {
   it('declara las únicas compuestas, entre ellas las cinco (id, organization_id)', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       expect(await leer(db, 'u')).toEqual(UNICAS)
+    })
+  })
+})
+
+describe('users y autoría', () => {
+  it('users guarda una persona y el correo es único', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+
+      expect(persona!.id).toBeTruthy()
+
+      await expect(
+        db.insert(esquema.users).values({ email: 'lukas@ejemplo.cl', name: 'Otro' }),
+      ).rejects.toThrow()
+    })
+  })
+
+  it('borrar a una persona conserva lo que aprobó, con el autor en null', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'Principal', slug: 'principal' })
+        .returning({ id: esquema.organizations.id })
+      const [marca] = await db
+        .insert(esquema.brands)
+        .values({ organizationId: org!.id, slug: 'parcelas', name: 'Parcelas' })
+        .returning({ id: esquema.brands.id })
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+
+      const [plan] = await db
+        .insert(esquema.contentPlans)
+        .values({
+          organizationId: org!.id,
+          brandId: marca!.id,
+          month: '2026-09-01',
+          approvedBy: persona!.id,
+        })
+        .returning({ id: esquema.contentPlans.id })
+
+      await db.delete(esquema.users).where(eq(esquema.users.id, persona!.id))
+
+      const [despues] = await db
+        .select({ approvedBy: esquema.contentPlans.approvedBy })
+        .from(esquema.contentPlans)
+        .where(eq(esquema.contentPlans.id, plan!.id))
+
+      // La fila sobrevive: borrar a una persona no debe borrar la historia de
+      // lo que aprobó. Si esto fuera CASCADE, el plan desaparecería con ella.
+      expect(despues).toBeTruthy()
+      expect(despues!.approvedBy).toBeNull()
     })
   })
 })

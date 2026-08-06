@@ -6,10 +6,10 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { corridaDe, estrategiaDelTrimestre, grillaDelMes, perfilConHistorial } from '@gc/operaciones'
-import PaginaDeEstrategia from './app/[marca]/estrategia/page.js'
-import PaginaDeGrilla from './app/[marca]/grilla/[mes]/page.js'
-import PaginaDePerfil from './app/[marca]/perfil/page.js'
-import Inicio from './app/page.js'
+import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
+import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
+import PaginaDePerfil from './app/(app)/[marca]/perfil/page.js'
+import Inicio from './app/(app)/page.js'
 import { marcasDeLaOrganizacion } from './datos.js'
 
 /**
@@ -384,5 +384,97 @@ describe('la pantalla de inicio', () => {
     await renderInicio({ nueva: '1' })
 
     expect(screen.queryByRole('button', { name: 'Crear marca' })).not.toBeNull()
+  })
+})
+
+describe('la pantalla de entrada', () => {
+  it('la pantalla de entrada explica el rechazo cuando la cuenta no está autorizada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: 'AccessDenied' }) }))
+
+    expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+
+  it('sin error la pantalla de entrada no acusa a nadie de nada', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({}) }))
+
+    // Sin esta mitad, una pantalla que mostrara siempre el aviso pasaría.
+    expect(screen.queryByText(/no está en la lista/i)).toBeNull()
+    // Y tampoco el banner rojo de falla del sistema: sin esta aserción, una
+    // pantalla que mostrara siempre ese banner también pasaba esta prueba.
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+
+  // Hallazgo 4: `Configuration` llega cuando `registrarPersona` falla (una
+  // caída de la base, por ejemplo). No es un rechazo por lista, así que no
+  // puede mostrar el mismo texto ni pasar en silencio: sin esta rama la
+  // pantalla queda muda y la persona reintenta sin saber que el problema es
+  // del sistema.
+  it('la pantalla de entrada avisa de una falla del sistema y no acusa a la cuenta', async () => {
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: 'Configuration' }) }))
+
+    expect(screen.queryByText(/problema del sistema/i)).not.toBeNull()
+    // No es el mismo aviso que el rechazo por lista: confundirlos manda a
+    // pedir un permiso que ya se tiene.
+    expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+  })
+
+  // Menor B de la revisión de rama: Auth.js manda otros códigos de error
+  // —`MissingCSRF` con un formulario expirado o cookies bloqueadas,
+  // `OAuthCallbackError`, `Verification`— que antes dejaban la pantalla
+  // muda: ni el aviso de rechazo ni el de falla del sistema, ni ninguna
+  // pista de que algo salió mal.
+  it.each(['MissingCSRF', 'OAuthCallbackError', 'Verification'])(
+    'la pantalla de entrada avisa de un error genérico (%s) sin acusar a la cuenta ni a un sistema en particular',
+    async (codigo) => {
+      const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+      render(await PaginaDeEntrada({ searchParams: Promise.resolve({ error: codigo }) }))
+
+      expect(screen.queryByRole('alert')).not.toBeNull()
+      expect(screen.queryByText(/no pudimos completar el inicio de sesión/i)).not.toBeNull()
+      expect(screen.queryByText(/no está en la lista de personas autorizadas/i)).toBeNull()
+      expect(screen.queryByText(/problema del sistema/i)).toBeNull()
+      expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
+    },
+  )
+})
+
+describe('la pantalla de entrada dentro de su layout real', () => {
+  // Hallazgo Crítico de la revisión de rama: el layout raíz (`app/layout.tsx`)
+  // envuelve también a `/entrar`, que el middleware excluye a propósito para
+  // que sea alcanzable sin sesión. Antes ese layout armaba el selector de
+  // marcas consultando la base, así que un `GET /entrar` sin cookie exponía
+  // el nombre de todas las marcas de la organización. El encabezado se movió
+  // al layout del grupo `(app)`, que `/entrar` no hereda. Esta prueba renderiza
+  // la pantalla de entrada dentro de su layout de verdad —no aislada, como el
+  // resto de este archivo— para afirmar que ningún nombre de marca se filtra.
+  it('no expone el catálogo de marcas de la organización', async () => {
+    vi.mocked(marcasDeLaOrganizacion).mockResolvedValue([
+      { id: 'm-1', slug: 'parcelas', name: 'CTP' },
+      { id: 'm-2', slug: 'otra-startup', name: 'Otra Startup' },
+    ])
+    const { default: RaizLayout } = await import('./app/layout.js')
+    const { default: PaginaDeEntrada } = await import('./app/entrar/page.js')
+
+    const contenido = await PaginaDeEntrada({ searchParams: Promise.resolve({}) })
+    render(await RaizLayout({ children: contenido }))
+
+    expect(screen.queryByText('CTP')).toBeNull()
+    expect(screen.queryByText('Otra Startup')).toBeNull()
+    expect(screen.queryByRole('link', { name: '+ Nueva marca' })).toBeNull()
+    // La ausencia de texto no distingue "no se armó el selector" de "se armó
+    // y no se ve por CSS": lo que hay que afirmar es que el layout raíz ni
+    // siquiera consultó el catálogo.
+    expect(marcasDeLaOrganizacion).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /entrar con google/i })).not.toBeNull()
   })
 })

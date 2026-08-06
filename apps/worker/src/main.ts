@@ -23,10 +23,9 @@ const INTERVALO_MS = 2000
  * corrida, es probable que haya otra detrás.
  */
 async function principal(): Promise<void> {
-  const url = process.env.DATABASE_URL
-  if (!url) throw new Error('Falta DATABASE_URL')
-
-  const { db, cerrar } = crearConexion(url)
+  // El worker corre siempre local, contra Docker: nunca configura CLOUD_SQL_*,
+  // así que `crearConexion` resuelve por `DATABASE_URL` (ver `destinoDeConexion`).
+  const { db, cerrar } = await crearConexion()
 
   // Misma construcción que el CLI, con una diferencia: `CARPETA_DE_MUESTRAS`
   // se resuelve contra la raíz del repositorio y no contra donde se escribió

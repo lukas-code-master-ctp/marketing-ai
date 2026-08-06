@@ -43,6 +43,25 @@ export const organizations = pgTable('organizations', {
   createdAt: creadoEn(),
 })
 
+/**
+ * Las personas que pueden entrar a la web. Se llena sola en el primer inicio
+ * de sesión exitoso, con un upsert por correo.
+ *
+ * No lleva `organization_id` a propósito: hoy hay una sola organización y las
+ * tres personas la comparten. Atar usuarios a organizaciones es el diseño que
+ * hace falta cuando haya equipos distintos por marca, y eso está explícitamente
+ * fuera de alcance.
+ *
+ * Quién puede entrar NO se decide aquí sino en la lista de correos permitidos
+ * de la variable de entorno: esta tabla registra a quien ya entró, no autoriza.
+ */
+export const users = pgTable('users', {
+  id: id(),
+  email: text('email').notNull().unique(),
+  name: text('name'),
+  createdAt: creadoEn(),
+})
+
 // Multi-tenencia exigible: cada tabla lleva `organization_id`, pero una clave
 // foránea simple hacia el padre no impide que la fila declare una organización
 // distinta a la de ese padre. Por eso las tablas padre (`brands`, `strategies`,
@@ -76,6 +95,7 @@ export const brandProfiles = pgTable('brand_profiles', {
   version: integer('version').notNull(),
   data: jsonb('data').notNull(),
   createdAt: creadoEn(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
 }, (t) => ({
   versionPorMarca: unique().on(t.brandId, t.version),
   marcaPorOrg: foreignKey({
@@ -157,6 +177,8 @@ export const contentPlans = pgTable('content_plans', {
     enum: ESTADOS_CONTENT_PLAN,
   }).notNull().default('borrador'),
   createdAt: creadoEn(),
+  approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'set null' }),
+  reopenedBy: uuid('reopened_by').references(() => users.id, { onDelete: 'set null' }),
 }, (t) => ({
   mesPorMarca: unique().on(t.brandId, t.month),
   estadoValido: chequeoEnum('content_plans_status_check', 'status', ESTADOS_CONTENT_PLAN),
@@ -341,6 +363,6 @@ export const aiCalls = pgTable('ai_calls', {
 }))
 
 export const esquema = {
-  organizations, brands, brandProfiles, channelAccounts, approvalPolicies,
+  organizations, users, brands, brandProfiles, channelAccounts, approvalPolicies,
   strategies, contentPlans, planSlots, pipelineRuns, pipelineSteps, aiCalls,
 }

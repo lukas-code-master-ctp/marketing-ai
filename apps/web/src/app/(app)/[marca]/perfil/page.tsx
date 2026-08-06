@@ -1,6 +1,6 @@
 import { PLANTILLA_DE_PERFIL, perfilConHistorial } from '@gc/operaciones'
-import { EditorDePerfil } from '../../../componentes/EditorDePerfil.js'
-import { conexion, organizacionPorDefecto } from '../../../datos.js'
+import { EditorDePerfil } from '../../../../componentes/EditorDePerfil.js'
+import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
 // no llegan hasta acá. Sin este, Next prerenderiza el perfil en el build.
@@ -12,7 +12,7 @@ export default async function PaginaDePerfil({
   params: Promise<{ marca: string }>
 }) {
   const { marca } = await params
-  const db = conexion()
+  const db = await conexion()
   const organizationId = await organizacionPorDefecto(db)
 
   // Que la marca no exista ya no llega hasta acá: lo resuelve

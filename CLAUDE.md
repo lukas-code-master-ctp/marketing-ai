@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. El despliegue en sí todavía no ocurrió: hubo una prueba de humo contra la instancia real que confirmó que el conector funciona desde Vercel, pero el proyecto de esa prueba, aunque se pensó desechable, **sigue existiendo**: no se borró, y todavía tiene la clave privada de la cuenta de servicio cargada en sus variables de entorno (ver `pendientes.md`). Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -43,6 +43,30 @@ vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
 contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
 worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
 
+La app exige sesión. En local, con `SESION_DE_DESARROLLO=true`, funciona
+**sin** `AUTH_SECRET` — comprobado levantando el servidor con la variable
+vacía: `GET /ruta-inexistente` da 404 y `GET /` da 307 a la grilla, igual que
+con el secreto puesto. Lo que sí queda, en cada petición de página, es
+`[auth][error] MissingSecret` en el log: el middleware llama a `auth()`, que
+internamente pide su propia sesión a `@auth/core` y esa petición interna es
+la que falla por falta de secreto; `parseSessionResponse` traduce esa
+respuesta no-OK en sesión `null` **antes** de llegar al callback
+`authorized`, que con la sesión de desarrollo devuelve `true`
+(`apps/web/src/auth.config.ts`) y deja pasar igual. No hay ningún 500. Con
+`SESION_DE_DESARROLLO=false` tampoco lo hay: el mismo `MissingSecret` queda
+en el log, pero sin sesión real `authorized` deniega y redirige a
+`/entrar?callbackUrl=…`. Y `sesionActual()` (`apps/web/src/auth.ts`)
+cortocircuita antes de llamar a `auth()` cuando hay sesión de desarrollo, así
+que las Server Actions tampoco se ven afectadas.
+
+El costo real de dejar `AUTH_SECRET` vacío en local no es un 500: es ese
+error rojo en el log, en cada petición de página, que quien no sepa esto va a
+perseguir creyendo que algo se rompió. `SESION_DE_DESARROLLO=true` evita
+pasar por Google —entra como `desarrollo@local`— pero no evita esa petición
+interna ni su log. La variable **se ignora fuera de
+`NODE_ENV=development`**, así que dejarla encendida no abre nada en
+producción.
+
 ## Reglas que no son negociables
 
 Cada una existe porque romperla ya costó trabajo real.
@@ -52,6 +76,29 @@ Cada una existe porque romperla ya costó trabajo real.
 **Un solo `.env`, en la raíz.** Ningún paquete tiene el suyo. Las pruebas lo cargan con `setupFiles: ['../../vitest.setup.ts']`; `next.config.ts` y el CLI lo resuelven desde `import.meta.url`. Una copia por paquete rompería cualquier clon nuevo.
 
 **Una migración aplicada es inmutable.** Un error se corrige con otra migración, jamás editando la anterior — el registro de drizzle no la reejecuta y el envoltorio `DO $$ ... EXCEPTION` la descartaría en silencio. Las migraciones nuevas van **sin** ese envoltorio: una que se salta sola es peor que una que falla.
+
+**El conector de Cloud SQL decide si autentica con un `instanceof`, y eso
+exige una sola copia de `google-auth-library` en el árbol de dependencias.**
+`crearConexion` (`packages/db/src/cliente.ts`) arma un `GoogleAuth` con las
+credenciales de la cuenta de servicio y se lo entrega al `Connector` de
+`@google-cloud/cloud-sql-connector` por su opción `auth`. Adentro, el
+`sqladmin-fetcher` del conector decide si usa esas credenciales con
+`loginAuth instanceof GoogleAuth` — y esa comparación solo da cierto si
+`google-auth-library` resuelve, para `@gc/db` y para el conector, al **mismo
+archivo**. Si pnpm instala dos copias —porque el rango que declara el
+conector deja de coincidir con el que declara `packages/db/package.json`—,
+el objeto cae por la rama equivocada y la petición sale **sin
+credenciales**: un `401 Login Required` que no menciona versiones ni copias.
+Ya mordió una vez, en la prueba de humo contra la instancia real. Ni el
+resto de la suite ni `pnpm -r typecheck` ven qué copia resuelve cada
+paquete —eso exige mirar el árbol de `node_modules`, no los tipos ni el
+comportamiento normal—, así que hace falta una prueba dedicada, que sí
+corre dentro de `pnpm test`: `packages/db/src/resolucion-google-auth-library.test.ts`,
+que afirma con `require.resolve` en vez de confiar en que los rangos
+declarados coincidan. **Si esa prueba se pone roja:** alinea el rango de
+`google-auth-library` en `packages/db/package.json` con el que exige
+`@google-cloud/cloud-sql-connector` (revisa su `package.json`) y corre
+`pnpm install` para que las dos vuelvan a resolver a una sola copia.
 
 **Idioma.** Esquema y columnas en inglés `snake_case`. API de dominio, variables, comentarios, prompts y **todo texto que ve el usuario** en español.
 
@@ -64,6 +111,40 @@ Cada una existe porque romperla ya costó trabajo real.
 **Ninguna salida del modelo se parsea con expresiones regulares.** Toda tarea declara un esquema Zod y valida. Validar entrada de usuario con regex sí es válido.
 
 **La capa web nunca ejecuta trabajo largo ni llama al modelo.** Generar es del CLI y del worker. La web lee, edita y aprueba.
+
+**Proteger las páginas no protege las Server Actions.** Son endpoints HTTP con
+identificador estable: cualquiera que lo conozca puede llamarlos sin pasar por
+la página. La comprobación de sesión vive en el ayudante `ejecutar` de
+`apps/web/src/acciones.ts`, por el que pasan las nueve acciones, no en los
+componentes de servidor. Una acción que no use ese ayudante nace desprotegida.
+
+**La configuración de Auth.js está partida en dos archivos, y quien edite uno
+tiene que saber que el otro existe.** `apps/web/src/auth.config.ts` es la
+mitad que el middleware puede cargar en el runtime Edge; `apps/web/src/auth.ts`
+la extiende con el proveedor de Google y los callbacks completos, para todo lo
+que sí corre en Node. Los dos quedan acoplados por el orden del spread con el
+que `auth.ts` combina sus callbacks con los de `authConfig`: ese orden decide
+cuál versión de cada callback compartido gana. El porqué de la partición —el
+choque con el runtime Edge— está comentado en la cabecera de
+`apps/web/src/auth.config.ts`; el detalle exacto del spread —qué versión de
+cada callback compartido gana— está comentado en la cabecera de
+`apps/web/src/auth.ts`. No se repiten aquí para no duplicar una línea de
+código que se desactualizaría en silencio si alguien la reordena.
+
+**El middleware necesita su propio callback `authorized`.** `NextAuth(authConfig)`
+a secas no bloquea nada: `handleAuth` de Auth.js arranca con
+`let authorized = true`, y sin ese callback deja pasar cualquier petición
+aunque no haya sesión. El callback vive en `apps/web/src/auth.config.ts`,
+compartido con `auth.ts` (ver arriba); `apps/web/src/middleware.ts` solo lo
+consume, con `export const { auth: middleware } = NextAuth(authConfig)` — no
+en la raíz del paquete, porque este proyecto usa `src/app`.
+
+**Sacar a alguien de `CORREOS_PERMITIDOS` le quita la sesión de inmediato**,
+porque el callback `jwt` revalida la lista en cada lectura, no solo al entrar.
+El precio es que esa variable pasó a ser obligatoria en cada petición: un
+despliegue con `CORREOS_PERMITIDOS` vacía por descuido no solo bloquea
+entradas nuevas, también tumba las sesiones vivas. Falla cerrado, que es la
+dirección correcta — pero hay que saber que esa es la dirección que toma.
 
 **El error de una corrida que ejecutó el motor lo escribe el motor.** `ejecutarFlujo` la marca fallida antes de relanzar, con la clase del error delante (`[permanente] …`). Quien lo llame anota el fallo solo si nadie lo anotó ya — el worker lo hace con un `AND status <> 'fallido'` — porque sobrescribir ese mensaje pierde el diagnóstico bueno. Lo que sí hay que anotar es lo que falla **antes** de entrar al motor: ahí la corrida ya está `en_curso` y nadie más la sacaría de ese estado.
 
@@ -141,7 +222,7 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 11 tablas, 6 migraciones
+@gc/db          esquema Drizzle, 12 tablas, 7 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
@@ -149,7 +230,9 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 @gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
 @gc/operaciones operaciones que comparten CLI, web y worker
 apps/cli        comandos de operación
-apps/web        Next.js App Router, Server Components y Server Actions
+apps/web        Next.js App Router, Server Components, Server Actions, y
+                autenticación con Auth.js v5 (Google + lista de correos
+                permitidos, sin tabla de sesiones)
 apps/worker     toma corridas pendientes y las ejecuta. Lo único que llama al modelo sin que se lo pidan
 ```
 
@@ -171,7 +254,123 @@ Dos hábitos que valen más que el resto:
 
 ## Entorno
 
-Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`. Postgres en Docker, bases `gestor` (desarrollo, con datos de marcha en seco) y `gestor_test`.
+Windows. `corepack enable` falla por permisos: pnpm está instalado con `npm install -g pnpm@9`.
+
+**Postgres vive en dos lugares con roles distintos.** En Docker para desarrollo
+y pruebas locales — bases `gestor` (con datos de marcha en seco) y
+`gestor_test`. En Cloud SQL para producción. **En local no se declara ninguna
+variable de Cloud SQL**: sin `CLOUD_SQL_INSTANCIA`, `destinoDeConexion`
+(`packages/db/src/destino.ts`) resuelve por `DATABASE_URL` y va a Docker — así
+en tu máquina, en el CLI y en el worker. Vercel sí declara `CLOUD_SQL_INSTANCIA`
+y sus cuatro variables acompañantes, y con eso `crearConexion`
+(`packages/db/src/cliente.ts`) resuelve contra Cloud SQL en vez de Docker.
+
+**Las pruebas del arnés nunca pasan por `destinoDeConexion`**, así que la
+frase anterior no las incluye a propósito — es la sexta corrección a una
+afirmación falsa de esta rama. Casi todas reciben la conexión como argumento
+(`crearConexionDePrueba`, en `packages/db/src/pruebas/entorno.ts`, lee
+`DATABASE_URL_TEST` directamente). La única excepción es
+`apps/web/src/acciones.test.ts`, que llama a las Server Actions de verdad y
+por eso sí llega a `conexion()` (`apps/web/src/datos.ts`), que sí pasa por
+`destinoDeConexion`: por eso ese archivo fija `process.env.DATABASE_URL =
+process.env.DATABASE_URL_TEST` antes de importar las acciones. Si
+`CLOUD_SQL_INSTANCIA` estuviera presente en el entorno de pruebas, esa
+sustitución no bastaría —la instancia gana por precedencia— y esas pruebas
+escribirían contra producción. Por eso `vitest.setup.ts` borra las cinco
+variables de Cloud SQL del proceso apenas carga el `.env`, y por eso
+`docker-compose.yml` fija `CLOUD_SQL_INSTANCIA: ""` en el bloque
+`environment:` del worker, junto a `DATABASE_URL`: las dos neutralizan la
+misma precedencia deliberada, cada una donde el `.env` la haría ganar.
+
+**La app en Vercel llega a Cloud SQL por el conector de Node de Google
+(`@google-cloud/cloud-sql-connector`), no por una cadena de conexión.** El
+conector autoriza por IAM —la cuenta de servicio necesita el rol Cloud SQL
+Client— y por eso la lista de redes autorizadas de la instancia queda
+**vacía**. Esa lista vacía es la garantía del diseño, no un detalle de
+configuración: significa que la base no está expuesta a internet por IP, y
+que no hay ningún firewall que mantener sincronizado con las IPs de Vercel.
+Las credenciales viajan como objeto —`GOOGLE_CREDENCIALES_JSON`, el JSON de
+la cuenta de servicio en una variable de entorno— y no por
+`GOOGLE_APPLICATION_CREDENTIALS`, que espera una ruta a archivo: en Vercel no
+hay archivos que poner.
+
+**`max: 5` en el pool (`packages/db/src/cliente.ts`) es bajo a propósito.**
+Cada invocación de Vercel corre en su propio proceso y abre su propio pool,
+así que el límite de conexiones de la instancia se reparte entre todas las
+invocaciones que estén vivas a la vez.
+
+**El caché de la conexión en `apps/web/src/datos.ts` no es una optimización:
+es lo que hace pagable cada arranque en frío.** Medido en la prueba de humo
+contra la instancia real desde Vercel: un proceso nuevo tarda ~1,6 s
+(construir el conector, ~800 ms, más la primera consulta, ~760 ms); un
+proceso ya tibio, ~123 ms. Perder el caché multiplica por trece el costo de
+cada petición, y no es hipotético: de cinco llamadas seguidas en esa prueba,
+una cayó en un proceso nuevo.
+
+**Aplicar una migración contra Cloud SQL exige el Cloud SQL Auth Proxy**,
+porque `drizzle-kit` corre fuera de la app y no usa el conector de Node —lo
+mismo que arma `crearConexion` no está disponible ahí—. El Auth Proxy es un
+binario aparte que levanta un escucha en `localhost`, tuneliza hacia la
+instancia autenticando por IAM, y deja que cualquier cliente Postgres normal
+—incluido `drizzle-kit`— se conecte como si la base estuviera en la máquina.
+Es una operación que se hace pocas veces y siempre con prisa, así que:
+
+**Nadie corrió este procedimiento de punta a punta todavía** — la instancia
+está detenida la mayor parte del tiempo (ver más abajo) y ninguna migración
+real se aplicó aún por este camino. El binario, sus argumentos y los
+comandos de `gcloud` de abajo salen de la documentación de Google, no de una
+prueba propia. Si algo no calza, no es necesariamente un error tuyo.
+
+0. **Enciende la instancia.** Cloud SQL no se despierta sola, y el Auth Proxy
+   contra una instancia apagada falla de un modo que no menciona que está
+   apagada — lleva a diagnosticar IAM, puertos o red antes de sospechar de
+   esto:
+   ```
+   gcloud sql instances patch gestor-contenido --project gestor-contenido-ctp --activation-policy=ALWAYS
+   ```
+   Espera a que quede lista antes de seguir (`gcloud sql instances describe
+   gestor-contenido --project gestor-contenido-ctp --format="value(state)"`
+   tiene que decir `RUNNABLE`).
+1. Descarga el binario del Cloud SQL Auth Proxy v2 (`cloud-sql-proxy.exe` en
+   Windows) desde la página de releases de `GoogleCloudPlatform/cloud-sql-proxy`
+   en GitHub, o desde la documentación de Cloud SQL de Google — **no el binario
+   viejo `cloud_sql_proxy`, con guion bajo, que es la v1**.
+2. Levántalo apuntando al nombre de conexión de la instancia, en un puerto
+   local que no choque con el Postgres de Docker (que ya ocupa 5432):
+   ```
+   .\cloud-sql-proxy.exe --port 5433 gestor-contenido-ctp:southamerica-east1:gestor-contenido
+   ```
+   Autentica con tus credenciales de `gcloud` (Application Default
+   Credentials) — corre `gcloud auth application-default login` antes si no
+   las tienes configuradas, y necesitas el rol `roles/cloudsql.client` sobre
+   el proyecto.
+3. Queda escuchando en `localhost:5433`, tunelizando hacia la instancia.
+4. **Mientras dure la operación**, apunta `DATABASE_URL` (en el `.env` de la
+   raíz) a ese puerto: `postgres://gestor:<clave>@localhost:5433/gestor`.
+5. Aplica las migraciones con el script real —confirmado en
+   `packages/db/package.json`— `pnpm --filter @gc/db migraciones:aplicar`,
+   que ejecuta `drizzle-kit migrate`.
+6. **Devuelve `DATABASE_URL` a `postgres://postgres:postgres@localhost:5432/gestor`
+   al terminar.** Este paso no es adorno: con el Auth Proxy corriendo y
+   `DATABASE_URL` sin restaurar, `pnpm --filter @gc/web dev` y el CLI
+   trabajarían contra la base de producción sin que nada lo avise — los dos
+   resuelven la conexión con `crearConexion()` sin argumentos, que lee
+   `DATABASE_URL` del entorno (`destinoDeConexion`, en
+   `packages/db/src/destino.ts`). El worker corre el mismo riesgo **solo si lo
+   levantas en el host**: dentro de `docker compose` no le pasa nada, porque
+   `DATABASE_URL` queda fijada en el bloque `environment:` de
+   `docker-compose.yml`, que gana sobre el `env_file:` y apunta siempre al
+   Postgres de Docker. `pnpm test` tampoco corre este riesgo: la suite conecta
+   por `DATABASE_URL_TEST` (`packages/db/src/pruebas/entorno.ts`), una
+   variable distinta, y `apps/web/src/acciones.test.ts` fija `DATABASE_URL` a
+   su valor explícitamente antes de que nada la lea. Es el accidente que este
+   procedimiento hace fácil, para lo que sí queda expuesto, si se salta este
+   paso.
+7. **Apaga la instancia cuando termines**, para no dejarla facturando sin que
+   nadie la use:
+   ```
+   gcloud sql instances patch gestor-contenido --project gestor-contenido-ctp --activation-policy=NEVER
+   ```
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
@@ -204,3 +403,17 @@ El `command` corre `pnpm install --frozen-lockfile`, que aborta con
 no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
 en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
 worker`.
+
+**Con la base en Cloud SQL, el costo ya no depende de que el worker esté
+encendido: depende de que la instancia lo esté.** Con Neon, el plan gratuito
+suspendía la base sola cuando nadie la consultaba, y era el sondeo del worker
+—cada dos segundos— el que la mantenía despierta las 730 horas del mes sin
+que nadie usara el sistema. Cloud SQL no tiene ese mecanismo: **no se apaga
+sola, y una instancia encendida se factura corriendo, la use alguien o no.**
+El sondeo del worker ya no mueve esa factura para nada. Lo que sí hay que
+hacer es detener la instancia cuando nadie vaya a generar contenido y
+encenderla antes de la próxima vez — es exactamente por lo que la instancia
+de `gestor-contenido-ctp` está detenida ahora mismo. Que algo la encienda y
+apague solo, en vez de hacerlo a mano, sigue siendo trabajo pendiente (ver
+`pendientes.md`), del mismo bloque 1C-B que se lleva al worker fuera de una
+máquina local.
