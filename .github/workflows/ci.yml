@@ -54,6 +54,15 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Dos pushes seguidos a `master` lanzan dos despliegues que pueden
+    # solaparse, y entonces el orden en que terminan decide qué revisión queda
+    # sirviendo: el commit más viejo puede ganarle al más nuevo. Con este grupo
+    # solo hay un despliegue vivo a la vez, y `cancel-in-progress` mata el
+    # viejo en vez de encolarlo — para desplegar, el último commit es el que
+    # importa y esperar a que termine uno superado no le sirve a nadie.
+    concurrency:
+      group: desplegar-worker-${{ github.ref }}
+      cancel-in-progress: true
     # Sin esto, la federación de identidad no funciona: `id-token: write` es lo
     # que permite a Actions pedir su token OIDC, que es lo que Google canjea
     # por credenciales efímeras. Es lo que evita guardar una clave de cuenta de
