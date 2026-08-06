@@ -46,8 +46,18 @@ services:
     # `IA_EN_SECO: true` en este archivo dejaría el contenedor en marcha seca
     # para siempre, incluso después de que alguien cargue la clave, y llenaría
     # la base con contenido de muestra sin que se note.
+    #
+    # `CLOUD_SQL_INSTANCIA` sí se fija, y vacía a propósito: `destinoDeConexion`
+    # (`packages/db/src/destino.ts`) le da precedencia sobre `DATABASE_URL`, así
+    # que si el `.env` de la raíz la trae cargada —para depurar el camino de
+    # Cloud SQL, como invita `.env.example`— el `env_file` de abajo la inyecta
+    # igual que cualquier otra variable, y gana sobre la `DATABASE_URL` fijada
+    # acá: el worker tomaría corridas de producción y las ejecutaría llamando
+    # al modelo. Vacía, `destinoDeConexion` la trata como ausente y cae a
+    # `DATABASE_URL`.
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/gestor
+      CLOUD_SQL_INSTANCIA: ""
     volumes:
       - .:/app
       # Un volumen **con nombre** por cada `node_modules` del workspace. pnpm en

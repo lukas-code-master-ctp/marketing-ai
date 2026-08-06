@@ -261,10 +261,26 @@ y pruebas locales — bases `gestor` (con datos de marcha en seco) y
 `gestor_test`. En Cloud SQL para producción. **En local no se declara ninguna
 variable de Cloud SQL**: sin `CLOUD_SQL_INSTANCIA`, `destinoDeConexion`
 (`packages/db/src/destino.ts`) resuelve por `DATABASE_URL` y va a Docker — así
-en tu máquina, en el CLI, en el worker y en las pruebas. Vercel sí declara
-`CLOUD_SQL_INSTANCIA` y sus cuatro variables acompañantes, y con eso
-`crearConexion` (`packages/db/src/cliente.ts`) resuelve contra Cloud SQL en
-vez de Docker.
+en tu máquina, en el CLI y en el worker. Vercel sí declara `CLOUD_SQL_INSTANCIA`
+y sus cuatro variables acompañantes, y con eso `crearConexion`
+(`packages/db/src/cliente.ts`) resuelve contra Cloud SQL en vez de Docker.
+
+**Las pruebas del arnés nunca pasan por `destinoDeConexion`**, así que la
+frase anterior no las incluye a propósito — es la sexta corrección a una
+afirmación falsa de esta rama. Casi todas reciben la conexión como argumento
+(`crearConexionDePrueba`, en `packages/db/src/pruebas/entorno.ts`, lee
+`DATABASE_URL_TEST` directamente). La única excepción es
+`apps/web/src/acciones.test.ts`, que llama a las Server Actions de verdad y
+por eso sí llega a `conexion()` (`apps/web/src/datos.ts`), que sí pasa por
+`destinoDeConexion`: por eso ese archivo fija `process.env.DATABASE_URL =
+process.env.DATABASE_URL_TEST` antes de importar las acciones. Si
+`CLOUD_SQL_INSTANCIA` estuviera presente en el entorno de pruebas, esa
+sustitución no bastaría —la instancia gana por precedencia— y esas pruebas
+escribirían contra producción. Por eso `vitest.setup.ts` borra las cinco
+variables de Cloud SQL del proceso apenas carga el `.env`, y por eso
+`docker-compose.yml` fija `CLOUD_SQL_INSTANCIA: ""` en el bloque
+`environment:` del worker, junto a `DATABASE_URL`: las dos neutralizan la
+misma precedencia deliberada, cada una donde el `.env` la haría ganar.
 
 **La app en Vercel llega a Cloud SQL por el conector de Node de Google
 (`@google-cloud/cloud-sql-connector`), no por una cadena de conexión.** El
@@ -346,9 +362,10 @@ prueba propia. Si algo no calza, no es necesariamente un error tuyo.
    `docker-compose.yml`, que gana sobre el `env_file:` y apunta siempre al
    Postgres de Docker. `pnpm test` tampoco corre este riesgo: la suite conecta
    por `DATABASE_URL_TEST` (`packages/db/src/pruebas/entorno.ts`), una
-   variable distinta, y `apps/web/src/acciones.test.ts` la fija explícitamente
-   antes de que nada la lea. Es el accidente que este procedimiento hace
-   fácil, para lo que sí queda expuesto, si se salta este paso.
+   variable distinta, y `apps/web/src/acciones.test.ts` fija `DATABASE_URL` a
+   su valor explícitamente antes de que nada la lea. Es el accidente que este
+   procedimiento hace fácil, para lo que sí queda expuesto, si se salta este
+   paso.
 7. **Apaga la instancia cuando termines**, para no dejarla facturando sin que
    nadie la use:
    ```
