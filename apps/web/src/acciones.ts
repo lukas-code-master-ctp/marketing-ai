@@ -1,5 +1,6 @@
 'use server'
 
+import { despertarWorker } from '@gc/despertador'
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
 import { sesionActual } from './auth.js'
@@ -153,21 +154,29 @@ export async function reabrirGrillaAccion(marca: string, mes: string): Promise<R
  * Encola y devuelve. **No ejecuta**: el worker toma la corrida y la corre. Es
  * lo que permite que esta acción responda al instante sin romper la regla de
  * que la web no hace trabajo largo ni llama al modelo.
+ *
+ * `despertarWorker` va **después** de `encolar` y nunca dentro: cuando corre,
+ * la corrida ya está a salvo en la base. Si crear la tarea falla, la función
+ * lo registra y no lanza, y la red de seguridad de Cloud Scheduler levanta la
+ * corrida unos minutos después. En local no hace nada: no hay Cloud Tasks, y
+ * el worker de Docker sondea solo.
  */
 export async function encolarGrillaAccion(marca: string, mes: string): Promise<Resultado> {
   return ejecutar(`/${marca}/grilla/${mes}`, async (db, organizationId) => {
     await encolarGrilla(db, organizationId, { slug: marca, mes })
+    await despertarWorker()
     return null
   })
 }
 
-/** La gemela de la anterior para P1. Encola y devuelve, por lo mismo. */
+/** La gemela de la anterior para P1. Encola, despierta y devuelve, por lo mismo. */
 export async function encolarEstrategiaAccion(
   marca: string,
   periodo: string,
 ): Promise<Resultado> {
   return ejecutar(`/${marca}/estrategia`, async (db, organizationId) => {
     await encolarEstrategia(db, organizationId, { slug: marca, periodo })
+    await despertarWorker()
     return null
   })
 }
@@ -178,10 +187,16 @@ export async function encolarEstrategiaAccion(
  * Recibe la ruta a revalidar y no la marca, porque el componente que la llama
  * sirve a las dos pantallas y la ruta ya lleva la marca dentro. Componer
  * `/${marca}/...` aquí obligaría a pasar además de qué pantalla se trata.
+ *
+ * Despierta igual que las dos de arriba: reanudar deja la fila en `pendiente`,
+ * o sea exactamente el mismo estado que encolar, y sin el aviso el botón
+ * «Reintentar» tardaría los minutos de la red de seguridad en hacer algo
+ * visible.
  */
 export async function reanudarCorridaAccion(ruta: string, runId: string): Promise<Resultado> {
   return ejecutar(ruta, async (db, organizationId) => {
     await reanudarCorridaEncolada(db, organizationId, runId)
+    await despertarWorker()
     return null
   })
 }

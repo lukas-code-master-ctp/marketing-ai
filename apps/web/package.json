@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@gc/db": "workspace:*",
+    "@gc/despertador": "workspace:*",
     "@gc/operaciones": "workspace:*",
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",

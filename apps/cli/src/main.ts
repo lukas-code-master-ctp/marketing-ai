@@ -1,6 +1,7 @@
 import { resolverDesdeInvocacion } from './entorno.js'
 import { crearCliente } from '@gc/ai'
 import { crearConexion } from '@gc/db'
+import { despertarWorker } from '@gc/despertador'
 import { parseArgs } from 'node:util'
 import { generarEstrategia, generarGrilla } from '@gc/flujos'
 import {
@@ -127,6 +128,10 @@ async function principal(): Promise<void> {
       case 'corrida:reanudar': {
         const id = exigir(values.id, '--id')
         await reanudarCorridaEncolada(db, organizationId, id)
+        // Igual que en la web: la fila queda en `pendiente` y quien la ejecuta
+        // es el worker. Contra la base remota esto le avisa; contra Docker no
+        // hace nada porque el worker de allá sondea solo.
+        await despertarWorker()
         console.log(`Corrida ${id} devuelta a pendiente`)
         break
       }

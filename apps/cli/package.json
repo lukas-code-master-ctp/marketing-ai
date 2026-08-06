@@ -11,6 +11,7 @@
   "dependencies": {
     "@gc/ai": "workspace:*",
     "@gc/db": "workspace:*",
+    "@gc/despertador": "workspace:*",
     "@gc/flujos": "workspace:*",
     "@gc/operaciones": "workspace:*",
     "dotenv": "^16.4.5"

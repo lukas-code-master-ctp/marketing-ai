@@ -1,4 +1,3 @@
-import { CloudTasksClient } from '@google-cloud/tasks'
 import { destinoDelDespertador } from './destino.js'
 
 /** Segundos que Cloud Tasks espera a que el worker termine antes de dar la tarea por fallida. */
@@ -27,6 +26,19 @@ export async function despertarWorker(
     const destino = destinoDelDespertador(env)
     if (destino.tipo === 'ninguno') return
 
+    // Import dinámico y no estático a propósito: el cliente generado por
+    // google-gax resuelve su JSON de reintentos con `require(path.join(...))`,
+    // una ruta que Next no puede analizar en tiempo de build y empaqueta como
+    // un contexto vacío — cualquier módulo que pida revienta con "Cannot find
+    // module" en cuanto se evalúa. Un `import` estático arriba del archivo
+    // evalúa ese código al cargar el módulo, antes de que este `try` exista
+    // siquiera, así que el error tumbaba `acciones.ts` entero — todas las
+    // Server Actions de la página, no solo esta. Con el import adentro del
+    // `try` y después del `return` de arriba, el camino local (sin
+    // configuración) nunca lo toca, y si igual truena en producción, cae dentro
+    // del mismo `catch` que ya trata cualquier otro fallo de Google como no
+    // fatal.
+    const { CloudTasksClient } = await import('@google-cloud/tasks')
     const cliente = new CloudTasksClient(
       destino.credenciales !== null ? { credentials: JSON.parse(destino.credenciales) } : {},
     )
