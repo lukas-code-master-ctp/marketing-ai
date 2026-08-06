@@ -307,19 +307,44 @@ proceso ya tibio, ~123 ms. Perder el caché multiplica por trece el costo de
 cada petición, y no es hipotético: de cinco llamadas seguidas en esa prueba,
 una cayó en un proceso nuevo.
 
-**Aplicar una migración contra Cloud SQL exige el Cloud SQL Auth Proxy**,
+**Para aplicar migraciones hay dos caminos, y el que está verificado no es el
+que parece.**
+
+El **camino corto, y el único que se ha corrido de verdad**: el migrador
+*programático* de Drizzle acepta una conexión ya hecha, así que se puede
+migrar por `crearConexion()` —el mismo código que usa la app— sin binarios
+extra y sin tocar la lista de redes autorizadas. Un script de veinte líneas
+que importe `migrate` de `drizzle-orm/node-postgres/migrator` y
+`crearConexion` de `@gc/db`, con las cinco variables de Cloud SQL en el
+entorno, hace el trabajo. **Así se aplicaron las siete migraciones el
+2026-08-05**, y quedó comprobado: 12 tablas, 12 claves foráneas compuestas,
+9 restricciones `CHECK` y las tres columnas de autoría. Escribe el mismo
+registro que `drizzle-kit` —`drizzle.__drizzle_migrations`— así que los dos
+caminos son intercambiables.
+
+Dos cosas que ese camino enseñó y conviene saber antes de repetirlo: hay que
+correrlo con `tsx` **desde dentro del workspace** (un script suelto en otra
+carpeta no resuelve `drizzle-orm` ni `@gc/db`), y el binario vive en
+`apps/worker/node_modules/.bin/tsx`, no en la raíz. Y el **primer intento
+falló** con `Connection terminated unexpectedly` justo después de encender la
+instancia; el segundo, idéntico, funcionó. Es transitorio y es exactamente la
+clase de error que `clasificarError` trata como reintentable: si te pasa,
+reintenta antes de diagnosticar nada.
+
+El **camino largo** —el Cloud SQL Auth Proxy— sigue siendo el que hace falta
+si necesitas una consola `psql` contra la instancia, o cualquier herramienta
+que no sea la app. **No se ha corrido de punta a punta**: el binario, sus
+argumentos y los comandos de `gcloud` de abajo salen de la documentación de
+Google, no de una prueba propia. Si algo no calza, no es necesariamente un
+error tuyo.
+
+**Ese camino largo exige el Cloud SQL Auth Proxy**,
 porque `drizzle-kit` corre fuera de la app y no usa el conector de Node —lo
 mismo que arma `crearConexion` no está disponible ahí—. El Auth Proxy es un
 binario aparte que levanta un escucha en `localhost`, tuneliza hacia la
 instancia autenticando por IAM, y deja que cualquier cliente Postgres normal
 —incluido `drizzle-kit`— se conecte como si la base estuviera en la máquina.
 Es una operación que se hace pocas veces y siempre con prisa, así que:
-
-**Nadie corrió este procedimiento de punta a punta todavía** — la instancia
-está detenida la mayor parte del tiempo (ver más abajo) y ninguna migración
-real se aplicó aún por este camino. El binario, sus argumentos y los
-comandos de `gcloud` de abajo salen de la documentación de Google, no de una
-prueba propia. Si algo no calza, no es necesariamente un error tuyo.
 
 0. **Enciende la instancia.** Cloud SQL no se despierta sola, y el Auth Proxy
    contra una instancia apagada falla de un modo que no menciona que está
