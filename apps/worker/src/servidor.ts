@@ -52,29 +52,64 @@ function responder(res: ServerResponse, codigo: number, cuerpo: unknown): void {
  * cuenta, y cada reintento vuelve a pagar el modelo. El 500 queda para lo que
  * sí conviene reintentar: que `drenarCola` lance, o sea un fallo de
  * infraestructura como la base caída.
+ *
+ * `manejarPeticion` no lleva su propio `try/catch`: el único manejador de
+ * errores es `manejarErrorNoCapturado`, adjunto abajo con un solo `.catch()`.
+ * Antes el cuerpo entero corría dentro de un `void (async () => {...})()` sin
+ * `.catch()`, y el `try/catch` de adentro solo envolvía la llamada a
+ * `drenarCola`: la comprobación del token y el ruteo quedaban sin protección,
+ * así que una excepción ahí —hoy inalcanzable, pero no por diseño— habría
+ * dejado la promesa rechazada sin manejar, y desde Node 15 eso termina el
+ * proceso. En Cloud Run, cuya única función es sobrevivir para drenar la
+ * cola, eso tumbaba la instancia entera en vez de responder 500.
  */
 export function crearServidor({ db, deps, token }: OpcionesDelServidor): Server {
   return createServer((req: IncomingMessage, res: ServerResponse) => {
-    void (async () => {
-      const recibido = req.headers[CABECERA_DEL_TOKEN]
-      if (!tokenValido(typeof recibido === 'string' ? recibido : undefined, token)) {
-        responder(res, 401, { error: 'No autorizado.' })
-        return
-      }
-
-      const ruta = (req.url ?? '').split('?')[0]
-      if (req.method !== 'POST' || ruta !== RUTA) {
-        responder(res, 404, { error: `Solo existe POST ${RUTA}.` })
-        return
-      }
-
-      try {
-        responder(res, 200, await drenarCola(db, deps))
-      } catch (error) {
-        const texto = error instanceof Error ? error.message : String(error)
-        console.error('[worker] fallo de infraestructura al drenar:', texto)
-        responder(res, 500, { error: texto })
-      }
-    })()
+    manejarPeticion(req, res, { db, deps, token }).catch((error: unknown) => {
+      manejarErrorNoCapturado(res, error)
+    })
   })
+}
+
+async function manejarPeticion(
+  req: IncomingMessage,
+  res: ServerResponse,
+  { db, deps, token }: OpcionesDelServidor,
+): Promise<void> {
+  const recibido = req.headers[CABECERA_DEL_TOKEN]
+  if (!tokenValido(typeof recibido === 'string' ? recibido : undefined, token)) {
+    responder(res, 401, { error: 'No autorizado.' })
+    return
+  }
+
+  const ruta = (req.url ?? '').split('?')[0]
+  if (req.method !== 'POST' || ruta !== RUTA) {
+    responder(res, 404, { error: `Solo existe POST ${RUTA}.` })
+    return
+  }
+
+  responder(res, 200, await drenarCola(db, deps))
+}
+
+/**
+ * Único punto donde termina cualquier excepción que escape de
+ * `manejarPeticion` —de la comprobación del token, del ruteo, o de
+ * `drenarCola`—. Un fallo aquí es de infraestructura: lo único que puede
+ * lanzar en ese camino es `drenarCola`, y solo lo hace ante lo que sí
+ * conviene reintentar, como la base caída.
+ *
+ * Comprueba `res.headersSent` antes de responder porque `manejarPeticion`
+ * puede haber escrito ya una respuesta completa —el camino feliz de
+ * `drenarCola`— antes de que la excepción ocurriera en otra parte; escribir
+ * una segunda respuesta sobre una ya enviada vuelve a lanzar. En ese caso
+ * solo cierra la conexión y deja constancia en el log.
+ */
+function manejarErrorNoCapturado(res: ServerResponse, error: unknown): void {
+  const texto = error instanceof Error ? error.message : String(error)
+  console.error('[worker] fallo de infraestructura al atender la petición:', texto)
+  if (res.headersSent) {
+    res.end()
+    return
+  }
+  responder(res, 500, { error: texto })
 }

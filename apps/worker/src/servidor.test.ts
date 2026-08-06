@@ -1,5 +1,8 @@
 import { ClienteFalso } from '@gc/ai'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { encolarGrilla } from '@gc/operaciones'
+import { sembrarConEstrategia } from '@gc/operaciones/pruebas'
+import { sql } from 'drizzle-orm'
 import type { AddressInfo } from 'node:net'
 import type { Server } from 'node:http'
 import { describe, expect, it } from 'vitest'
@@ -7,6 +10,9 @@ import { crearServidor } from './servidor.js'
 
 const TOKEN = 'token-de-prueba'
 const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
+
+/** Mismo mes de 2026-Q3 que usan `tomar.test.ts` y `drenar.test.ts`: la siembra trae esa estrategia. */
+const MES = '2026-09'
 
 /** Levanta el servidor en un puerto efímero y lo cierra pase lo que pase. */
 async function conServidor(
@@ -103,6 +109,47 @@ describe('el servidor del worker', () => {
         })
         expect(r.status).toBe(404)
       })
+    })
+  })
+
+  // El punto de este arreglo: antes, cualquier excepción fuera del
+  // `try/catch` que envolvía solo a `drenarCola` dejaba la promesa del
+  // manejador rechazada sin manejar, y eso termina el proceso desde Node 15
+  // — en Cloud Run, tumbaba la instancia entera en vez de responder. Ahora
+  // hay un único manejador de errores adjunto a toda la petición, así que un
+  // fallo de infraestructura tiene que devolver 500 —o sea, tiene que
+  // devolver algo— y no colgar la petición ni matar el servidor.
+  //
+  // El disparador engancha `before update on pipeline_runs`, que es
+  // exactamente la sentencia con la que `tomarCorridaPendiente` toma la
+  // corrida (ver `packages/operaciones/src/corridas.ts`): la misma forma que
+  // usa `tomar.test.ts` para simular un fallo de Postgres en una sentencia
+  // concreta.
+  it('un fallo de infraestructura al tomar la corrida responde 500 y no cuelga', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: MES })
+
+      await db.execute(sql`
+        create or replace function gc_romper_toma() returns trigger
+        language plpgsql as $$ begin raise exception 'la base se cayó al tomar la corrida'; end; $$
+      `)
+      await db.execute(sql`
+        create trigger gc_romper_toma before update on pipeline_runs
+        for each row execute function gc_romper_toma()
+      `)
+      try {
+        await conServidor(db, async (base) => {
+          const r = await fetch(`${base}/trabajar`, {
+            method: 'POST',
+            headers: { 'x-token-worker': TOKEN },
+          })
+          expect(r.status).toBe(500)
+        })
+      } finally {
+        await db.execute(sql`drop trigger if exists gc_romper_toma on pipeline_runs`)
+        await db.execute(sql`drop function if exists gc_romper_toma()`)
+      }
     })
   })
 })
