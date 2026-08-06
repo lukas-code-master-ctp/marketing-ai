@@ -1,0 +1,32 @@
+# La imagen que va a Cloud Run. **No es la de desarrollo** (`Dockerfile`, al
+# lado): aquella monta el repositorio como volumen para que un cambio no
+# obligue a reconstruir, y esta lo copia adentro porque en Cloud Run no hay
+# nada que montar.
+#
+# Se copia el workspace completo y se instala con `--frozen-lockfile` sin
+# filtrar. Instalar solo `@gc/worker...` sería más chico, pero exige que todos
+# los `package.json` de los importadores del lockfile estén presentes, y esa
+# lista cambia cada vez que se agrega un paquete: una imagen que falla al
+# construir por eso es una trampa que se arma sola. `.dockerignore` ya deja
+# fuera lo que pesa (node_modules, .git, .next, docs).
+FROM node:22-alpine
+
+# `corepack enable` falla por permisos en algunas máquinas, así que el `||`
+# deja la salida por npm — igual que en la imagen de desarrollo.
+RUN corepack enable pnpm || npm install -g pnpm@9
+
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+
+ENV NODE_ENV=production
+
+# Cloud Run inyecta `PORT` y el worker lo lee; 8080 es el valor por omisión de
+# los dos, y queda declarado para que la imagen se pueda correr a mano igual.
+ENV PORT=8080
+EXPOSE 8080
+
+# Se corre con `tsx`, sin compilar, igual que en desarrollo: el workspace es
+# TypeScript sin build y agregar uno solo para esta imagen sería una segunda
+# forma de ejecutar el mismo código, con sus propias diferencias.
+CMD ["pnpm", "--filter", "@gc/worker", "start"]
