@@ -104,12 +104,17 @@ export function EditorDePerfil({
   // que algo se perdió.
   const textoAvanzado =
     textoAvanzadoEditado ?? JSON.stringify(haciaElPerfil(formulario, { conservarVacios: true }), null, 2)
+  // Calculado una sola vez y reusado tanto por `copiarPrompt` como por el
+  // `value` del textarea de abajo: que se calculen por separado es justo el
+  // modo en que podrían desalinearse en silencio (ver prueba del botón de
+  // copiar en EditorDePerfil.test.tsx).
+  const promptGenerado = promptParaIa(marca, formulario)
 
   async function copiarPrompt() {
     setCopiado(false)
     setErrorDeCopia(null)
     try {
-      await navigator.clipboard.writeText(promptParaIa(marca, formulario))
+      await navigator.clipboard.writeText(promptGenerado)
       setCopiado(true)
     } catch {
       // `navigator.clipboard` exige contexto seguro y puede estar denegado por
@@ -125,6 +130,11 @@ export function EditorDePerfil({
   function actualizar(cambio: Partial<PerfilEnFormulario>) {
     setFormulario((f) => ({ ...f, ...cambio }))
     setVersionGuardada(null)
+    // El prompt de abajo se recalcula con el formulario nuevo: un aviso de
+    // "Copiado." que quedó de una copia anterior ya no describe lo que hay
+    // en pantalla, por el mismo motivo que `versionGuardada` se limpia acá.
+    setCopiado(false)
+    setErrorDeCopia(null)
   }
 
   function cargarJsonAvanzado() {
@@ -291,32 +301,37 @@ export function EditorDePerfil({
 
             <hr className="my-4 border-gray-200" />
 
-            <h3 className="text-sm font-medium text-gray-700">Prompt para una IA</h3>
-            <p className="mt-1 text-xs text-gray-500">
-              Pégalo en una herramienta de IA que ya conozca tu empresa para que complete el
-              perfil, y trae el resultado de vuelta al área de arriba.
-            </p>
-            <textarea
-              value={promptParaIa(marca, formulario)}
-              readOnly
-              spellCheck={false}
-              rows={20}
-              aria-label="Prompt para una IA"
-              className="mt-2 w-full rounded border border-gray-300 p-3 font-mono text-xs text-gray-800"
-            />
-            <button
-              type="button"
-              onClick={() => void copiarPrompt()}
-              className="mt-2 rounded bg-gray-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
-            >
-              Copiar prompt para IA
-            </button>
-            {copiado && <span className="ml-2 text-sm text-green-700">Copiado.</span>}
-            {errorDeCopia && (
-              <p role="alert" className="mt-2 text-sm text-red-800">
-                {errorDeCopia}
+            <div>
+              <h3 className="text-sm font-medium text-gray-700">
+                Prompt para una IA — un texto listo para pegar en ChatGPT, Claude o similar
+              </h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Pégalo en una herramienta de IA que ya conozca tu empresa para que complete el
+                perfil, trae el resultado de vuelta al área de arriba y haz clic en «Cargar
+                este JSON en el formulario» para que quede en el formulario.
               </p>
-            )}
+              <textarea
+                value={promptGenerado}
+                readOnly
+                spellCheck={false}
+                rows={20}
+                aria-label="Prompt para una IA"
+                className="mt-2 w-full rounded border border-gray-300 p-3 font-mono text-xs text-gray-800"
+              />
+              <button
+                type="button"
+                onClick={() => void copiarPrompt()}
+                className="mt-2 rounded bg-gray-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Copiar prompt para IA
+              </button>
+              {copiado && <span className="ml-2 text-sm text-green-700">Copiado.</span>}
+              {errorDeCopia && (
+                <p role="alert" className="mt-2 text-sm text-red-800">
+                  {errorDeCopia}
+                </p>
+              )}
+            </div>
           </div>
         </details>
       </div>

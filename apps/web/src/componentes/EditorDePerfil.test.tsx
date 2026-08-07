@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { guardarPerfilAction } from '../acciones.js'
@@ -267,6 +267,45 @@ describe('EditorDePerfil', () => {
     expect(area.value).toMatch(/al menos dos pilares/i)
   })
 
+  it('el botón de copiar copia el prompt generado, no el texto avanzado', async () => {
+    // Si `copiarPrompt` pasara `textoAvanzado` en vez de
+    // `promptParaIa(marca, formulario)`, este espía capturaría el JSON crudo
+    // en vez del prompt, y las dos aserciones de abajo caerían.
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+
+    expect(escribir).toHaveBeenCalledTimes(1)
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toContain('parcelas')
+    expect(copiado).toMatch(/al menos dos pilares/i)
+    expect(screen.getByText('Copiado.')).not.toBeNull()
+  })
+
+  it('editar un campo después de copiar limpia el aviso de "Copiado."', async () => {
+    // El prompt cambia con el formulario; un aviso de éxito que sigue en
+    // pantalla después de una edición ya no describe lo que hay copiado.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.resolve() },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+    expect(screen.getByText('Copiado.')).not.toBeNull()
+
+    await userEvent.type(screen.getByLabelText('Categoría'), '!')
+
+    expect(screen.queryByText('Copiado.')).toBeNull()
+  })
+
   it('si el portapapeles falla lo dice, y el texto sigue disponible', async () => {
     // `navigator.clipboard` exige contexto seguro y puede estar denegado. El
     // botón es una comodidad sobre un texto que ya se puede copiar a mano;
@@ -280,7 +319,10 @@ describe('EditorDePerfil', () => {
     await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
     await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
 
-    expect(screen.getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
+    // Acotado al bloque del prompt, no al documento entero: ahí es donde
+    // vive el aviso de este fallo específico.
+    const bloqueDelPrompt = screen.getByLabelText('Prompt para una IA').closest('div')!
+    expect(within(bloqueDelPrompt).getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
     const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
     expect(area.value).toContain('parcelas')
   })
