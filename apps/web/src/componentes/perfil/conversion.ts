@@ -195,58 +195,86 @@ export function estaVacio(texto: string): boolean {
   return texto.trim() === ''
 }
 
-/** Recorta una lista de textos y descarta los que quedan vacíos. */
-function limpiarLista(lista: string[]): string[] {
-  return lista.map((t) => t.trim()).filter((t) => t !== '')
+/** Recorta una lista de textos y, salvo que se pida conservarlos, descarta los que quedan vacíos. */
+function limpiarLista(lista: string[], conservarVacios: boolean): string[] {
+  const recortada = lista.map((t) => t.trim())
+  return conservarVacios ? recortada : recortada.filter((t) => t !== '')
+}
+
+export interface OpcionesDeConversion {
+  /**
+   * Con `true`, conserva las filas y los textos vacíos, y la clave `url`
+   * aunque esté vacía.
+   *
+   * Es para **mostrar y copiar**, no para guardar. Al guardar, lo vacío se
+   * descarta a propósito: el formulario arranca las listas obligatorias con
+   * una fila en blanco para que haya dónde escribir, y mandarla haría que el
+   * esquema se queje de un elemento que nadie llenó.
+   *
+   * Al copiar pasa lo contrario: una lista vacía —`"publicos": []`— no le
+   * dice a quien la lea que cada público lleva nombre, dolor y objeción. La
+   * fila vacía **es** la documentación de la forma.
+   */
+  conservarVacios?: boolean
 }
 
 /**
  * Convierte el formulario a la forma que `PerfilDeMarca` valida. Recorta
- * espacios, descarta filas y elementos que la persona nunca llenó, convierte
- * porcentaje a proporción y normaliza el nombre del pilar a `snake_case`.
+ * espacios, convierte porcentaje a proporción y normaliza el nombre del
+ * pilar a `snake_case`. Sin opciones, además descarta filas y elementos que
+ * la persona nunca llenó — lo correcto al guardar. Con `conservarVacios:
+ * true`, los conserva — para mostrar el formulario completo y para armar un
+ * prompt que una IA externa pueda rellenar.
  */
-export function haciaElPerfil(f: PerfilEnFormulario): unknown {
+export function haciaElPerfil(f: PerfilEnFormulario, opciones?: OpcionesDeConversion): unknown {
+  const conservar = opciones?.conservarVacios === true
   return {
     posicionamiento: {
       categoria: f.posicionamiento.categoria.trim(),
       promesa: f.posicionamiento.promesa.trim(),
-      diferenciadores: limpiarLista(f.posicionamiento.diferenciadores),
+      diferenciadores: limpiarLista(f.posicionamiento.diferenciadores, conservar),
     },
     publicos: f.publicos
-      .filter((p) => !(estaVacio(p.nombre) && estaVacio(p.dolor) && estaVacio(p.objecion)))
+      .filter(
+        (p) => conservar || !(estaVacio(p.nombre) && estaVacio(p.dolor) && estaVacio(p.objecion)),
+      )
       .map((p) => ({
         nombre: p.nombre.trim(),
         dolor: p.dolor.trim(),
         objecion: p.objecion.trim(),
       })),
     tono: {
-      atributos: limpiarLista(f.tono.atributos),
-      hacer: limpiarLista(f.tono.hacer),
-      noHacer: limpiarLista(f.tono.noHacer),
+      atributos: limpiarLista(f.tono.atributos, conservar),
+      hacer: limpiarLista(f.tono.hacer, conservar),
+      noHacer: limpiarLista(f.tono.noHacer, conservar),
     },
     lexico: {
-      preferido: limpiarLista(f.lexico.preferido),
-      prohibido: limpiarLista(f.lexico.prohibido),
+      preferido: limpiarLista(f.lexico.preferido, conservar),
+      prohibido: limpiarLista(f.lexico.prohibido, conservar),
     },
     pilares: f.pilares
-      .filter((p) => !(estaVacio(p.nombre) && estaVacio(p.descripcion)))
+      .filter((p) => conservar || !(estaVacio(p.nombre) && estaVacio(p.descripcion)))
       .map((p) => ({
         nombre: aSnakeCase(p.nombre.trim()),
         descripcion: p.descripcion.trim(),
         proporcion: p.porcentaje / 100,
       })),
     ofertas: f.ofertas
-      .filter((o) => !(estaVacio(o.nombre) && estaVacio(o.descripcion) && estaVacio(o.url)))
+      .filter(
+        (o) =>
+          conservar || !(estaVacio(o.nombre) && estaVacio(o.descripcion) && estaVacio(o.url)),
+      )
       .map((o) => {
         const url = o.url.trim()
         const base = { nombre: o.nombre.trim(), descripcion: o.descripcion.trim() }
         // El esquema declara `url` opcional pero con forma de URL: la
         // ausencia de la clave se acepta, una cadena vacía se rechaza. Por
-        // eso se omite la clave en vez de mandarla vacía.
-        return url === '' ? base : { ...base, url }
+        // eso se omite la clave en vez de mandarla vacía, salvo que se pida
+        // conservarla para mostrar o copiar.
+        return url === '' && !conservar ? base : { ...base, url }
       }),
     restricciones: {
-      disclaimers: limpiarLista(f.restricciones.disclaimers),
+      disclaimers: limpiarLista(f.restricciones.disclaimers, conservar),
     },
   }
 }
