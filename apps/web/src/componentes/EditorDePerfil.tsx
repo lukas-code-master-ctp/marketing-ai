@@ -308,7 +308,7 @@ export function EditorDePerfil({
               <p className="mt-1 text-xs text-gray-500">
                 Pégalo en una herramienta de IA que ya conozca tu empresa para que complete el
                 perfil, trae el resultado de vuelta al área de arriba y haz clic en «Cargar
-                este JSON en el formulario» para que quede en el formulario.
+                este JSON en el formulario».
               </p>
               <textarea
                 value={promptGenerado}
