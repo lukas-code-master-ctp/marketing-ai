@@ -130,4 +130,95 @@ describe('EditorDePerfil', () => {
       PROPS.perfil.posicionamiento.categoria,
     )
   })
+
+  it('un JSON parseable que no describe un perfil muestra el error y no toca el formulario', async () => {
+    // IMPORTANTE 1: `JSON.parse('{"otra":"cosa"}')` no lanza, y `desdeElPerfil`
+    // "carga lo que se pueda y nunca lanza" —con esta entrada, nada—. Sin la
+    // guarda de `pareceUnPerfil`, esto vaciaría el formulario en silencio.
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    fireEvent.change(area, { target: { value: '{"otra":"cosa"}' } })
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cargar este JSON en el formulario' }),
+    )
+
+    expect(screen.getByRole('alert').textContent).toMatch(/no parece un perfil/i)
+    // La aserción que importa es sobre el VALOR del campo, no sobre el
+    // documento entero: si el formulario se hubiera vaciado, este campo
+    // quedaría en ''.
+    expect((screen.getByLabelText('Categoría') as HTMLInputElement).value).toBe(
+      PROPS.perfil.posicionamiento.categoria,
+    )
+  })
+
+  it('un JSON válido en la sección avanzada sí carga el formulario', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    const nuevo = {
+      ...PROPS.perfil,
+      posicionamiento: { ...PROPS.perfil.posicionamiento, categoria: 'Categoría reemplazada' },
+    }
+    fireEvent.change(area, { target: { value: JSON.stringify(nuevo) } })
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cargar este JSON en el formulario' }),
+    )
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect((screen.getByLabelText('Categoría') as HTMLInputElement).value).toBe(
+      'Categoría reemplazada',
+    )
+  })
+
+  it('con una edición del JSON sin cargar, "Guardar" queda deshabilitado y no llama a la acción con el perfil viejo', async () => {
+    // IMPORTANTE 2: el escenario real es "abrió la sección avanzada para
+    // pegar un perfil nuevo, y apretó Guardar sin cargarlo primero". Si
+    // alguien revirtiera el arreglo, el botón dejaría de deshabilitarse y
+    // este clic SÍ llamaría a la acción con `haciaElPerfil(formulario)"
+    // —el perfil viejo—, así que esta aserción se pondría roja.
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    fireEvent.change(area, {
+      target: { value: '{"posicionamiento":{"categoria":"Editado a mano, nunca cargado"}}' },
+    })
+
+    // No hay `jest-dom` en este paquete: `disabled` se lee como propiedad
+    // del elemento, no con `toBeDisabled`.
+    const botonGuardar = screen.getByRole('button', { name: 'Guardar' }) as HTMLButtonElement
+    expect(botonGuardar.disabled).toBe(true)
+
+    await userEvent.click(botonGuardar)
+
+    expect(vi.mocked(guardarPerfilAction)).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText(/edición del JSON sin cargar/),
+    ).not.toBeNull()
+  })
+
+  it('con el formulario vacío, "Guardar" marca los campos obligatorios y no llama a la acción', async () => {
+    // IMPORTANTE 3b: sin perfil, `desdeElPerfil(null)` arranca todos los
+    // campos obligatorios vacíos. El primer clic en Guardar no debe mandar
+    // eso al esquema —que respondería con seis líneas en inglés—, sino
+    // marcar en la pantalla lo que falta.
+    render(<EditorDePerfil {...PROPS} perfil={null} version={0} versiones={[]} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(vi.mocked(guardarPerfilAction)).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Categoría').getAttribute('aria-invalid')).toBe('true')
+  })
+
+  it('con los campos obligatorios llenos, "Guardar" no los marca y sí llama a la acción', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    expect(vi.mocked(guardarPerfilAction)).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('Categoría').getAttribute('aria-invalid')).not.toBe('true')
+  })
 })

@@ -2,7 +2,12 @@
 
 import { useState } from 'react'
 import { guardarPerfilAction } from '../acciones.js'
-import { desdeElPerfil, haciaElPerfil, type PerfilEnFormulario } from './perfil/conversion.js'
+import {
+  desdeElPerfil,
+  faltanCamposObligatorios,
+  haciaElPerfil,
+  type PerfilEnFormulario,
+} from './perfil/conversion.js'
 import {
   SeccionLexico,
   SeccionOfertas,
@@ -12,6 +17,40 @@ import {
   SeccionTono,
 } from './perfil/secciones.js'
 import { SeccionPilares } from './perfil/Pilares.js'
+
+/**
+ * Las siete claves que puede traer un perfil de marca. Se usan para
+ * distinguir "esto parece un perfil, aunque le falten secciones" de "esto es
+ * cualquier otro JSON que la persona pegó por error" — ver `pareceUnPerfil`.
+ */
+const CLAVES_DE_PERFIL = [
+  'posicionamiento',
+  'publicos',
+  'tono',
+  'lexico',
+  'pilares',
+  'ofertas',
+  'restricciones',
+] as const
+
+/**
+ * `true` si `valor` es un objeto (no `null`, no un arreglo) con al menos una
+ * de las siete claves de un perfil de marca.
+ *
+ * `desdeElPerfil` carga lo que se pueda y nunca lanza — es su contrato, para
+ * poder mostrar en el formulario un perfil viejo o parcialmente roto. Pero
+ * ese mismo contrato significa que, sin esta guarda, pegar *cualquier* JSON
+ * que `JSON.parse` acepte —`{"otra":"cosa"}`, `[]`, `5`— produce un
+ * formulario en blanco sin ningún error: `desdeElPerfil` no tiene con qué
+ * cargar nada, así que carga nada. Esta función es lo que distingue "no es
+ * JSON" (atrapado por el `catch` de `JSON.parse`) de "es JSON pero no
+ * describe un perfil" (atrapado acá), para que los dos caminos avisen en vez
+ * de vaciar el formulario en silencio.
+ */
+function pareceUnPerfil(valor: unknown): valor is Record<string, unknown> {
+  if (typeof valor !== 'object' || valor === null || Array.isArray(valor)) return false
+  return CLAVES_DE_PERFIL.some((clave) => clave in valor)
+}
 
 /**
  * El perfil se edita con un formulario guiado, sección por sección: cubre el
@@ -42,6 +81,12 @@ export function EditorDePerfil({
   const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
   const [versionGuardada, setVersionGuardada] = useState<number | null>(null)
 
+  // Se enciende con el primer intento de guardar que encuentra campos
+  // obligatorios vacíos, y desde ahí queda encendido: no hace falta
+  // apagarlo, porque cada sección decide si marcar un campo mirando su
+  // propio valor actual, así que un campo que se llena deja de marcarse solo.
+  const [mostrarObligatorios, setMostrarObligatorios] = useState(false)
+
   // La sección avanzada muestra el JSON derivado del formulario mientras
   // nadie la haya editado a mano: `null` significa "sin edición propia,
   // seguir reflejando `formulario`". En cuanto la persona escribe ahí, el
@@ -57,20 +102,45 @@ export function EditorDePerfil({
   }
 
   function cargarJsonAvanzado() {
+    let nuevo: unknown
     try {
-      const nuevo: unknown = JSON.parse(textoAvanzado)
-      setFormulario(desdeElPerfil(nuevo))
-      setVersionGuardada(null)
-      setTextoAvanzadoEditado(null)
-      setErrorAvanzado(null)
+      nuevo = JSON.parse(textoAvanzado)
     } catch (error) {
       setErrorAvanzado(
         `El texto no es JSON válido: ${error instanceof Error ? error.message : String(error)}`,
       )
+      return
     }
+
+    // `JSON.parse` acepta de todo —un arreglo, un número, `{"otra":"cosa"}`—
+    // y `desdeElPerfil` "carga lo que se pueda y nunca lanza": con una
+    // entrada que no describe un perfil, lo que se puede cargar es nada, y
+    // el formulario quedaría en blanco sin ningún aviso. Se rechaza acá,
+    // antes de tocar el formulario.
+    if (!pareceUnPerfil(nuevo)) {
+      setErrorAvanzado(
+        'Esto no parece un perfil de marca: tiene que ser un objeto con alguna de sus ' +
+          'secciones (posicionamiento, publicos, tono, lexico, pilares, ofertas, restricciones).',
+      )
+      return
+    }
+
+    setFormulario(desdeElPerfil(nuevo))
+    setVersionGuardada(null)
+    setTextoAvanzadoEditado(null)
+    setErrorAvanzado(null)
   }
 
   async function guardar() {
+    // El botón queda deshabilitado mientras esto es cierto (ver más abajo);
+    // esta comprobación es una defensa adicional, no la única barrera.
+    if (textoAvanzadoEditado !== null) return
+
+    if (faltanCamposObligatorios(formulario)) {
+      setMostrarObligatorios(true)
+      return
+    }
+
     setOcupado(true)
     setError(null)
     setVersionGuardada(null)
@@ -86,6 +156,16 @@ export function EditorDePerfil({
     setOcupado(false)
   }
 
+  // «Guardar» serializa siempre el FORMULARIO, no el texto de la sección
+  // avanzada: si alguien pegó ahí un JSON y no lo cargó, guardar ahora
+  // guardaría el perfil viejo mientras la pantalla anuncia éxito, y la
+  // edición se perdería sin rastro. Se elige deshabilitar «Guardar» —en vez
+  // de aplicar el JSON pegado antes de guardar— porque abrir la sección
+  // avanzada no siempre significa "quiero aplicar esto": alguien puede
+  // pegar un JSON solo para mirarlo o compararlo, y aplicar de más
+  // adivinaría una intención que el clic en «Cargar» no confirmó.
+  const hayJsonSinCargar = textoAvanzadoEditado !== null
+
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
       <div className="flex-1">
@@ -93,16 +173,23 @@ export function EditorDePerfil({
           <SeccionPosicionamiento
             valor={formulario.posicionamiento}
             alCambiar={(posicionamiento) => actualizar({ posicionamiento })}
+            mostrarObligatorios={mostrarObligatorios}
           />
           <SeccionPublicos
             valor={formulario.publicos}
             alCambiar={(publicos) => actualizar({ publicos })}
+            mostrarObligatorios={mostrarObligatorios}
           />
-          <SeccionTono valor={formulario.tono} alCambiar={(tono) => actualizar({ tono })} />
+          <SeccionTono
+            valor={formulario.tono}
+            alCambiar={(tono) => actualizar({ tono })}
+            mostrarObligatorios={mostrarObligatorios}
+          />
           <SeccionLexico valor={formulario.lexico} alCambiar={(lexico) => actualizar({ lexico })} />
           <SeccionPilares
             valor={formulario.pilares}
             alCambiar={(pilares) => actualizar({ pilares })}
+            mostrarObligatorios={mostrarObligatorios}
           />
           <SeccionOfertas
             valor={formulario.ofertas}
@@ -117,12 +204,18 @@ export function EditorDePerfil({
         <div className="mt-6 flex items-center gap-3">
           <button
             type="button"
-            disabled={ocupado}
+            disabled={ocupado || hayJsonSinCargar}
             onClick={() => void guardar()}
             className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             Guardar
           </button>
+          {hayJsonSinCargar && (
+            <span className="text-sm text-amber-700">
+              Hay una edición del JSON sin cargar en el formulario. Cárgala, o descarta el
+              texto pegado, antes de guardar.
+            </span>
+          )}
           {versionGuardada !== null && (
             <span className="text-sm text-green-700">
               Perfil guardado como versión {versionGuardada}.

@@ -191,7 +191,7 @@ export function desdeElPerfil(crudo: unknown): PerfilEnFormulario {
 }
 
 /** `true` si el texto queda vacío tras recortar espacios. */
-function estaVacio(texto: string): boolean {
+export function estaVacio(texto: string): boolean {
   return texto.trim() === ''
 }
 
@@ -249,4 +249,36 @@ export function haciaElPerfil(f: PerfilEnFormulario): unknown {
       disclaimers: limpiarLista(f.restricciones.disclaimers),
     },
   }
+}
+
+/**
+ * `true` si al formulario le falta alguno de los campos que el esquema exige
+ * como mínimo para poder guardar: categoría, promesa, al menos un
+ * diferenciador, al menos un público completo, al menos un atributo de tono,
+ * y al menos dos pilares con nombre y descripción.
+ *
+ * No repite los mínimos de longitud que valida `PerfilDeMarca`
+ * (`packages/brand/src/perfil.ts`) —esa sigue siendo su única autoridad—,
+ * solo distingue "vacío" de "algo escrito", que es lo único que el
+ * formulario puede juzgar sin conocer ese esquema. Se usa para decidir si
+ * `EditorDePerfil` deja intentar guardar o marca los campos que faltan.
+ */
+export function faltanCamposObligatorios(f: PerfilEnFormulario): boolean {
+  if (estaVacio(f.posicionamiento.categoria)) return true
+  if (estaVacio(f.posicionamiento.promesa)) return true
+  if (f.posicionamiento.diferenciadores.every(estaVacio)) return true
+
+  const algunPublicoCompleto = f.publicos.some(
+    (p) => !estaVacio(p.nombre) && !estaVacio(p.dolor) && !estaVacio(p.objecion),
+  )
+  if (!algunPublicoCompleto) return true
+
+  if (f.tono.atributos.every(estaVacio)) return true
+
+  const pilaresCompletos = f.pilares.filter(
+    (p) => !estaVacio(p.nombre) && !estaVacio(p.descripcion),
+  ).length
+  if (pilaresCompletos < 2) return true
+
+  return false
 }
