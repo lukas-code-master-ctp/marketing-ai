@@ -302,7 +302,7 @@ Que las listas opcionales arranquen vacías y las obligatorias con una fila es d
 pnpm --filter @gc/web test -- conversion
 ```
 
-Esperado: PASAN las once.
+Esperado: PASAN las diez.
 
 - [ ] **Paso 5: mutar y confirmar que se ponen rojas**
 
