@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo y app web local.** Genera estrategia trimestral y grilla mensual, y las revisas y apruebas en el navegador. Esta rama agrega lo que hace falta para desplegarla —base en Cloud SQL, autenticación con Google— y deja preparado el terreno para alojarla en Vercel, aunque eso último se configura en su interfaz y no agrega código a la rama. **Ya está desplegada** en `https://marketing-ai-web.vercel.app`, contra la base de Cloud SQL: las siete migraciones aplicadas, el inicio de sesión con Google funcionando de punta a punta, y la organización `principal` con la marca `parcelas` creadas desde el CLI apuntado a la base remota. La lista de redes autorizadas de la instancia sigue **vacía**. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo, app web desplegada, y el worker fuera de cualquier máquina local.** Genera estrategia trimestral y grilla mensual; las revisas, editas el perfil de marca con un formulario guiado y las apruebas en el navegador. **Está desplegada** en `https://marketing-ai-web.vercel.app`, contra la base de Cloud SQL: las siete migraciones aplicadas, el inicio de sesión con Google funcionando de punta a punta, y la organización `principal` con la marca `parcelas` creada desde el CLI apuntado a la base remota. El worker (bloque 1C-B) dejó de ser un proceso que alguien tiene que tener corriendo a mano: vive como servicio de Cloud Run, lo despierta Cloud Tasks cuando la web encola algo, y Cloud Scheduler lo llama cada cinco minutos como red de seguridad. La lista de redes autorizadas de la instancia de Cloud SQL sigue **vacía**. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -16,7 +16,7 @@ Cada bloque de trabajo tiene su spec y su plan en `docs/superpowers/`. Los plane
 ## Comandos
 
 ```bash
-docker compose up -d postgres # la base. Sin esto fallan seis paquetes
+docker compose up -d postgres # la base. Sin esto fallan diez paquetes
 docker compose up -d          # lo anterior más el worker — que exige credenciales, ver abajo
 pnpm test                     # NUNCA `pnpm -r test` — ver abajo
 pnpm -r typecheck
@@ -34,11 +34,19 @@ en la web basta la base, y ese comando no depende de tener credenciales ni
 cuanto falte la clave, y dejaría un servicio en rojo en `docker compose ps` en
 una máquina perfectamente sana.
 
-El worker construye el cliente del modelo al arrancar, así que no levanta sin
-`OPENROUTER_API_KEY` o sin `IA_EN_SECO=true`. Es a propósito: prefiere no
-arrancar antes que arrancar sano y marcar fallida toda la cola. **Esto vale
-también dentro de `docker compose`**: con el `.env` tal como está hoy —clave
-vacía y `IA_EN_SECO=false`— el contenedor `worker` arranca, falla con
+El worker ahora se niega a arrancar por **dos** motivos distintos, y en este
+orden. Primero, antes de tocar la base o el modelo, `main.ts` exige
+`WORKER_TOKEN` —el token compartido que la ruta HTTP del worker exige en la
+cabecera `x-token-worker` (ver la sección de arquitectura y despliegue más
+abajo)— y sale con `Falta WORKER_TOKEN` si no está. Recién después, al
+construir el cliente del modelo, exige `OPENROUTER_API_KEY` o
+`IA_EN_SECO=true`. Las dos son la misma política: prefiere no arrancar antes
+que arrancar sano y, según cuál falte, marcar fallida toda la cola o dejar la
+ruta abierta sin el cerrojo compartido. **Esto vale también dentro de
+`docker compose`**: `WORKER_TOKEN` la fija `docker-compose.yml` (vale
+`"local"`, que alcanza porque ahí nadie llama al worker por HTTP), así que con
+el `.env` tal como está hoy —clave vacía y `IA_EN_SECO=false`— el contenedor
+`worker` pasa esa primera comprobación, arranca, falla con
 `Falta OPENROUTER_API_KEY` y queda en `Exited (1)`. No es un problema del
 contenedor; es la misma negativa de siempre, y se ve con `docker compose logs
 worker`. Carga la clave o pon `IA_EN_SECO=true` en el `.env` de la raíz.
@@ -79,26 +87,39 @@ Cada una existe porque romperla ya costó trabajo real.
 
 **El conector de Cloud SQL decide si autentica con un `instanceof`, y eso
 exige una sola copia de `google-auth-library` en el árbol de dependencias.**
-`crearConexion` (`packages/db/src/cliente.ts`) arma un `GoogleAuth` con las
-credenciales de la cuenta de servicio y se lo entrega al `Connector` de
-`@google-cloud/cloud-sql-connector` por su opción `auth`. Adentro, el
-`sqladmin-fetcher` del conector decide si usa esas credenciales con
-`loginAuth instanceof GoogleAuth` — y esa comparación solo da cierto si
-`google-auth-library` resuelve, para `@gc/db` y para el conector, al **mismo
-archivo**. Si pnpm instala dos copias —porque el rango que declara el
-conector deja de coincidir con el que declara `packages/db/package.json`—,
-el objeto cae por la rama equivocada y la petición sale **sin
-credenciales**: un `401 Login Required` que no menciona versiones ni copias.
-Ya mordió una vez, en la prueba de humo contra la instancia real. Ni el
-resto de la suite ni `pnpm -r typecheck` ven qué copia resuelve cada
-paquete —eso exige mirar el árbol de `node_modules`, no los tipos ni el
-comportamiento normal—, así que hace falta una prueba dedicada, que sí
-corre dentro de `pnpm test`: `packages/db/src/resolucion-google-auth-library.test.ts`,
-que afirma con `require.resolve` en vez de confiar en que los rangos
-declarados coincidan. **Si esa prueba se pone roja:** alinea el rango de
-`google-auth-library` en `packages/db/package.json` con el que exige
+`crearConexion` (`packages/db/src/cliente.ts`) arma un `GoogleAuth` y se lo
+entrega al `Connector` de `@google-cloud/cloud-sql-connector` por su opción
+`auth`. Con qué credenciales lo arma depende de dónde corre: en Vercel, con
+las del JSON de la cuenta de servicio (`GOOGLE_CREDENCIALES_JSON`); **dentro
+de Cloud Run, sin `credentials` en absoluto**, porque ahí hay una cuenta de
+servicio adherida al proceso y `GoogleAuth` la resuelve sola por el servidor
+de metadatos. La señal que distingue los dos casos es `K_SERVICE`
+(`packages/db/src/destino.ts`): Cloud Run la define en toda revisión, y
+ningún otro entorno de este repositorio la define, así que su presencia es lo
+que le dice a `destinoDeConexion` que `GOOGLE_CREDENCIALES_JSON` ya no hace
+falta — en Vercel, sin esa identidad adherida, la variable sigue siendo
+obligatoria. En los dos casos, adentro, el `sqladmin-fetcher` del conector
+decide si usa el objeto que le llega con `loginAuth instanceof GoogleAuth` —
+y esa comparación solo da cierto si `google-auth-library` resuelve, para
+`@gc/db` y para el conector, al **mismo archivo**. Si pnpm instala dos
+copias —porque el rango que declara el conector deja de coincidir con el que
+declara `packages/db/package.json`—, el objeto cae por la rama equivocada y
+la petición sale **sin credenciales**: un `401 Login Required` que no
+menciona versiones ni copias. Ya mordió una vez, en la prueba de humo contra
+la instancia real. Ni el resto de la suite ni `pnpm -r typecheck` ven qué
+copia resuelve cada paquete —eso exige mirar el árbol de `node_modules`, no
+los tipos ni el comportamiento normal—, así que hace falta una prueba
+dedicada, que sí corre dentro de `pnpm test`:
+`packages/db/src/resolucion-google-auth-library.test.ts`, que afirma con
+`require.resolve` en vez de confiar en que los rangos declarados coincidan.
+Esa misma prueba comprueba también que `@gc/despertador` —que importa
+`GoogleAuth` por su cuenta para firmar contra la API REST de Cloud Tasks, sin
+pasar por el `instanceof` del conector pero como tercer declarante del mismo
+rango— resuelve al mismo archivo. **Si alguna de las dos aserciones se pone
+roja:** alinea el rango de `google-auth-library` en `packages/db/package.json`
+y en `packages/despertador/package.json` con el que exige
 `@google-cloud/cloud-sql-connector` (revisa su `package.json`) y corre
-`pnpm install` para que las dos vuelvan a resolver a una sola copia.
+`pnpm install` para que las tres vuelvan a resolver a una sola copia.
 
 **Idioma.** Esquema y columnas en inglés `snake_case`. API de dominio, variables, comentarios, prompts y **todo texto que ve el usuario** en español.
 
@@ -193,8 +214,8 @@ pnpm comprobar:aislamiento
 
 El script (`scripts/comprobar-aislamiento.mjs`) **deriva el conjunto auditado
 del cierre transitivo de dependencias de workspace de `apps/web`**, recorriendo
-los `package.json` desde ahí hacia abajo (hoy son cinco: `@gc/brand`, `@gc/db`,
-`@gc/operaciones`, `@gc/shared`, `@gc/strategy`). Antes lo leía de
+los `package.json` desde ahí hacia abajo (hoy son seis: `@gc/brand`, `@gc/db`,
+`@gc/despertador`, `@gc/operaciones`, `@gc/shared`, `@gc/strategy`). Antes lo leía de
 `transpilePackages` en `next.config.ts`, y eso se podía achicar en silencio:
 ese archivo documenta que su lista **no** controla la resolución, así que
 quitar una entrada dejaba de auditar un paquete sin cambiar nada real. El
@@ -218,6 +239,19 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 
 **Cada ruta de Next necesita su propio `export const dynamic = 'force-dynamic'`.** No se propaga entre árboles de rutas. Sin él la página se prerenderiza y congela sus datos en el build. Verificar en `pnpm --filter @gc/web build` que salga `ƒ` y no `○`.
 
+**`--max-instances 1` en el servicio de Cloud Run del worker no es un ajuste de
+rendimiento: es lo que sostiene que la columna de latido no haga falta.**
+Decidir si una corrida está abandonada es hoy una aproximación por tiempo
+—quince minutos sin señal, en `reanudarCorridaEncolada`— y esa aproximación
+solo es segura mientras haya **un** worker: con varias instancias, una
+corrida que un worker está ejecutando puede ser reanudada y tomada por otro,
+y el modelo se paga dos veces. `--max-instances 1` junto con `--concurrency 1`
+en el servicio, y `--max-concurrent-dispatches 1` en la cola de Cloud Tasks,
+mantienen el sistema exactamente tan concurrente como cuando el worker era un
+proceso local secuencial. **Subir cualquiera de los tres exige construir
+antes la columna de arriendo** (`lease_until` en `pipeline_runs`), que sigue
+anotada en `pendientes.md`.
+
 ## Arquitectura
 
 ```
@@ -229,11 +263,20 @@ produzca esa forma lo verifica `p2.test.ts`, en `@gc/flujos`.
 @gc/strategy    esquemas, validación, derivados, periodos, lectura de estrategia
 @gc/flujos      flujos P1 (estrategia) y P2 (grilla): lo único que llama al modelo
 @gc/operaciones operaciones que comparten CLI, web y worker
+@gc/despertador avisa a Cloud Tasks que hay una corrida encolada, para que
+                despierte al worker; en local no hace nada (el worker sondea solo)
 apps/cli        comandos de operación
 apps/web        Next.js App Router, Server Components, Server Actions, y
                 autenticación con Auth.js v5 (Google + lista de correos
                 permitidos, sin tabla de sesiones)
-apps/worker     toma corridas pendientes y las ejecuta. Lo único que llama al modelo sin que se lo pidan
+apps/worker     servidor HTTP con una sola ruta, `POST /trabajar`, que drena
+                la cola de corridas pendientes. Es lo único que llama al
+                modelo sin que se lo pidan. En producción (Cloud Run) lo
+                despierta Cloud Tasks al encolar y Cloud Scheduler cada cinco
+                minutos como red de seguridad; entre llamada y llamada la
+                instancia se apaga sola. El sondeo por bucle —cada `SONDEO_MS`
+                milisegundos— sobrevive solo en desarrollo local, donde no hay
+                ni Cloud Tasks ni Cloud Scheduler
 ```
 
 `esTransitorio` es el **único** punto donde se decide reintentar, y clasifica por SQLSTATE — por eso cubre toda llamada a la base sin envolverlas una por una.
@@ -261,9 +304,16 @@ y pruebas locales — bases `gestor` (con datos de marcha en seco) y
 `gestor_test`. En Cloud SQL para producción. **En local no se declara ninguna
 variable de Cloud SQL**: sin `CLOUD_SQL_INSTANCIA`, `destinoDeConexion`
 (`packages/db/src/destino.ts`) resuelve por `DATABASE_URL` y va a Docker — así
-en tu máquina, en el CLI y en el worker. Vercel sí declara `CLOUD_SQL_INSTANCIA`
-y sus cuatro variables acompañantes, y con eso `crearConexion`
-(`packages/db/src/cliente.ts`) resuelve contra Cloud SQL en vez de Docker.
+en tu máquina, en el CLI y en el worker de `docker compose`. Vercel y el
+worker de Cloud Run sí declaran `CLOUD_SQL_INSTANCIA`, pero no la misma
+cantidad de variables acompañantes: Vercel declara **cuatro**
+(`CLOUD_SQL_USUARIO`, `CLOUD_SQL_CLAVE`, `CLOUD_SQL_BASE` y
+`GOOGLE_CREDENCIALES_JSON`, porque ahí no hay identidad adherida); Cloud Run
+declara **tres**, sin el JSON, porque `destinoDeConexion` detecta `K_SERVICE`
+—la variable que Cloud Run define en toda revisión— y toma las credenciales
+de la cuenta de servicio adherida al proceso en vez de pedir el JSON. Con
+cualquiera de las dos, `crearConexion` (`packages/db/src/cliente.ts`) resuelve
+contra Cloud SQL en vez de Docker.
 
 **Las pruebas del arnés nunca pasan por `destinoDeConexion`**, así que la
 frase anterior no las incluye a propósito — es la sexta corrección a una
@@ -277,10 +327,27 @@ process.env.DATABASE_URL_TEST` antes de importar las acciones. Si
 `CLOUD_SQL_INSTANCIA` estuviera presente en el entorno de pruebas, esa
 sustitución no bastaría —la instancia gana por precedencia— y esas pruebas
 escribirían contra producción. Por eso `vitest.setup.ts` borra las cinco
-variables de Cloud SQL del proceso apenas carga el `.env`, y por eso
+variables de Cloud SQL del proceso apenas carga el `.env` (las cuatro
+acompañantes más `GOOGLE_CREDENCIALES_JSON`, que comparten Cloud SQL y el
+despertador porque es la misma cuenta de servicio), y por eso
 `docker-compose.yml` fija `CLOUD_SQL_INSTANCIA: ""` en el bloque
 `environment:` del worker, junto a `DATABASE_URL`: las dos neutralizan la
 misma precedencia deliberada, cada una donde el `.env` la haría ganar.
+
+**`vitest.setup.ts` borra seis variables más, por la misma simetría.** Son las
+que configuran `@gc/despertador` (`CLOUD_TASKS_PROYECTO`, `CLOUD_TASKS_REGION`,
+`CLOUD_TASKS_COLA`, `WORKER_URL`, `WORKER_CUENTA_DE_SERVICIO` y
+`WORKER_TOKEN`): `.env.example` invita a cargarlas para depurar el camino de
+la nube, y con las seis presentes cualquier prueba que llame a las Server
+Actions que encolan —`encolarGrillaAccion` y sus dos hermanas, que llaman a
+`despertarWorker`— crearía una tarea de verdad contra la cola de producción, y
+esa tarea despertaría al worker real para que ejecute corridas de la base de
+pruebas. Hoy ninguna prueba llega ahí, así que el riesgo es latente; deja de
+serlo el día que alguien pruebe esas acciones. `WORKER_TOKEN` va en la lista
+aunque sola no configure ningún destino del despertador (`destinoDelDespertador`
+la trata aparte porque también es la que exige el worker local para arrancar):
+borrarla mantiene el entorno de pruebas parejo con el de un clon nuevo. En
+total son once variables borradas, no cinco.
 
 **La app en Vercel llega a Cloud SQL por el conector de Node de Google
 (`@google-cloud/cloud-sql-connector`), no por una cadena de conexión.** El
@@ -289,10 +356,13 @@ Client— y por eso la lista de redes autorizadas de la instancia queda
 **vacía**. Esa lista vacía es la garantía del diseño, no un detalle de
 configuración: significa que la base no está expuesta a internet por IP, y
 que no hay ningún firewall que mantener sincronizado con las IPs de Vercel.
-Las credenciales viajan como objeto —`GOOGLE_CREDENCIALES_JSON`, el JSON de
-la cuenta de servicio en una variable de entorno— y no por
+En Vercel las credenciales viajan como objeto —`GOOGLE_CREDENCIALES_JSON`, el
+JSON de la cuenta de servicio en una variable de entorno— y no por
 `GOOGLE_APPLICATION_CREDENTIALS`, que espera una ruta a archivo: en Vercel no
-hay archivos que poner.
+hay archivos que poner. **En Cloud Run no viaja ninguna credencial**: el
+worker corre con la cuenta de servicio adherida al propio servicio, y
+`GoogleAuth` la resuelve por el servidor de metadatos sin que ningún JSON
+cruce la red (ver la regla no negociable de `google-auth-library`, arriba).
 
 **`max: 5` en el pool (`packages/db/src/cliente.ts`) es bajo a propósito.**
 Cada invocación de Vercel corre en su propio proceso y abre su propio pool,
@@ -399,12 +469,21 @@ Es una operación que se hace pocas veces y siempre con prisa, así que:
 
 La base de desarrollo tiene la marca `parcelas` con perfil cargado, estrategia `2026-Q3` y la grilla de `2026-09` en borrador. **Si una verificación manual la modifica, restáurala.**
 
-El worker corre en un contenedor con el repositorio montado en `/app`, y se
-ejecuta con `tsx` sin compilar nada: **un cambio en `apps/worker` o en
+**Hay dos Dockerfiles del worker, con propósitos distintos, y confundirlos
+lleva a pensar que un cambio no necesita desplegarse cuando sí.**
+`apps/worker/Dockerfile` es la imagen de desarrollo, la que arma
+`docker compose`: monta el repositorio como volumen en `/app` y corre con
+`tsx` sin compilar nada, así que **en local un cambio en `apps/worker` o en
 cualquier paquete solo pide `docker compose restart worker`, no reconstruir la
-imagen.** Son unos siete segundos hasta que el worker vuelve a escuchar.
-Reconstruir (`docker compose build worker`) hace falta solo si cambia el
-`Dockerfile`.
+imagen** — son unos siete segundos hasta que el worker vuelve a escuchar, y
+reconstruir (`docker compose build worker`) hace falta solo si cambia ese
+`Dockerfile`. `apps/worker/Dockerfile.produccion` es otra cosa: la imagen que
+corre en Cloud Run, que copia el workspace completo adentro porque ahí no hay
+nada que montar. **Un cambio en `apps/worker` o en cualquier paquete del
+workspace sí exige una imagen nueva en producción** — lo que localmente basta
+con reiniciar, en la nube exige reconstruir y volver a desplegar. Eso lo hace
+CI solo, en cada push verde a `master` (ver la sección de despliegue más
+abajo); no hace falta acordarse de hacerlo a mano.
 
 Sus `node_modules` no son los del host: pnpm en Windows deja enlaces con rutas
 absolutas y binarios de otra plataforma, así que el contenedor tiene los suyos
@@ -429,16 +508,114 @@ no concuerdan. El orden que funciona es: agregar la dependencia, `pnpm install`
 en el host —que actualiza el lockfile—, y recién ahí `docker compose restart
 worker`.
 
-**Con la base en Cloud SQL, el costo ya no depende de que el worker esté
-encendido: depende de que la instancia lo esté.** Con Neon, el plan gratuito
-suspendía la base sola cuando nadie la consultaba, y era el sondeo del worker
-—cada dos segundos— el que la mantenía despierta las 730 horas del mes sin
-que nadie usara el sistema. Cloud SQL no tiene ese mecanismo: **no se apaga
-sola, y una instancia encendida se factura corriendo, la use alguien o no.**
-El sondeo del worker ya no mueve esa factura para nada. Lo que sí hay que
-hacer es detener la instancia cuando nadie vaya a generar contenido y
-encenderla antes de la próxima vez — es exactamente por lo que la instancia
-de `gestor-contenido-ctp` está detenida ahora mismo. Que algo la encienda y
-apague solo, en vez de hacerlo a mano, sigue siendo trabajo pendiente (ver
-`pendientes.md`), del mismo bloque 1C-B que se lleva al worker fuera de una
-máquina local.
+El worker de `docker compose` publica su ruta HTTP en el host, para poder
+golpearla a mano mientras se desarrolla: `curl -X POST -H "x-token-worker:
+local" http://localhost:8090/trabajar`. El puerto es **8090 y no 8080** a
+propósito —en la máquina de este proyecto el 8080 del host ya está ocupado de
+forma permanente por un contenedor de otro proyecto—, pero adentro del
+contenedor sigue siendo 8080, que es lo que Cloud Run espera y el valor por
+omisión que lee el worker (`PORT` en `main.ts`); no lo cambies de vuelta. No
+hace falta este `curl` para que el worker local funcione: el sondeo
+(`SONDEO_MS`, fijado en `2000` por `docker-compose.yml`) lo hace solo.
+
+### Cómo se despliega y se opera el worker en Cloud Run
+
+**El despliegue es automático en cada push verde a `master`**, sin filtro de
+rutas: el trabajo `desplegar-worker` de `.github/workflows/ci.yml` corre
+después de `test` (con `needs: test`, para no desplegar algo que no pasó las
+pruebas), construye la imagen con `apps/worker/Dockerfile.produccion` —no el
+`Dockerfile` de al lado, ver arriba— y la empuja con dos etiquetas al
+repositorio `southamerica-east1-docker.pkg.dev/gestor-contenido-ctp/gestor`:
+el SHA del commit, para poder volver a una revisión concreta, y `latest`. No
+hay filtro de rutas a propósito: un cambio en cualquier paquete del workspace
+puede afectar al worker, y una lista de rutas mantenida a mano es una forma
+conocida de equivocarse en eso.
+
+**El despliegue pasa solo la imagen.** El paso final es
+`gcloud run deploy worker --image ...`, sin `--set-env-vars` ni ninguna otra
+bandera de configuración: las variables de entorno, los secretos, la cuenta de
+servicio y los límites de instancias (`--max-instances 1`, `--concurrency 1`,
+ver la regla no negociable) los fijó la creación del servicio, y el workflow
+no los toca. Un `--set-env-vars` ahí pisaría, entre otras cosas, el token
+compartido y la contraseña de la base.
+
+**El token compartido, `WORKER_TOKEN`, vive en dos lados y tiene que valer lo
+mismo en los dos**: el servicio de Cloud Run —que lo exige en la cabecera
+`x-token-worker` de `POST /trabajar`— y Vercel —que lo manda al crear la tarea
+de Cloud Tasks, desde `@gc/despertador`—. Cambiarlo en un lado sin el otro
+deja al despertador creando tareas que el worker rechaza con 401; el síntoma
+es silencioso desde la web, porque `despertarWorker` traga sus errores y
+confía en que la red de seguridad los cubra, así que el único aviso es que
+generar empieza a tardar los cinco minutos del intervalo de Cloud Scheduler
+en vez de los segundos de siempre.
+
+Para ver qué revisión está sirviendo:
+
+```
+gcloud run services describe worker --region southamerica-east1 --project gestor-contenido-ctp --format="value(spec.template.spec.containers[0].image)"
+```
+
+La etiqueta de la imagen debería terminar en el SHA del último commit de
+`master`.
+
+Para leer los logs:
+
+```
+gcloud run services logs read worker --region southamerica-east1 --project gestor-contenido-ctp --limit 50
+```
+
+Los datos concretos de la infraestructura: proyecto `gestor-contenido-ctp`,
+región `southamerica-east1`, servicio de Cloud Run `worker`, cola de Cloud
+Tasks `generaciones`, trabajo de Cloud Scheduler `despertar-worker` —corre
+cada cinco minutos, `*/5 * * * *`, la red de seguridad que toma lo que
+`@gc/despertador` no haya podido avisar—, y repositorio de imágenes
+`southamerica-east1-docker.pkg.dev/gestor-contenido-ctp/gestor`. Cuánto atiende
+un turno del worker lo acotan `LIMITE_POR_PETICION` (diez corridas,
+`apps/worker/src/drenar.ts`) y `PRESUPUESTO_MS` (900 s), calculados contra el
+`--timeout 1200` del servicio: sin esos dos topes, una cola larga se atendería
+entera dentro de una sola petición HTTP y el corte de Cloud Run llegaría a
+mitad de una generación.
+
+Tres cosas que se aprendieron operando esto, y que le ahorran tiempo a la
+próxima persona:
+
+1. **`gcloud secrets versions add --data-file=-` NO funciona en PowerShell.**
+   `Ctrl+D` no cierra la entrada, y el comando sale **sin guardar nada y en
+   silencio**. El camino que sirve es un archivo temporal, escrito con
+   `[System.IO.File]::WriteAllText` y **no** con `echo`, porque `echo` agrega
+   un salto de línea que viajaría dentro de la clave hasta la cabecera de
+   autorización.
+2. **El frontend de Google devuelve `411 Length Required` a un `POST` sin
+   `Content-Length`.** Afecta a un `curl` armado a mano contra el worker;
+   Cloud Scheduler sí lo manda bien.
+3. **El puerto 8080 del host está ocupado de forma permanente** en la máquina
+   de este proyecto por un contenedor de otro proyecto, y por eso
+   `docker-compose.yml` publica el worker en **8090** (ver arriba).
+
+**Con la base en Cloud SQL, el costo de tenerla encendida no depende de que
+el worker esté escuchando: depende de que la instancia lo esté.** Con Neon,
+el plan gratuito suspendía la base sola cuando nadie la consultaba, y era el
+sondeo del worker —cada dos segundos— el que la mantenía despierta las 730
+horas del mes sin que nadie usara el sistema. Cloud SQL no tiene ese
+mecanismo: **no se apaga sola, y una instancia encendida se factura
+corriendo, la use alguien o no.** Ese sondeo, además, ya no corre en
+producción: el worker vive en Cloud Run, escala a cero entre llamada y
+llamada, y `SONDEO_MS` —lo que lo sustituye— **solo se declara en desarrollo
+local**, donde no hay ni Cloud Tasks ni Cloud Scheduler que avisen.
+
+Que algo encienda y apague la instancia de Cloud SQL sola, para no pagarla
+mientras nadie genera contenido, se evaluó en el mismo bloque 1C-B y se
+**descartó**, con motivo escrito en
+`docs/superpowers/specs/2026-08-06-worker-en-la-nube-design.md`: una instancia
+apagada no solo detiene al worker, **deja la app web muerta** —cada página de
+`https://marketing-ai-web.vercel.app` lee la base en cada petición, así que
+respondería 500 a todo mientras la instancia esté abajo—, y lo que se ahorra
+es menor de lo que parece, porque el disco se factura igual que la instancia
+esté prendida o apagada: sobre una `db-f1-micro`, apagarla doce horas al día
+ahorra del orden de la mitad de la parte de cómputo, unos pocos dólares al
+mes. El sustituto es una **alerta de presupuesto** en Google Cloud: avisa
+cuando el gasto se sale de lo esperado —el problema real, una factura que
+crece sin que nadie mire— sin apagar nada. Detener la instancia a mano sigue
+siendo una opción razonable si nadie va a generar contenido por un buen rato,
+pero ya no es trabajo pendiente de este bloque: es una decisión operativa de
+cada momento, no algo que 1C-B haya dejado a medio construir.
