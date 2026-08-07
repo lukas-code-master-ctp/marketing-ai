@@ -244,8 +244,13 @@ describe('EditorDePerfil', () => {
   })
 
   it('guardar sigue descartando lo vacío', async () => {
-    // El cambio de la sección avanzada NO debe filtrarse al guardado.
+    // El cambio de la sección avanzada NO debe filtrarse al guardado: la
+    // fixture `PROPS` no trae de por sí ninguna fila vacía en `publicos`, así
+    // que sin agregar una acá la aserción de abajo sería trivialmente cierta
+    // se descarte o no. Se agrega un público con el botón de "agregar" —nace
+    // vacío— para que el guardado tenga algo que descartar de verdad.
     render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Agregar público' }))
     await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
 
     const [, texto] = vi.mocked(guardarPerfilAction).mock.calls[0]!
