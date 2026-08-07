@@ -27,16 +27,26 @@ const REGLAS = `- \`categoria\`, \`promesa\` y al menos un \`diferenciador\` son
   en blanco—.
 - **Al menos dos pilares.** Cada uno lleva \`nombre\` en \`snake_case\`
   —minúsculas, sin acentos, con guiones bajos, empezando por una letra—,
-  \`descripcion\`, y \`proporcion\`.
+  \`descripcion\`, y \`proporcion\`. Los nombres de pilar no se repiten entre sí.
 - Las proporciones van de 0 a 1 —no en porcentaje— y **suman exactamente 1**
   entre todos los pilares.
-- Las ofertas son opcionales, y dentro de cada una \`url\` también.
-- \`lexico\` y \`disclaimers\` pueden ir vacíos.`
+- Las ofertas son opcionales —la lista puede quedar vacía (\`[]\`)—, pero cada
+  oferta que incluyas lleva \`nombre\` y \`descripcion\`. La \`url\` es opcional
+  dentro de cada una: si no la tienes, **quita la clave \`url\` entera** en vez
+  de dejarla en \`""\`, porque una cadena vacía no es una dirección válida y se
+  rechaza.
+- \`lexico\` es el vocabulario de la marca: en \`preferido\` van las palabras y
+  expresiones que la marca sí usa —los términos propios de su negocio, cómo le
+  llama a lo que vende—, y en \`prohibido\` las que nunca usa —promesas que no
+  puede sostener, muletillas, jerga que confunde—. Los dos son opcionales, pero
+  llénalos si conoces la empresa: es lo que evita que el contenido suene
+  genérico.
+- \`disclaimers\` puede ir vacío.`
 
 const INSTRUCCION_DE_CIERRE = `Devuelve SOLO el JSON completo, sin explicaciones alrededor y sin envolverlo
 en un bloque de código, para que se pueda pegar de vuelta sin editar. No
-dejes filas vacías: si no tienes información para un público, una oferta o
-un disclaimer, quítalo en vez de dejarlo en blanco.`
+dejes filas vacías: si no tienes información para una oferta o un disclaimer,
+quítalo en vez de dejarlo en blanco.`
 
 /**
  * Arma el prompt completo: la instrucción, las reglas, y al final el
@@ -45,7 +55,12 @@ un disclaimer, quítalo en vez de dejarlo en blanco.`
  *
  * El esqueleto conserva las filas y los textos vacíos (`conservarVacios:
  * true`) a propósito: es la única forma de que el JSON muestre las claves de
- * cada público, pilar y oferta sin que la IA tenga que adivinarlas.
+ * cada público y de cada pilar sin que la IA tenga que adivinarlas. Con las
+ * ofertas no alcanza —el formulario vacío no trae ninguna, así que el
+ * esqueleto muestra `"ofertas": []` y no hay claves que mostrar—, y por eso
+ * `REGLAS` las nombra una por una en prosa. Lo mismo con `preferido` y
+ * `prohibido` de `lexico`, que son listas de textos sueltos y no de objetos:
+ * sus claves están, pero nada dice qué va adentro.
  */
 export function promptParaIa(marca: string, formulario: PerfilEnFormulario): string {
   const esqueleto = JSON.stringify(haciaElPerfil(formulario, { conservarVacios: true }), null, 2)

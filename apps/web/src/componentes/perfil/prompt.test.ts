@@ -40,6 +40,51 @@ describe('promptParaIa', () => {
     expect(p).toMatch(/`noHacer`/)
   })
 
+  it('documenta las claves de una oferta, que el esqueleto vacío no puede mostrar', () => {
+    // El esqueleto de un perfil en blanco trae `"ofertas": []`: no hay ninguna
+    // oferta de la que mostrar claves, así que si las reglas no las nombran,
+    // nadie las nombra. Una IA que devuelva `{"titulo":…,"detalle":…}` produce
+    // tarjetas en blanco y el contenido se pierde sin decir por qué.
+    const p = promptParaIa('tapcar', FORMULARIO_VACIO)
+    expect(p).toMatch(/cada\s+oferta\s+que\s+incluyas\s+lleva\s+`nombre`\s+y\s+`descripcion`/i)
+  })
+
+  it('pide QUITAR la clave url en vez de dejarla vacía', () => {
+    // `conservarVacios` deja `"url": ""` en el esqueleto a propósito, para que
+    // se vea que la clave existe. Pero el esquema declara `url` como
+    // `.url().optional()`: la ausencia se acepta y la cadena vacía se rechaza.
+    // Por la web no muerde —`guardar()` la omite—, pero sí por el camino de
+    // copiar el JSON a un archivo y cargarlo con `pnpm cli perfil:cargar`,
+    // que va directo a validar.
+    const p = promptParaIa('tapcar', FORMULARIO_VACIO)
+    expect(p).toMatch(/quita\s+la\s+clave\s+`url`/i)
+  })
+
+  it('explica qué son `preferido` y `prohibido`', () => {
+    // Es lo que una IA que conoce la empresa sí sabría llenar, y sin
+    // explicación lo deja vacío. Con comillas invertidas, no sueltos: las dos
+    // palabras también viven en el esqueleto JSON, entre comillas dobles.
+    const p = promptParaIa('tapcar', FORMULARIO_VACIO)
+    expect(p).toMatch(/`preferido`/)
+    expect(p).toMatch(/`prohibido`/)
+  })
+
+  it('dice que los nombres de pilar no se repiten', () => {
+    // `validarPerfil` lanza «Hay nombres de pilar repetidos», y el esqueleto
+    // —dos pilares con el nombre vacío— no puede insinuarlo.
+    const p = promptParaIa('tapcar', FORMULARIO_VACIO)
+    expect(p).toMatch(/nombres\s+de\s+pilar\s+no\s+se\s+repiten/i)
+  })
+
+  it('no se contradice sobre los públicos', () => {
+    // Las reglas exigen al menos un público. La instrucción de cierre invita a
+    // quitar lo que no se sepa llenar; si nombrara al público ahí, las dos
+    // afirmaciones no podrían ser ciertas a la vez en el caso límite.
+    const p = promptParaIa('tapcar', FORMULARIO_VACIO)
+    expect(p).toMatch(/al menos un público/i)
+    expect(p).not.toMatch(/informaci[oó]n para un p[úu]blico/i)
+  })
+
   it('pide devolver solo JSON y sin filas vacías', () => {
     // Sin filas vacías porque el mismo archivo puede cargarse por el CLI, que
     // NO las descarta: `cargarPerfilDeArchivo` pasa el archivo directo a
