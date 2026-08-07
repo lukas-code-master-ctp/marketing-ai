@@ -23,10 +23,20 @@ export interface PerfilConHistorial {
  * es la muestra de una marca concreta: una marca nueva estrenaría su perfil
  * hablando de parcelas de agrado.
  *
- * Valida a propósito, aunque sea texto de relleno: quien abre el editor de una
- * marca nueva no tiene que pelearse con una lista de reglas rotas que no
- * escribió para empezar a editar. Lo que sí se rechaza es guardarla **sin
- * tocar** — ver `cargarPerfilDeObjeto`.
+ * Ya no la ve nadie desde el editor web: `perfil/page.tsx` arranca el
+ * formulario vacío para una marca sin perfil (`perfil={datos?.perfil ?? null}`,
+ * y `null` no es esta plantilla), así que la persona que llena el formulario
+ * nunca se topa con este texto de relleno. Lo que sigue vivo es su otro uso:
+ * el patrón contra el que se compara, campo por campo, lo que llega por el
+ * CLI (`perfil:cargar --archivo`, ver `cargarPerfilDeObjeto` más abajo) para
+ * detectar que nadie lo tocó.
+ *
+ * Valida a propósito, aunque sea texto de relleno: para que esa comparación
+ * siga siendo significativa hace falta que la plantilla sea, ella misma, un
+ * perfil válido según el esquema vigente — si el esquema cambia y esta deja
+ * de cumplirlo, la comparación seguiría funcionando pero ya no protegería
+ * nada real. Lo que sí se rechaza es guardarla **sin tocar** — ver
+ * `cargarPerfilDeObjeto`.
  */
 export const PLANTILLA_DE_PERFIL = {
   posicionamiento: {

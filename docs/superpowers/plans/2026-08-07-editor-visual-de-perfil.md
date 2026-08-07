@@ -18,7 +18,7 @@
 
 Hoy, una marca sin perfil recibe `PLANTILLA_DE_PERFIL` **como valor** del `textarea`: los campos vienen llenos de textos de relleno («En qué categoría compite la marca») que hay que borrar uno por uno. En un formulario eso es hostil: nadie quiere seleccionar y borrar antes de escribir.
 
-**Decisión: en el formulario esos textos son marcadores de posición, no valores.** Los campos arrancan vacíos, con el texto de la plantilla en gris dentro del campo. Las listas arrancan con un elemento vacío, y los pilares con **dos** filas —el mínimo del esquema— repartidas en 50 y 50, porque el total tiene que sumar 100 de todos modos.
+**Decisión: en el formulario esos textos son marcadores de posición, no valores.** Los campos arrancan vacíos, con el texto de la plantilla como ayuda y ejemplo bajo el campo —no como `placeholder` dentro de él, que es lo que se planeó acá y no lo que terminó haciendo `campos.tsx`: un `placeholder` desaparece en cuanto se escribe la primera letra, y el ejemplo sirve justamente mientras se escribe, así que quedó visible debajo, con el prefijo «Ejemplo: », de forma permanente. Las listas arrancan con un elemento vacío, y los pilares con **dos** filas —el mínimo del esquema— repartidas en 50 y 50, porque el total tiene que sumar 100 de todos modos.
 
 Consecuencia que hay que aceptar a conciencia: el comentario de `perfil/page.tsx` justifica la plantilla-como-valor diciendo que así editar «no empieza con una lista de reglas rotas». Con campos vacíos, guardar demasiado pronto sí produce una lista de errores del esquema. Es el comportamiento normal de un formulario y se mitiga marcando los campos vacíos **antes** de intentar guardar, que es lo que un `textarea` no podía hacer.
 
@@ -471,7 +471,7 @@ Requisitos que las pruebas fijan y que hay que respetar:
 
 - La etiqueta se asocia al control con `htmlFor`/`id`, para que `getByLabelText` lo encuentre. Genera el `id` con el hook `useId` de React.
 - El ejemplo se muestra visible bajo el campo con el prefijo `Ejemplo: `, no como `placeholder`: un `placeholder` desaparece al escribir, y el ejemplo sirve justamente mientras se escribe.
-- El texto de la plantilla —lo que hoy viene como valor— sí va como `placeholder`.
+- El texto de la plantilla —lo que hoy viene como valor— pasa a ser ese mismo texto de ayuda y ejemplo bajo el campo, no un `placeholder` dentro de él: por la misma razón del punto anterior, y para no mantener dos mecanismos distintos para el mismo propósito.
 - El botón de agregar se llama `Agregar {etiqueta en minúsculas}` y el de quitar empieza con `Quitar`, para que las pruebas los distingan por nombre accesible.
 - Estilos con las clases de Tailwind que ya usa `EditorDePerfil.tsx`: bordes `border-gray-300`, texto `text-sm`, el botón principal `bg-indigo-600`.
 
