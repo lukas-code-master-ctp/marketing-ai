@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { guardarPerfilAction } from '../acciones.js'
@@ -102,9 +102,32 @@ describe('EditorDePerfil', () => {
 
   it('la sección avanzada muestra el JSON del estado actual', async () => {
     render(<EditorDePerfil {...PROPS} />)
-    await userEvent.click(screen.getByRole('button', { name: /Avanzado/ }))
+    // `<summary>` no lleva `role="button"`: es un widget de divulgación
+    // nativo, y jsdom no le resuelve el rol implícito. Se ubica por su
+    // texto, que también es lo que ve la persona que hace clic.
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
 
     const area = screen.getByLabelText('Perfil de marca en formato JSON')
     expect(JSON.parse((area as HTMLTextAreaElement).value).pilares[0].proporcion).toBe(0.6)
+  })
+
+  it('un JSON inválido en la sección avanzada muestra el error y no toca el formulario', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    // `fireEvent.change` en vez de `userEvent.type`: se simula pegar el
+    // texto de una vez, y evita que `userEvent.type` interprete las llaves
+    // del JSON como teclas especiales (`{` abre un modificador para esa
+    // API).
+    fireEvent.change(area, { target: { value: '{ esto no es json válido' } })
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cargar este JSON en el formulario' }),
+    )
+
+    expect(screen.getByRole('alert').textContent).toContain('no es JSON válido')
+    expect((screen.getByLabelText('Categoría') as HTMLInputElement).value).toBe(
+      PROPS.perfil.posicionamiento.categoria,
+    )
   })
 })

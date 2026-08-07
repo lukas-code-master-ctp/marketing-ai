@@ -145,15 +145,7 @@ export function EditorDePerfil({
         )}
 
         <details className="mt-8">
-          {/*
-            `role="button"` es explícito porque el rol implícito de
-            `<summary>` como activador de un `<details>` no lo reconocen ni
-            jsdom ni `aria-query` (lo que usa `getByRole` de Testing
-            Library): sin esto la sección queda inalcanzable por rol para las
-            pruebas, aunque el comportamiento nativo de abrir/cerrar sí
-            funciona en cualquier navegador real.
-          */}
-          <summary role="button" className="cursor-pointer text-sm font-medium text-gray-700">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">
             Avanzado: ver o pegar el JSON
           </summary>
           <div className="mt-2">
