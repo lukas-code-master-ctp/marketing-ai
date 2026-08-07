@@ -116,8 +116,8 @@ describe('haciaElPerfil con conservarVacios', () => {
     posicionamiento: { categoria: 'Algo', promesa: 'Una promesa larga', diferenciadores: ['Uno', ''] },
     publicos: [{ nombre: '', dolor: '', objecion: '' }],
     pilares: [
-      { nombre: 'educacion', descripcion: 'Enseña', porcentaje: 50 },
-      { nombre: '', descripcion: '', porcentaje: 50 },
+      { nombre: 'educacion', descripcion: 'Enseña', porcentaje: 30 },
+      { nombre: '', descripcion: '', porcentaje: 70 },
     ],
     ofertas: [{ nombre: 'Tour', descripcion: 'Visita al terreno', url: '' }],
   }
@@ -153,7 +153,7 @@ describe('haciaElPerfil con conservarVacios', () => {
     const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true }) as {
       pilares: Record<string, unknown>[]
     }
-    expect(s.pilares[0]!.proporcion).toBe(0.5)
+    expect(s.pilares[0]!.proporcion).toBe(0.3)
     expect(Object.hasOwn(s.pilares[0]!, 'porcentaje')).toBe(false)
   })
 
@@ -178,7 +178,7 @@ describe('haciaElPerfil con conservarVacios', () => {
     const vuelta = desdeElPerfil(s)
     expect(vuelta.publicos).toHaveLength(1)
     expect(vuelta.pilares).toHaveLength(2)
-    expect(vuelta.pilares[1]!.porcentaje).toBe(50)
+    expect(vuelta.pilares[1]!.porcentaje).toBe(70)
   })
 })
 
