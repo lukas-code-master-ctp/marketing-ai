@@ -10,8 +10,11 @@
  * - `desdeElPerfil` carga lo que haya —perfil viejo, plantilla, basura desde
  *   la base— para que el formulario tenga algo que mostrar. Nunca lanza:
  *   validar no es asunto suyo, de eso responde el esquema al guardar.
- * - `haciaElPerfil` limpia lo que la persona escribió —recorta espacios,
- *   descarta filas vacías— y lo deja en la forma que el esquema exige.
+ * - `haciaElPerfil` limpia lo que la persona escribió —recorta espacios— y lo
+ *   deja en la forma que el esquema exige. Por defecto además descarta las
+ *   filas vacías, que es lo correcto al guardar; con `conservarVacios: true`
+ *   las mantiene, para mostrar el formulario completo y para armar el prompt
+ *   que una IA externa rellena (ver `OpcionesDeConversion`).
  */
 
 export interface PublicoEnFormulario {
