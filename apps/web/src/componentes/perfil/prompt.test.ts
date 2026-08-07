@@ -33,7 +33,11 @@ describe('promptParaIa', () => {
     const p = promptParaIa('tapcar', FORMULARIO_VACIO)
     expect(p).toMatch(/al menos dos pilares/i)
     expect(p).toMatch(/snake_case/)
-    expect(p).toMatch(/suman?\s+1/i)
+    expect(p).toMatch(/suman\s+(exactamente\s+)?1\b/i)
+    // Con comillas invertidas, no solo `/noHacer/`: esa clave también vive en
+    // el esqueleto JSON (entre comillas dobles), así que un regex suelto no
+    // caería si se borrara la viñeta que explica el campo.
+    expect(p).toMatch(/`noHacer`/)
   })
 
   it('pide devolver solo JSON y sin filas vacías', () => {
@@ -41,7 +45,7 @@ describe('promptParaIa', () => {
     // NO las descarta: `cargarPerfilDeArchivo` pasa el archivo directo a
     // validar, y ahí una fila en blanco hace fallar el esquema.
     const p = promptParaIa('tapcar', FORMULARIO_VACIO)
-    expect(p).toMatch(/solo\s+JSON/i)
+    expect(p).toMatch(/SOLO\s+(el\s+)?JSON/i)
     expect(p).toMatch(/vac[ií]as/i)
   })
 

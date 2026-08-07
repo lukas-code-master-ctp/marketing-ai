@@ -21,6 +21,10 @@ const REGLAS = `- \`categoria\`, \`promesa\` y al menos un \`diferenciador\` son
   dolor es el problema que esa persona tiene hoy; la objeción es lo que la
   frena justo antes de decidirse.
 - Al menos un atributo de tono.
+- Dentro de \`tono\`, además de los atributos: \`hacer\` es lo que la marca sí
+  hace al comunicarse y \`noHacer\` lo que nunca hace. Los dos son opcionales
+  —si no tienes información, deja la lista vacía (\`[]\`) en vez de una línea
+  en blanco—.
 - **Al menos dos pilares.** Cada uno lleva \`nombre\` en \`snake_case\`
   —minúsculas, sin acentos, con guiones bajos, empezando por una letra—,
   \`descripcion\`, y \`proporcion\`.
@@ -47,7 +51,7 @@ export function promptParaIa(marca: string, formulario: PerfilEnFormulario): str
   const esqueleto = JSON.stringify(haciaElPerfil(formulario, { conservarVacios: true }), null, 2)
 
   return [
-    `Este es el perfil de marca de ${marca}. Complétalo con la información que ya tienes de la empresa, siguiendo las reglas de abajo al pie de la letra: entre todos los pilares las proporciones suman 1, y la respuesta va solo JSON, sin nada más alrededor.`,
+    `Este es el perfil de marca de ${marca}. Complétalo con la información que ya tienes de la empresa, siguiendo al pie de la letra las reglas de abajo.`,
     '',
     REGLAS,
     '',
