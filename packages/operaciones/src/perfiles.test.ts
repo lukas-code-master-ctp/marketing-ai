@@ -54,20 +54,22 @@ describe('perfilConHistorial', () => {
 })
 
 /**
- * La plantilla la ve una persona que abre el perfil de una marca recién
- * creada, y tiene dos exigencias opuestas.
+ * Ya no la ve nadie desde el editor web —arranca el formulario vacío, no
+ * esta plantilla—, así que sus dos exigencias hoy sirven a otra persona: al
+ * CLI, que compara contra ella lo que llega por `perfil:cargar --archivo`.
  *
- * Valida contra el esquema: si no, editarla empieza con una lista de reglas
- * rotas que ella no escribió. Eso se afirma contra `validarPerfil` directo,
- * que es la puerta por la que pasa, y no guardándola —guardarla ya no se
- * puede—.
+ * Valida contra el esquema: si dejara de cumplirlo, la comparación seguiría
+ * corriendo pero dejaría de proteger nada, y nada más lo notaría —nada del
+ * camino de ejecución llama a `validarPerfil(PLANTILLA_DE_PERFIL)`—. Eso se
+ * afirma contra `validarPerfil` directo, que es la puerta por la que pasa, y
+ * no guardándola —guardarla ya no se puede—.
  *
  * Y no se guarda sin tocar: desde ahí P1 y P2 le pasan al modelo un contexto
  * de marca de relleno, con los pilares al 50/50, y la salida no se ve rota
  * sino vacía. Esa corrida cuesta una llamada real al modelo.
  */
 describe('PLANTILLA_DE_PERFIL', () => {
-  it('cumple el esquema, para que editarla no empiece con reglas rotas', () => {
+  it('cumple el esquema, para que un cambio en el esquema no la deje desincronizada en silencio', () => {
     expect(() => validarPerfil(PLANTILLA_DE_PERFIL)).not.toThrow()
   })
 

@@ -1,4 +1,4 @@
-import { PLANTILLA_DE_PERFIL, perfilConHistorial } from '@gc/operaciones'
+import { perfilConHistorial } from '@gc/operaciones'
 import { EditorDePerfil } from '../../../../componentes/EditorDePerfil.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 
@@ -30,24 +30,27 @@ export default async function PaginaDePerfil({
 
       {/*
         Sin perfil no se muestra un estado vacío que remita al CLI, sino el
-        mismo editor con la plantilla dentro: es el paso siguiente a crear la
-        marca, y sin perfil no se genera ni estrategia ni grilla. La plantilla
-        valida contra el esquema —para que editarla no empiece con una lista de
-        reglas rotas—, pero guardarla **sin tocar** se rechaza: un perfil de
-        relleno se le pasa igual al modelo y esa corrida se paga.
+        mismo editor con el formulario vacío: es el paso siguiente a crear la
+        marca, y sin perfil no se genera ni estrategia ni grilla. Los textos de
+        la plantilla ya no se cargan como valor de los campos —con un
+        formulario por campo eso confundiría relleno con contenido real—, sino
+        que quedan como ayuda y ejemplo bajo cada uno (`ejemplos.ts`). La
+        guarda de «plantilla sin cambios» de `cargarPerfilDeObjeto` deja de
+        dispararse por este camino —el formulario nunca envía la plantilla
+        entera— pero se conserva para el CLI, que sigue cargando perfiles por
+        la misma puerta.
       */}
       {!datos && (
         <p className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          La marca {marca} todavía no tiene perfil. Reemplaza el texto de la plantilla por
-          el de la marca y guarda: eso crea la versión 1. Sin perfil no se puede generar
-          ni la estrategia ni la grilla.
+          La marca {marca} todavía no tiene perfil. Complétalo y guarda: eso crea la
+          versión 1. Sin perfil no se puede generar ni la estrategia ni la grilla.
         </p>
       )}
 
       <EditorDePerfil
         marca={marca}
         version={datos?.version ?? 0}
-        perfil={datos?.perfil ?? PLANTILLA_DE_PERFIL}
+        perfil={datos?.perfil ?? null}
         versiones={datos?.versiones ?? []}
       />
     </div>
