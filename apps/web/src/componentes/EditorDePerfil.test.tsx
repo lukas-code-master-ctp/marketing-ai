@@ -263,7 +263,12 @@ describe('EditorDePerfil', () => {
     await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
 
     const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
-    expect(area.value).toContain('parcelas')
+    // Se afirma sobre la APERTURA completa, no sobre la cadena «parcelas»
+    // suelta: la fixture trae `categoria: 'Venta de parcelas de agrado'`, así
+    // que esa palabra aparece dentro del esqueleto aunque `marca` nunca llegue
+    // a `promptParaIa`. Solo esta forma distingue el cableado correcto del
+    // roto.
+    expect(area.value).toMatch(/perfil de marca de parcelas\b/)
     expect(area.value).toMatch(/al menos dos pilares/i)
   })
 
@@ -283,7 +288,9 @@ describe('EditorDePerfil', () => {
 
     expect(escribir).toHaveBeenCalledTimes(1)
     const copiado = escribir.mock.calls[0]![0]
-    expect(copiado).toContain('parcelas')
+    // Sobre la apertura completa, por el mismo motivo que arriba: «parcelas»
+    // a secas también vive en la categoría del esqueleto.
+    expect(copiado).toMatch(/perfil de marca de parcelas\b/)
     expect(copiado).toMatch(/al menos dos pilares/i)
     expect(screen.getByText('Copiado.')).not.toBeNull()
   })
@@ -324,6 +331,7 @@ describe('EditorDePerfil', () => {
     const bloqueDelPrompt = screen.getByLabelText('Prompt para una IA').closest('div')!
     expect(within(bloqueDelPrompt).getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
     const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
-    expect(area.value).toContain('parcelas')
+    // Sobre la apertura completa, por el mismo motivo que arriba.
+    expect(area.value).toMatch(/perfil de marca de parcelas\b/)
   })
 })

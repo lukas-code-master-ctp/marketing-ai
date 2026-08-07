@@ -110,11 +110,26 @@ describe('haciaElPerfil', () => {
 })
 
 describe('haciaElPerfil con conservarVacios', () => {
-  /** Un formulario con una fila vacía de cada clase. */
+  /**
+   * Un formulario con una fila llena y una vacía de cada clase.
+   *
+   * Los públicos llevan la llena a propósito, igual que los pilares. Con un
+   * solo público vacío no hay nada que distinguir en la ida y vuelta: al
+   * descartarlo, `listaOFila` de `desdeElPerfil` lo repone idéntico, así que
+   * conservar o descartar producen el MISMO formulario de vuelta y cualquier
+   * aserción sobre él se cumpliría en las dos ramas.
+   */
   const CON_VACIOS = {
     ...FORMULARIO_VACIO,
     posicionamiento: { categoria: 'Algo', promesa: 'Una promesa larga', diferenciadores: ['Uno', ''] },
-    publicos: [{ nombre: '', dolor: '', objecion: '' }],
+    publicos: [
+      {
+        nombre: 'Inversionista primerizo',
+        dolor: 'Teme comprar un terreno sin agua',
+        objecion: 'No sabe distinguir una parcela regularizada',
+      },
+      { nombre: '', dolor: '', objecion: '' },
+    ],
     pilares: [
       { nombre: 'educacion', descripcion: 'Enseña', porcentaje: 30 },
       { nombre: '', descripcion: '', porcentaje: 70 },
@@ -130,8 +145,8 @@ describe('haciaElPerfil con conservarVacios', () => {
       pilares: unknown[]
       posicionamiento: { diferenciadores: string[] }
     }
-    expect(s.publicos).toHaveLength(1)
-    expect(s.publicos[0]).toEqual({ nombre: '', dolor: '', objecion: '' })
+    expect(s.publicos).toHaveLength(2)
+    expect(s.publicos[1]).toEqual({ nombre: '', dolor: '', objecion: '' })
     expect(s.pilares).toHaveLength(2)
     expect(s.posicionamiento.diferenciadores).toEqual(['Uno', ''])
   })
@@ -165,7 +180,10 @@ describe('haciaElPerfil con conservarVacios', () => {
       posicionamiento: { diferenciadores: string[] }
       ofertas: Record<string, unknown>[]
     }
-    expect(s.publicos).toHaveLength(0)
+    // Queda el público lleno y se va el vacío, que es justo lo contrario de
+    // lo que hace `conservarVacios`.
+    expect(s.publicos).toHaveLength(1)
+    expect((s.publicos[0] as { nombre: string }).nombre).toBe('Inversionista primerizo')
     expect(s.pilares).toHaveLength(1)
     expect(s.posicionamiento.diferenciadores).toEqual(['Uno'])
     expect(Object.hasOwn(s.ofertas[0]!, 'url')).toBe(false)
@@ -176,8 +194,13 @@ describe('haciaElPerfil con conservarVacios', () => {
     // formulario, filas vacías incluidas.
     const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true })
     const vuelta = desdeElPerfil(s)
-    expect(vuelta.publicos).toHaveLength(1)
-    expect(vuelta.pilares).toHaveLength(2)
+    // Se afirma sobre el CONTENIDO de la fila vacía, no sobre las longitudes:
+    // `listaOFila` repone una lista vacía con una fila y el `while` empuja los
+    // pilares hasta dos, así que las longitudes solas se cumplirían igual sin
+    // `conservarVacios` y no distinguirían el código correcto del incorrecto.
+    // Cada una de estas tres cae si se quita la opción.
+    expect(vuelta.publicos[1]).toEqual({ nombre: '', dolor: '', objecion: '' })
+    expect(vuelta.posicionamiento.diferenciadores).toEqual(['Uno', ''])
     expect(vuelta.pilares[1]!.porcentaje).toBe(70)
   })
 })
