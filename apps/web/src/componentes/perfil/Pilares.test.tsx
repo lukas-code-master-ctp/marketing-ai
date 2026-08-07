@@ -1,10 +1,23 @@
 // @vitest-environment jsdom
+import { useState } from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SeccionPilares } from './Pilares.js'
+import type { PilarEnFormulario } from './conversion.js'
 
 afterEach(cleanup)
+
+/**
+ * Envoltorio con estado real: a diferencia de `alCambiar={vi.fn()}`, acá el
+ * cambio sí vuelve a `SeccionPilares` como prop nueva. Es lo único que puede
+ * reproducir el defecto de la fila que no se remonta al quitar una del medio
+ * —con un mock, el padre nunca vuelve a renderizar con datos distintos.
+ */
+function EnvoltorioConEstado({ inicial }: { inicial: PilarEnFormulario[] }) {
+  const [pilares, setPilares] = useState(inicial)
+  return <SeccionPilares valor={pilares} alCambiar={setPilares} />
+}
 
 const DOS = [
   { nombre: 'educacion', descripcion: 'Sobre qué enseña', porcentaje: 60 },
@@ -77,5 +90,24 @@ describe('SeccionPilares', () => {
 
     await userEvent.click(screen.getAllByRole('button', { name: /^Quitar pilar/ })[1]!)
     expect(alCambiar).toHaveBeenCalledWith([DOS[0], tres[2]])
+  })
+
+  it('al quitar el pilar del medio, la fila que queda en su lugar muestra su propio nombre', async () => {
+    const tres = [
+      { nombre: 'primero', descripcion: 'Uno', porcentaje: 34 },
+      { nombre: 'segundo', descripcion: 'Dos', porcentaje: 33 },
+      { nombre: 'tercero', descripcion: 'Tres', porcentaje: 33 },
+    ]
+    render(<EnvoltorioConEstado inicial={tres} />)
+
+    await userEvent.click(screen.getAllByRole('button', { name: /^Quitar pilar/ })[1]!)
+
+    // Quitar el "segundo" (índice 1) corre al "tercero" a esa posición. Con
+    // `key={indice}` y sin sincronizar el eco local, esa fila quedaría
+    // mostrando "segundo" en el campo de nombre en vez de "tercero".
+    const nombresRestantes = screen.getAllByLabelText<HTMLInputElement>('Nombre del pilar')
+    expect(nombresRestantes).toHaveLength(2)
+    expect(nombresRestantes[0]!.value).toBe('primero')
+    expect(nombresRestantes[1]!.value).toBe('tercero')
   })
 })

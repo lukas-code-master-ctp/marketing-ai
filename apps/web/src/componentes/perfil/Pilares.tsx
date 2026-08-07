@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { CampoDeTexto } from './campos.js'
 import { aSnakeCase, type PilarEnFormulario } from './conversion.js'
@@ -53,6 +53,18 @@ function FilaDePilar({
   // previa se quedaría atrás mientras se escribe —el padre solo la
   // actualiza cuando decide re-renderizar con la lista nueva.
   const [nombre, setNombre] = useState(pilar.nombre)
+
+  // Con `key={indice}`, quitar una fila que no es la última corre de índice
+  // a las que quedan debajo: React reconcilia por key, así que la instancia
+  // no se remonta y su estado local queda con el nombre de la fila vieja
+  // mientras `pilar` (la prop) ya trae la fila que se corrió. Repone el eco
+  // cuando el nombre cambia por una vía distinta a la propia tecla —una fila
+  // eliminada más arriba, o (en la tarea siguiente) un JSON pegado entero—.
+  // En el flujo normal esto no pelea con lo que se teclea porque `onCambiar`
+  // ya deja a `pilar.nombre` igual al eco antes de que el efecto corra.
+  useEffect(() => {
+    setNombre(pilar.nombre)
+  }, [pilar.nombre])
 
   function cambiarNombre(v: string) {
     setNombre(v)
