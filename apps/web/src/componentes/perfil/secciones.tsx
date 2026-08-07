@@ -1,6 +1,9 @@
 'use client'
 
-import { CampoDeTexto, ListaDeTextos } from './campos.js'
+import { useRef } from 'react'
+
+import { CampoDeTexto, ListaDeTextos, MENSAJE_CAMPO_OBLIGATORIO } from './campos.js'
+import { estaVacio } from './conversion.js'
 import { EJEMPLOS } from './ejemplos.js'
 import type { OfertaEnFormulario, PerfilEnFormulario, PublicoEnFormulario } from './conversion.js'
 
@@ -12,14 +15,21 @@ import type { OfertaEnFormulario, PerfilEnFormulario, PublicoEnFormulario } from
  * Cada sección recibe su rebanada del formulario y devuelve la rebanada
  * modificada completa: ninguna conoce el perfil entero, así que ninguna
  * puede pisar lo que otra sección editó.
+ *
+ * `mostrarObligatorios` llega desde `EditorDePerfil` y solo se enciende tras
+ * un intento de guardar con campos obligatorios vacíos: antes de eso, ningún
+ * campo se marca en rojo. Las secciones cuyos campos son todos opcionales
+ * —léxico, restricciones— no lo reciben porque no tienen nada que marcar.
  */
 
 export function SeccionPosicionamiento({
   valor,
   alCambiar,
+  mostrarObligatorios = false,
 }: {
   valor: PerfilEnFormulario['posicionamiento']
   alCambiar: (v: PerfilEnFormulario['posicionamiento']) => void
+  mostrarObligatorios?: boolean
 }) {
   const e = EJEMPLOS.posicionamiento
 
@@ -33,6 +43,7 @@ export function SeccionPosicionamiento({
           ejemplo={e.categoria.ejemplo}
           valor={valor.categoria}
           alCambiar={(categoria) => alCambiar({ ...valor, categoria })}
+          error={mostrarObligatorios && estaVacio(valor.categoria) ? MENSAJE_CAMPO_OBLIGATORIO : undefined}
         />
         <CampoDeTexto
           etiqueta="Promesa"
@@ -41,6 +52,7 @@ export function SeccionPosicionamiento({
           valor={valor.promesa}
           alCambiar={(promesa) => alCambiar({ ...valor, promesa })}
           largo
+          error={mostrarObligatorios && estaVacio(valor.promesa) ? MENSAJE_CAMPO_OBLIGATORIO : undefined}
         />
         <ListaDeTextos
           etiqueta="Diferenciadores"
@@ -49,6 +61,11 @@ export function SeccionPosicionamiento({
           valores={valor.diferenciadores}
           alCambiar={(diferenciadores) => alCambiar({ ...valor, diferenciadores })}
           minimo={1}
+          error={
+            mostrarObligatorios && valor.diferenciadores.every(estaVacio)
+              ? 'Agrega al menos un diferenciador.'
+              : undefined
+          }
         />
       </div>
     </section>
@@ -58,11 +75,22 @@ export function SeccionPosicionamiento({
 export function SeccionPublicos({
   valor,
   alCambiar,
+  mostrarObligatorios = false,
 }: {
   valor: PublicoEnFormulario[]
   alCambiar: (v: PublicoEnFormulario[]) => void
+  mostrarObligatorios?: boolean
 }) {
   const e = EJEMPLOS.publicos
+  const refAgregar = useRef<HTMLButtonElement>(null)
+
+  // Se exige al menos UN público completo, no que todos lo estén: mientras
+  // ninguno lo esté, se marcan los campos vacíos de todos, para que quede
+  // claro qué falta en cada uno.
+  const algunPublicoCompleto = valor.some(
+    (p) => !estaVacio(p.nombre) && !estaVacio(p.dolor) && !estaVacio(p.objecion),
+  )
+  const marcarVacios = mostrarObligatorios && !algunPublicoCompleto
 
   function cambiarPublico(indice: number, cambio: Partial<PublicoEnFormulario>) {
     alCambiar(valor.map((p, i) => (i === indice ? { ...p, ...cambio } : p)))
@@ -74,6 +102,7 @@ export function SeccionPublicos({
 
   function quitar(indice: number) {
     alCambiar(valor.filter((_, i) => i !== indice))
+    refAgregar.current?.focus()
   }
 
   return (
@@ -81,7 +110,12 @@ export function SeccionPublicos({
       <h2 className="text-lg font-semibold text-gray-900">Públicos</h2>
       <div className="mt-2 flex flex-col gap-4">
         {valor.map((publico, indice) => (
-          <div key={indice} className="rounded border border-gray-200 p-3">
+          // `fieldset`/`legend` en vez de un `div` pelado: con varios
+          // públicos, cada uno repite los mismos nombres de campo (Nombre,
+          // Dolor, Objeción), y sin agrupar, un lector de pantalla los
+          // anuncia sin decir a cuál público pertenecen.
+          <fieldset key={indice} className="rounded border border-gray-200 p-3">
+            <legend className="px-1 text-sm font-medium text-gray-700">Público {indice + 1}</legend>
             <div className="flex flex-col gap-2">
               <CampoDeTexto
                 etiqueta="Nombre"
@@ -89,6 +123,7 @@ export function SeccionPublicos({
                 ejemplo={e.nombre.ejemplo}
                 valor={publico.nombre}
                 alCambiar={(nombre) => cambiarPublico(indice, { nombre })}
+                error={marcarVacios && estaVacio(publico.nombre) ? MENSAJE_CAMPO_OBLIGATORIO : undefined}
               />
               <CampoDeTexto
                 etiqueta="Dolor"
@@ -96,6 +131,7 @@ export function SeccionPublicos({
                 ejemplo={e.dolor.ejemplo}
                 valor={publico.dolor}
                 alCambiar={(dolor) => cambiarPublico(indice, { dolor })}
+                error={marcarVacios && estaVacio(publico.dolor) ? MENSAJE_CAMPO_OBLIGATORIO : undefined}
               />
               <CampoDeTexto
                 etiqueta="Objeción"
@@ -103,6 +139,7 @@ export function SeccionPublicos({
                 ejemplo={e.objecion.ejemplo}
                 valor={publico.objecion}
                 alCambiar={(objecion) => cambiarPublico(indice, { objecion })}
+                error={marcarVacios && estaVacio(publico.objecion) ? MENSAJE_CAMPO_OBLIGATORIO : undefined}
               />
             </div>
             {valor.length > 1 && (
@@ -114,11 +151,12 @@ export function SeccionPublicos({
                 Quitar público {indice + 1}
               </button>
             )}
-          </div>
+          </fieldset>
         ))}
       </div>
       <button
         type="button"
+        ref={refAgregar}
         onClick={agregar}
         className="mt-2 rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
       >
@@ -131,9 +169,11 @@ export function SeccionPublicos({
 export function SeccionTono({
   valor,
   alCambiar,
+  mostrarObligatorios = false,
 }: {
   valor: PerfilEnFormulario['tono']
   alCambiar: (v: PerfilEnFormulario['tono']) => void
+  mostrarObligatorios?: boolean
 }) {
   const e = EJEMPLOS.tono
 
@@ -148,6 +188,11 @@ export function SeccionTono({
           valores={valor.atributos}
           alCambiar={(atributos) => alCambiar({ ...valor, atributos })}
           minimo={1}
+          error={
+            mostrarObligatorios && valor.atributos.every(estaVacio)
+              ? 'Agrega al menos un atributo.'
+              : undefined
+          }
         />
         <ListaDeTextos
           etiqueta="Hacer"
@@ -208,6 +253,7 @@ export function SeccionOfertas({
   alCambiar: (v: OfertaEnFormulario[]) => void
 }) {
   const e = EJEMPLOS.ofertas
+  const refAgregar = useRef<HTMLButtonElement>(null)
 
   function cambiarOferta(indice: number, cambio: Partial<OfertaEnFormulario>) {
     alCambiar(valor.map((o, i) => (i === indice ? { ...o, ...cambio } : o)))
@@ -219,6 +265,7 @@ export function SeccionOfertas({
 
   function quitar(indice: number) {
     alCambiar(valor.filter((_, i) => i !== indice))
+    refAgregar.current?.focus()
   }
 
   return (
@@ -226,7 +273,8 @@ export function SeccionOfertas({
       <h2 className="text-lg font-semibold text-gray-900">Ofertas</h2>
       <div className="mt-2 flex flex-col gap-4">
         {valor.map((oferta, indice) => (
-          <div key={indice} className="rounded border border-gray-200 p-3">
+          <fieldset key={indice} className="rounded border border-gray-200 p-3">
+            <legend className="px-1 text-sm font-medium text-gray-700">Oferta {indice + 1}</legend>
             <div className="flex flex-col gap-2">
               <CampoDeTexto
                 etiqueta="Nombre"
@@ -258,11 +306,12 @@ export function SeccionOfertas({
             >
               Quitar oferta {indice + 1}
             </button>
-          </div>
+          </fieldset>
         ))}
       </div>
       <button
         type="button"
+        ref={refAgregar}
         onClick={agregar}
         className="mt-2 rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
       >

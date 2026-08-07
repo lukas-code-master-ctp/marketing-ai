@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SeccionPilares } from './Pilares.js'
@@ -109,5 +109,81 @@ describe('SeccionPilares', () => {
     expect(nombresRestantes).toHaveLength(2)
     expect(nombresRestantes[0]!.value).toBe('primero')
     expect(nombresRestantes[1]!.value).toBe('tercero')
+  })
+
+  it('quitar un pilar devuelve el foco al botón de agregar', async () => {
+    const tres = [
+      { nombre: 'primero', descripcion: 'Uno', porcentaje: 34 },
+      { nombre: 'segundo', descripcion: 'Dos', porcentaje: 33 },
+      { nombre: 'tercero', descripcion: 'Tres', porcentaje: 33 },
+    ]
+    render(<EnvoltorioConEstado inicial={tres} />)
+
+    await userEvent.click(screen.getAllByRole('button', { name: /^Quitar pilar/ })[1]!)
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Agregar pilar' }))
+  })
+
+  describe('IMPORTANTE 3a — el formulario vacío no saluda con errores', () => {
+    const DOS_VACIOS = [
+      { nombre: '', descripcion: '', porcentaje: 50 },
+      { nombre: '', descripcion: '', porcentaje: 50 },
+    ]
+
+    it('sin mostrarObligatorios, dos pilares vacíos no muestran ninguna alerta', () => {
+      render(<SeccionPilares valor={DOS_VACIOS} alCambiar={vi.fn()} />)
+      expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    })
+
+    it('con mostrarObligatorios, un pilar vacío nunca avisa que el nombre "no puede empezar con letra"', () => {
+      // Distingue el aviso de 3a (nombre ESCRITO pero inconvertible) del de
+      // 3b (campo vacío, otro mensaje): un campo vacío jamás debe mostrar
+      // "El nombre tiene que empezar con una letra.", aunque sí puede
+      // mostrar "Este campo es obligatorio." una vez que se intentó guardar.
+      render(<SeccionPilares valor={DOS_VACIOS} alCambiar={vi.fn()} mostrarObligatorios />)
+      const alertas = screen.getAllByRole('alert').map((a) => a.textContent ?? '')
+      expect(alertas.some((t) => /empezar con una letra/i.test(t))).toBe(false)
+    })
+  })
+
+  describe('IMPORTANTE 4 — el porcentaje se redondea a un entero entre 0 y 100', () => {
+    it('el input declara min, max y step de entero', () => {
+      render(<SeccionPilares valor={DOS} alCambiar={vi.fn()} />)
+      const campo = screen.getAllByLabelText('Porcentaje')[0]!
+      expect(campo.getAttribute('min')).toBe('0')
+      expect(campo.getAttribute('max')).toBe('100')
+      expect(campo.getAttribute('step')).toBe('1')
+    })
+
+    it('escribir un decimal deja guardado un entero redondeado', () => {
+      const alCambiar = vi.fn()
+      render(<SeccionPilares valor={DOS} alCambiar={alCambiar} />)
+      const campo = screen.getAllByLabelText('Porcentaje')[0]!
+
+      fireEvent.change(campo, { target: { value: '33.7' } })
+
+      expect(alCambiar).toHaveBeenCalledWith([{ ...DOS[0]!, porcentaje: 34 }, DOS[1]])
+    })
+
+    it('tres pilares con decimales nunca dejan el total en notación científica', () => {
+      // Antes del arreglo, 33.3 + 33.3 + 33.4 en coma flotante da
+      // 100.00000000000001 y el total se muestra así. Con el redondeo en
+      // `onChange`, los decimales nunca entran al estado, así que el total
+      // siempre es una suma de enteros.
+      const tres = [
+        { nombre: 'a', descripcion: 'x', porcentaje: 33 },
+        { nombre: 'b', descripcion: 'y', porcentaje: 33 },
+        { nombre: 'c', descripcion: 'z', porcentaje: 33 },
+      ]
+      render(<EnvoltorioConEstado inicial={tres} />)
+
+      const campos = screen.getAllByLabelText<HTMLInputElement>('Porcentaje')
+      fireEvent.change(campos[2]!, { target: { value: '33.4' } })
+
+      expect(campos[2]!.value).toBe('33')
+      const total = screen.getByTestId('total-de-pilares')
+      expect(total.textContent).not.toMatch(/e[-+]?\d/i)
+      expect(total.textContent).toContain('99')
+    })
   })
 })

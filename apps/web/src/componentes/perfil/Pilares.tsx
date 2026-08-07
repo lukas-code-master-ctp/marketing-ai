@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
-import { CampoDeTexto } from './campos.js'
-import { aSnakeCase, type PilarEnFormulario } from './conversion.js'
+import { CampoDeTexto, MENSAJE_CAMPO_OBLIGATORIO } from './campos.js'
+import { aSnakeCase, estaVacio, type PilarEnFormulario } from './conversion.js'
 import { EJEMPLOS } from './ejemplos.js'
 
 /**
@@ -36,12 +36,19 @@ function FilaDePilar({
   pilar,
   indice,
   mostrarQuitar,
+  marcarObligatorio,
   onCambiar,
   onQuitar,
 }: {
   pilar: PilarEnFormulario
   indice: number
   mostrarQuitar: boolean
+  /**
+   * `true` cuando el intento de guardar encontró menos de los dos pilares
+   * completos que el esquema exige: marca en rojo el nombre y la
+   * descripción que sigan vacíos en esta fila.
+   */
+  marcarObligatorio: boolean
   onCambiar: (cambio: Partial<PilarEnFormulario>) => void
   onQuitar: () => void
 }) {
@@ -71,10 +78,18 @@ function FilaDePilar({
     onCambiar({ nombre: v })
   }
 
+  // El aviso de "no se puede convertir" es para un nombre ESCRITO que no
+  // sirve —"123", "!!!"—, no para un campo que todavía está vacío: un
+  // formulario recién abierto tiene dos filas de pilar sin nombre, y
+  // marcarlas como error antes de que nadie escriba nada saludaría con dos
+  // alertas rojas que la persona no causó.
+  const nombreEscrito = nombre.trim() !== ''
   const snake = aSnakeCase(nombre.trim())
+  const nombreInconvertible = nombreEscrito && snake === ''
 
   return (
-    <div className="rounded border border-gray-200 p-3">
+    <fieldset className="rounded border border-gray-200 p-3">
+      <legend className="px-1 text-sm font-medium text-gray-700">Pilar {indice + 1}</legend>
       <div className="flex flex-col gap-2">
         <div>
           <CampoDeTexto
@@ -83,13 +98,16 @@ function FilaDePilar({
             ejemplo={e.nombre.ejemplo}
             valor={nombre}
             alCambiar={cambiarNombre}
+            error={
+              marcarObligatorio && !nombreEscrito ? MENSAJE_CAMPO_OBLIGATORIO : undefined
+            }
           />
-          {snake === '' ? (
+          {nombreInconvertible ? (
             <p role="alert" className="mt-1 text-xs text-red-700">
               El nombre tiene que empezar con una letra.
             </p>
           ) : (
-            <p className="mt-1 text-xs text-gray-400">→ {snake}</p>
+            nombreEscrito && <p className="mt-1 text-xs text-gray-400">→ {snake}</p>
           )}
         </div>
 
@@ -99,6 +117,9 @@ function FilaDePilar({
           ejemplo={e.descripcion.ejemplo}
           valor={pilar.descripcion}
           alCambiar={(descripcion) => onCambiar({ descripcion })}
+          error={
+            marcarObligatorio && estaVacio(pilar.descripcion) ? MENSAJE_CAMPO_OBLIGATORIO : undefined
+          }
         />
 
         <div>
@@ -109,6 +130,9 @@ function FilaDePilar({
           <input
             id={idPorcentaje}
             type="number"
+            min={0}
+            max={100}
+            step={1}
             value={pilar.porcentaje}
             onChange={(ev) => {
               const bruto = ev.target.value
@@ -117,7 +141,16 @@ function FilaDePilar({
               // `NaN` a la interfaz: mostrar "NaN" sería peor que asumir 0
               // mientras termina de escribir.
               const numero = bruto === '' ? 0 : Number(bruto)
-              if (!Number.isNaN(numero)) onCambiar({ porcentaje: numero })
+              if (Number.isNaN(numero)) return
+              // `step={1}` en un `input[type=number]` es una restricción de
+              // VALIDEZ, no un filtro del valor: escribir "33.3" deja
+              // `value === "33.3"` intacto. Redondear acá es lo que de
+              // verdad impide que un decimal entre al estado —y con él, que
+              // la suma de tres pilares dé algo como
+              // 100.00000000000001 por error de coma flotante— y de paso
+              // descarta negativos y valores fuera de 0–100.
+              const acotado = Math.min(100, Math.max(0, Math.round(numero)))
+              onCambiar({ porcentaje: acotado })
             }}
             className="mt-1 w-full rounded border border-gray-300 p-2 text-sm text-gray-800"
           />
@@ -134,21 +167,31 @@ function FilaDePilar({
           Quitar pilar {indice + 1}
         </button>
       )}
-    </div>
+    </fieldset>
   )
 }
 
 export function SeccionPilares({
   valor,
   alCambiar,
+  mostrarObligatorios = false,
 }: {
   valor: PilarEnFormulario[]
   alCambiar: (v: PilarEnFormulario[]) => void
+  mostrarObligatorios?: boolean
 }) {
   const total = valor.reduce((acc, p) => acc + p.porcentaje, 0)
   const completo = total === 100
   const diferencia = 100 - total
   const repetidos = nombresRepetidos(valor)
+  const refAgregar = useRef<HTMLButtonElement>(null)
+
+  // El esquema exige al menos dos pilares con nombre y descripción. Mientras
+  // no haya dos completos, se marcan los campos vacíos de todas las filas.
+  const pilaresCompletos = valor.filter(
+    (p) => !estaVacio(p.nombre) && !estaVacio(p.descripcion),
+  ).length
+  const marcarObligatorio = mostrarObligatorios && pilaresCompletos < 2
 
   function cambiarPilar(indice: number, cambio: Partial<PilarEnFormulario>) {
     alCambiar(valor.map((p, i) => (i === indice ? { ...p, ...cambio } : p)))
@@ -162,6 +205,7 @@ export function SeccionPilares({
 
   function quitar(indice: number) {
     alCambiar(valor.filter((_, i) => i !== indice))
+    refAgregar.current?.focus()
   }
 
   return (
@@ -191,6 +235,7 @@ export function SeccionPilares({
             pilar={pilar}
             indice={indice}
             mostrarQuitar={valor.length > 2}
+            marcarObligatorio={marcarObligatorio}
             onCambiar={(cambio) => cambiarPilar(indice, cambio)}
             onQuitar={() => quitar(indice)}
           />
@@ -199,6 +244,7 @@ export function SeccionPilares({
 
       <button
         type="button"
+        ref={refAgregar}
         onClick={agregar}
         className="mt-2 rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
       >
