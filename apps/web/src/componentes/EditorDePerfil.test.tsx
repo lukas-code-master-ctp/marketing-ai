@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { guardarPerfilAction } from '../acciones.js'
@@ -10,6 +10,14 @@ vi.mock('../acciones.js', () => ({
 }))
 
 afterEach(cleanup)
+// Una prueba reemplaza `navigator.clipboard` con `Object.defineProperty`; sin
+// restaurarlo, la propiedad propia queda puesta para las pruebas que siguen
+// en este archivo y contamina cualquiera que dependa del comportamiento
+// original (ausente en jsdom). Borrarla revela de nuevo lo que hubiera en el
+// prototipo, que es el estado con el que arrancó cada prueba.
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'clipboard')
+})
 beforeEach(() => vi.mocked(guardarPerfilAction).mockClear())
 
 const PROPS = {
@@ -220,5 +228,146 @@ describe('EditorDePerfil', () => {
 
     expect(vi.mocked(guardarPerfilAction)).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText('Categoría').getAttribute('aria-invalid')).not.toBe('true')
+  })
+
+  it('el JSON avanzado muestra el formulario completo, con sus filas vacías', async () => {
+    // Antes mostraba lo que se GUARDARÍA, que descarta lo vacío: alguien con
+    // una tarjeta «Público 1» delante veía `"publicos": []` y concluía,
+    // razonablemente, que algo se había perdido.
+    render(<EditorDePerfil {...PROPS} perfil={null} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON') as HTMLTextAreaElement
+    const mostrado = JSON.parse(area.value)
+    expect(mostrado.publicos).toHaveLength(1)
+    expect(mostrado.pilares).toHaveLength(2)
+  })
+
+  it('guardar sigue descartando lo vacío', async () => {
+    // El cambio de la sección avanzada NO debe filtrarse al guardado: la
+    // fixture `PROPS` no trae de por sí ninguna fila vacía en `publicos`, así
+    // que sin agregar una acá la aserción de abajo sería trivialmente cierta
+    // se descarte o no. Se agrega un público con el botón de "agregar" —nace
+    // vacío— para que el guardado tenga algo que descartar de verdad.
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Agregar público' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    const [, texto] = vi.mocked(guardarPerfilAction).mock.calls[0]!
+    const enviado = JSON.parse(texto)
+    expect(enviado.publicos.every((p: { nombre: string }) => p.nombre !== '')).toBe(true)
+  })
+
+  it('ofrece el prompt, con la marca dentro', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
+    // Se afirma sobre la APERTURA completa, no sobre la cadena «parcelas»
+    // suelta: la fixture trae `categoria: 'Venta de parcelas de agrado'`, así
+    // que esa palabra aparece dentro del esqueleto aunque `marca` nunca llegue
+    // a `promptParaIa`. Solo esta forma distingue el cableado correcto del
+    // roto.
+    expect(area.value).toMatch(/perfil de marca de parcelas\b/)
+    expect(area.value).toMatch(/al menos dos pilares/i)
+  })
+
+  it('el botón de copiar copia el prompt generado, no el texto avanzado', async () => {
+    // Si `copiarPrompt` pasara `textoAvanzado` en vez de
+    // `promptParaIa(marca, formulario)`, este espía capturaría el JSON crudo
+    // en vez del prompt, y las dos aserciones de abajo caerían.
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+
+    expect(escribir).toHaveBeenCalledTimes(1)
+    const copiado = escribir.mock.calls[0]![0]
+    // Sobre la apertura completa, por el mismo motivo que arriba: «parcelas»
+    // a secas también vive en la categoría del esqueleto.
+    expect(copiado).toMatch(/perfil de marca de parcelas\b/)
+    expect(copiado).toMatch(/al menos dos pilares/i)
+    // Con `role="status"`, no solo por su texto: el fallo de copiar lleva
+    // `role="alert"` y se anuncia solo; sin un rol acá, quien use lector de
+    // pantalla se entera del fracaso y no del éxito.
+    expect(screen.getByRole('status').textContent).toBe('Copiado.')
+  })
+
+  it('cargar un JSON en el formulario limpia el aviso de "Copiado."', async () => {
+    // El otro camino que muta `formulario`, y por lo tanto recalcula el
+    // prompt. Secuencia real: copias el prompt, se lo pasas a la IA, pegas lo
+    // que devolvió, cargas — y el prompt de abajo cambia entero mientras
+    // «Copiado.» sigue describiendo el texto anterior.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.resolve() },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+    expect(screen.getByText('Copiado.')).not.toBeNull()
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    const nuevo = {
+      ...PROPS.perfil,
+      posicionamiento: { ...PROPS.perfil.posicionamiento, categoria: 'Categoría que trajo la IA' },
+    }
+    fireEvent.change(area, { target: { value: JSON.stringify(nuevo) } })
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cargar este JSON en el formulario' }),
+    )
+
+    // El formulario sí cambió —o sea que el prompt de abajo también—, y por
+    // eso el aviso ya no puede seguir en pantalla.
+    expect((screen.getByLabelText('Categoría') as HTMLInputElement).value).toBe(
+      'Categoría que trajo la IA',
+    )
+    expect(screen.queryByText('Copiado.')).toBeNull()
+  })
+
+  it('editar un campo después de copiar limpia el aviso de "Copiado."', async () => {
+    // El prompt cambia con el formulario; un aviso de éxito que sigue en
+    // pantalla después de una edición ya no describe lo que hay copiado.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.resolve() },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+    expect(screen.getByText('Copiado.')).not.toBeNull()
+
+    await userEvent.type(screen.getByLabelText('Categoría'), '!')
+
+    expect(screen.queryByText('Copiado.')).toBeNull()
+  })
+
+  it('si el portapapeles falla lo dice, y el texto sigue disponible', async () => {
+    // `navigator.clipboard` exige contexto seguro y puede estar denegado. El
+    // botón es una comodidad sobre un texto que ya se puede copiar a mano;
+    // que falle no puede dejar a nadie sin salida.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('denegado')) },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+
+    // Acotado al bloque del prompt, no al documento entero: ahí es donde
+    // vive el aviso de este fallo específico.
+    const bloqueDelPrompt = screen.getByLabelText('Prompt para una IA').closest('div')!
+    expect(within(bloqueDelPrompt).getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
+    const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
+    // Sobre la apertura completa, por el mismo motivo que arriba.
+    expect(area.value).toMatch(/perfil de marca de parcelas\b/)
   })
 })

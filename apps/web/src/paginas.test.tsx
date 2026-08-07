@@ -324,15 +324,18 @@ describe('la pantalla de perfil', () => {
 
     // Sin perfil, `EditorDePerfil` arranca de `desdeElPerfil(null)`: un
     // formulario vacío, ya no la plantilla. La sección avanzada muestra ese
-    // formulario pasado por `haciaElPerfil` —las listas obligatorias sin
-    // filas escritas se recortan a `[]`—, el mismo JSON que se mandaría si
-    // se guardara tal cual.
+    // formulario COMPLETO —con sus filas y textos vacíos, `conservarVacios:
+    // true`—, no lo que se guardaría: eso es lo que descarta las listas
+    // obligatorias sin filas escritas.
     expect(JSON.parse(editor().value)).toEqual({
-      posicionamiento: { categoria: '', promesa: '', diferenciadores: [] },
-      publicos: [],
-      tono: { atributos: [], hacer: [], noHacer: [] },
+      posicionamiento: { categoria: '', promesa: '', diferenciadores: [''] },
+      publicos: [{ nombre: '', dolor: '', objecion: '' }],
+      tono: { atributos: [''], hacer: [''], noHacer: [''] },
       lexico: { preferido: [], prohibido: [] },
-      pilares: [],
+      pilares: [
+        { nombre: '', descripcion: '', proporcion: 0.5 },
+        { nombre: '', descripcion: '', proporcion: 0.5 },
+      ],
       ofertas: [],
       restricciones: { disclaimers: [] },
     })

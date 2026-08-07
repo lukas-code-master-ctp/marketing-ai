@@ -8,6 +8,7 @@ import {
   haciaElPerfil,
   type PerfilEnFormulario,
 } from './perfil/conversion.js'
+import { promptParaIa } from './perfil/prompt.js'
 import {
   SeccionLexico,
   SeccionOfertas,
@@ -94,11 +95,46 @@ export function EditorDePerfil({
   // pisar lo que está escribiendo mientras el resto del formulario cambia.
   const [textoAvanzadoEditado, setTextoAvanzadoEditado] = useState<string | null>(null)
   const [errorAvanzado, setErrorAvanzado] = useState<string | null>(null)
-  const textoAvanzado = textoAvanzadoEditado ?? JSON.stringify(haciaElPerfil(formulario), null, 2)
+  const [copiado, setCopiado] = useState(false)
+  const [errorDeCopia, setErrorDeCopia] = useState<string | null>(null)
+  // A diferencia de `guardar()`, acá se conservan las filas y los textos
+  // vacíos (`conservarVacios: true`): esta sección muestra el formulario
+  // completo, no lo que se guardaría. Sin esto, alguien con una tarjeta
+  // «Público 1» delante vería `"publicos": []` y concluiría, razonablemente,
+  // que algo se perdió.
+  const textoAvanzado =
+    textoAvanzadoEditado ?? JSON.stringify(haciaElPerfil(formulario, { conservarVacios: true }), null, 2)
+  // Calculado una sola vez y reusado tanto por `copiarPrompt` como por el
+  // `value` del textarea de abajo: que se calculen por separado es justo el
+  // modo en que podrían desalinearse en silencio (ver prueba del botón de
+  // copiar en EditorDePerfil.test.tsx).
+  const promptGenerado = promptParaIa(marca, formulario)
+
+  async function copiarPrompt() {
+    setCopiado(false)
+    setErrorDeCopia(null)
+    try {
+      await navigator.clipboard.writeText(promptGenerado)
+      setCopiado(true)
+    } catch {
+      // `navigator.clipboard` exige contexto seguro y puede estar denegado por
+      // permisos; si no existe siquiera, el acceso lanza y cae aquí igual. El
+      // texto ya está en pantalla y se puede seleccionar, así que el fallo se
+      // informa y no bloquea nada.
+      setErrorDeCopia(
+        'No se pudo copiar automáticamente. Selecciona el texto de arriba y cópialo a mano.',
+      )
+    }
+  }
 
   function actualizar(cambio: Partial<PerfilEnFormulario>) {
     setFormulario((f) => ({ ...f, ...cambio }))
     setVersionGuardada(null)
+    // El prompt de abajo se recalcula con el formulario nuevo: un aviso de
+    // "Copiado." que quedó de una copia anterior ya no describe lo que hay
+    // en pantalla, por el mismo motivo que `versionGuardada` se limpia acá.
+    setCopiado(false)
+    setErrorDeCopia(null)
   }
 
   function cargarJsonAvanzado() {
@@ -129,6 +165,11 @@ export function EditorDePerfil({
     setVersionGuardada(null)
     setTextoAvanzadoEditado(null)
     setErrorAvanzado(null)
+    // Este es el otro camino que muta `formulario`, así que también recalcula
+    // el prompt de abajo: un «Copiado.» que quedó de una copia anterior ya no
+    // describe lo que hay en pantalla, igual que en `actualizar()`.
+    setCopiado(false)
+    setErrorDeCopia(null)
   }
 
   async function guardar() {
@@ -262,6 +303,47 @@ export function EditorDePerfil({
                 {errorAvanzado}
               </p>
             )}
+
+            <hr className="my-4 border-gray-200" />
+
+            <div>
+              <h3 className="text-sm font-medium text-gray-700">
+                Prompt para una IA — un texto listo para pegar en ChatGPT, Claude o similar
+              </h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Pégalo en una herramienta de IA que ya conozca tu empresa para que complete el
+                perfil, trae el resultado de vuelta al área de arriba y haz clic en «Cargar
+                este JSON en el formulario».
+              </p>
+              <textarea
+                value={promptGenerado}
+                readOnly
+                spellCheck={false}
+                rows={20}
+                aria-label="Prompt para una IA"
+                className="mt-2 w-full rounded border border-gray-300 p-3 font-mono text-xs text-gray-800"
+              />
+              <button
+                type="button"
+                onClick={() => void copiarPrompt()}
+                className="mt-2 rounded bg-gray-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Copiar prompt para IA
+              </button>
+              {/* `role="status"` para que un lector de pantalla anuncie el
+                  éxito, no solo el fallo de abajo, que ya lleva
+                  `role="alert"`. */}
+              {copiado && (
+                <span role="status" className="ml-2 text-sm text-green-700">
+                  Copiado.
+                </span>
+              )}
+              {errorDeCopia && (
+                <p role="alert" className="mt-2 text-sm text-red-800">
+                  {errorDeCopia}
+                </p>
+              )}
+            </div>
           </div>
         </details>
       </div>

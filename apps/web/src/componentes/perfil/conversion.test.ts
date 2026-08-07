@@ -109,6 +109,102 @@ describe('haciaElPerfil', () => {
   })
 })
 
+describe('haciaElPerfil con conservarVacios', () => {
+  /**
+   * Un formulario con una fila llena y una vacía de cada clase.
+   *
+   * Los públicos llevan la llena a propósito, igual que los pilares. Con un
+   * solo público vacío no hay nada que distinguir en la ida y vuelta: al
+   * descartarlo, `listaOFila` de `desdeElPerfil` lo repone idéntico, así que
+   * conservar o descartar producen el MISMO formulario de vuelta y cualquier
+   * aserción sobre él se cumpliría en las dos ramas.
+   */
+  const CON_VACIOS = {
+    ...FORMULARIO_VACIO,
+    posicionamiento: { categoria: 'Algo', promesa: 'Una promesa larga', diferenciadores: ['Uno', ''] },
+    publicos: [
+      {
+        nombre: 'Inversionista primerizo',
+        dolor: 'Teme comprar un terreno sin agua',
+        objecion: 'No sabe distinguir una parcela regularizada',
+      },
+      { nombre: '', dolor: '', objecion: '' },
+    ],
+    pilares: [
+      { nombre: 'educacion', descripcion: 'Enseña', porcentaje: 30 },
+      { nombre: '', descripcion: '', porcentaje: 70 },
+    ],
+    ofertas: [{ nombre: 'Tour', descripcion: 'Visita al terreno', url: '' }],
+  }
+
+  it('conserva las filas vacías en vez de descartarlas', () => {
+    // El caso que motivó el bloque: una IA que recibe `"publicos": []` no
+    // tiene forma de saber que cada público lleva nombre, dolor y objeción.
+    const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true }) as {
+      publicos: unknown[]
+      pilares: unknown[]
+      posicionamiento: { diferenciadores: string[] }
+    }
+    expect(s.publicos).toHaveLength(2)
+    expect(s.publicos[1]).toEqual({ nombre: '', dolor: '', objecion: '' })
+    expect(s.pilares).toHaveLength(2)
+    expect(s.posicionamiento.diferenciadores).toEqual(['Uno', ''])
+  })
+
+  it('conserva la clave url aunque esté vacía', () => {
+    // Al guardar se omite, porque el esquema la rechaza vacía. Al copiar se
+    // conserva, porque es la única forma de que la IA sepa que existe.
+    const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true }) as {
+      ofertas: Record<string, unknown>[]
+    }
+    expect(Object.hasOwn(s.ofertas[0]!, 'url')).toBe(true)
+    expect(s.ofertas[0]!.url).toBe('')
+  })
+
+  it('sigue en la forma del ESQUEMA, no en la del formulario', () => {
+    // La trampa que rompería el pegado de vuelta: el formulario tiene
+    // `porcentaje: 50`, el esquema tiene `proporcion: 0.5`, y
+    // `desdeElPerfil` lee `proporcion`.
+    const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true }) as {
+      pilares: Record<string, unknown>[]
+    }
+    expect(s.pilares[0]!.proporcion).toBe(0.3)
+    expect(Object.hasOwn(s.pilares[0]!, 'porcentaje')).toBe(false)
+  })
+
+  it('sin la opción se comporta exactamente como antes', () => {
+    // La garantía de que el camino de guardado no cambió.
+    const s = haciaElPerfil(CON_VACIOS) as {
+      publicos: unknown[]
+      pilares: unknown[]
+      posicionamiento: { diferenciadores: string[] }
+      ofertas: Record<string, unknown>[]
+    }
+    // Queda el público lleno y se va el vacío, que es justo lo contrario de
+    // lo que hace `conservarVacios`.
+    expect(s.publicos).toHaveLength(1)
+    expect((s.publicos[0] as { nombre: string }).nombre).toBe('Inversionista primerizo')
+    expect(s.pilares).toHaveLength(1)
+    expect(s.posicionamiento.diferenciadores).toEqual(['Uno'])
+    expect(Object.hasOwn(s.ofertas[0]!, 'url')).toBe(false)
+  })
+
+  it('lo que se conserva se puede volver a leer con desdeElPerfil', () => {
+    // La garantía del pegado: copiar y volver a cargar reconstruye el mismo
+    // formulario, filas vacías incluidas.
+    const s = haciaElPerfil(CON_VACIOS, { conservarVacios: true })
+    const vuelta = desdeElPerfil(s)
+    // Se afirma sobre el CONTENIDO de la fila vacía, no sobre las longitudes:
+    // `listaOFila` repone una lista vacía con una fila y el `while` empuja los
+    // pilares hasta dos, así que las longitudes solas se cumplirían igual sin
+    // `conservarVacios` y no distinguirían el código correcto del incorrecto.
+    // Cada una de estas tres cae si se quita la opción.
+    expect(vuelta.publicos[1]).toEqual({ nombre: '', dolor: '', objecion: '' })
+    expect(vuelta.posicionamiento.diferenciadores).toEqual(['Uno', ''])
+    expect(vuelta.pilares[1]!.porcentaje).toBe(70)
+  })
+})
+
 describe('aSnakeCase', () => {
   it('minúsculas, sin acentos, con guiones bajos', () => {
     expect(aSnakeCase('Prueba de Manejo')).toBe('prueba_de_manejo')
