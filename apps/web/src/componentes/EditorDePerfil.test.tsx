@@ -15,7 +15,34 @@ beforeEach(() => vi.mocked(guardarPerfilAction).mockClear())
 const PROPS = {
   marca: 'parcelas',
   version: 7,
-  perfil: { pilares: [] },
+  perfil: {
+    posicionamiento: {
+      categoria: 'Venta de parcelas de agrado',
+      promesa: 'Parcelas con factibilidad garantizada y trazabilidad legal completa',
+      diferenciadores: ['Factibilidad verificada', 'Financiamiento directo'],
+    },
+    publicos: [
+      {
+        nombre: 'Inversionista primerizo',
+        dolor: 'Teme comprar un terreno sin agua ni acceso legal',
+        objecion: 'No sabe distinguir una parcela regularizada de una que no lo está',
+      },
+    ],
+    tono: {
+      atributos: ['claro', 'didáctico'],
+      hacer: ['Explicar con datos concretos'],
+      noHacer: ['Prometer retornos'],
+    },
+    lexico: { preferido: ['factibilidad'], prohibido: ['oportunidad única'] },
+    pilares: [
+      { nombre: 'educacion', descripcion: 'Sobre qué enseña la marca', proporcion: 0.6 },
+      { nombre: 'producto', descripcion: 'Qué vende la marca', proporcion: 0.4 },
+    ],
+    ofertas: [
+      { nombre: 'Tour guiado', descripcion: 'Visita al terreno', url: 'https://ejemplo.cl/tour' },
+    ],
+    restricciones: { disclaimers: ['Imágenes referenciales'] },
+  },
   versiones: [{ version: 7, createdAt: new Date('2026-08-01T00:00:00Z') }],
 }
 
@@ -58,5 +85,26 @@ describe('EditorDePerfil', () => {
       vi.mocked(guardarPerfilAction).mock.calls[1],
     )
     expect(screen.queryByText('Perfil guardado como versión 8.')).not.toBeNull()
+  })
+
+  it('guarda el JSON del esquema, no el estado del formulario', async () => {
+    // La garantía que une todo el bloque: lo que viaja a la Server Action
+    // tiene la forma que el esquema espera —proporciones, no porcentajes—
+    // y no la forma cómoda de editar.
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    const [, texto] = vi.mocked(guardarPerfilAction).mock.calls[0]!
+    const enviado = JSON.parse(texto)
+    expect(enviado.pilares[0].proporcion).toBe(0.6)
+    expect(enviado.pilares[0].porcentaje).toBeUndefined()
+  })
+
+  it('la sección avanzada muestra el JSON del estado actual', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: /Avanzado/ }))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    expect(JSON.parse((area as HTMLTextAreaElement).value).pilares[0].proporcion).toBe(0.6)
   })
 })

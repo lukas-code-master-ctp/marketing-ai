@@ -27,11 +27,6 @@ vi.mock('@gc/operaciones', () => ({
   grillaDelMes: vi.fn(),
   estrategiaDelTrimestre: vi.fn(),
   perfilConHistorial: vi.fn(),
-  // Valor marcado y no el real: lo que estas pruebas afirman es que la
-  // pantalla siembra el editor **con la plantilla**, no cómo es la plantilla.
-  // Que la de verdad valide contra el esquema lo cubre `perfiles.test.ts` en
-  // `@gc/operaciones`, que es el único lado que puede importar `@gc/brand`.
-  PLANTILLA_DE_PERFIL: { marcador: 'plantilla-de-partida' },
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -322,26 +317,72 @@ function editor(): HTMLTextAreaElement {
  * de donde esta rama viene sacando a la gente.
  */
 describe('la pantalla de perfil', () => {
-  it('sin perfil abre el editor con la plantilla de partida y no manda al CLI', async () => {
+  it('sin perfil abre el editor con el formulario vacío y no manda al CLI', async () => {
     vi.mocked(perfilConHistorial).mockResolvedValue(null)
 
     await renderPerfil('nueva')
 
-    expect(JSON.parse(editor().value)).toEqual({ marcador: 'plantilla-de-partida' })
+    // Sin perfil, `EditorDePerfil` arranca de `desdeElPerfil(null)`: un
+    // formulario vacío, ya no la plantilla. La sección avanzada muestra ese
+    // formulario pasado por `haciaElPerfil` —las listas obligatorias sin
+    // filas escritas se recortan a `[]`—, el mismo JSON que se mandaría si
+    // se guardara tal cual.
+    expect(JSON.parse(editor().value)).toEqual({
+      posicionamiento: { categoria: '', promesa: '', diferenciadores: [] },
+      publicos: [],
+      tono: { atributos: [], hacer: [], noHacer: [] },
+      lexico: { preferido: [], prohibido: [] },
+      pilares: [],
+      ofertas: [],
+      restricciones: { disclaimers: [] },
+    })
     expect(screen.queryByText(/pnpm cli/)).toBeNull()
     expect(screen.queryByText(/todavía no tiene perfil/)).not.toBeNull()
   })
 
   it('con perfil abre el editor con ese perfil y sin el aviso de marca nueva', async () => {
+    // Perfil ya canónico —la forma que también produciría guardar el
+    // formulario— para que sobreviva `desdeElPerfil` y `haciaElPerfil` sin
+    // cambios; que esa ida y vuelta no pierda nada lo prueba
+    // `conversion.test.ts` en general, y acá solo que la pantalla pasa el
+    // perfil recibido al editor.
+    const perfilGuardado = {
+      posicionamiento: {
+        categoria: 'Venta de parcelas de agrado',
+        promesa: 'Parcelas con factibilidad garantizada y trazabilidad legal completa',
+        diferenciadores: ['Factibilidad verificada'],
+      },
+      publicos: [
+        {
+          nombre: 'Inversionista primerizo',
+          dolor: 'Teme comprar un terreno sin agua ni acceso legal',
+          objecion: 'No sabe distinguir una parcela regularizada de una que no lo está',
+        },
+      ],
+      tono: {
+        atributos: ['claro'],
+        hacer: ['Explicar con datos concretos'],
+        noHacer: ['Prometer retornos'],
+      },
+      lexico: { preferido: ['factibilidad'], prohibido: ['oportunidad única'] },
+      pilares: [
+        { nombre: 'educacion', descripcion: 'Sobre qué enseña la marca', proporcion: 0.6 },
+        { nombre: 'producto', descripcion: 'Qué vende la marca', proporcion: 0.4 },
+      ],
+      ofertas: [
+        { nombre: 'Tour guiado', descripcion: 'Visita al terreno', url: 'https://ejemplo.cl/tour' },
+      ],
+      restricciones: { disclaimers: ['Imágenes referenciales'] },
+    }
     vi.mocked(perfilConHistorial).mockResolvedValue({
       version: 3,
-      perfil: { esElPerfilGuardado: true },
+      perfil: perfilGuardado,
       versiones: [{ version: 3, createdAt: new Date('2026-08-01T00:00:00Z') }],
     })
 
     await renderPerfil('parcelas')
 
-    expect(JSON.parse(editor().value)).toEqual({ esElPerfilGuardado: true })
+    expect(JSON.parse(editor().value)).toEqual(perfilGuardado)
     expect(screen.queryByText(/todavía no tiene perfil/)).toBeNull()
   })
 })
