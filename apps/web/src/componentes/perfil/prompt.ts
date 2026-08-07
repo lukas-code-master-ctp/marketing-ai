@@ -38,8 +38,9 @@ const REGLAS = `- \`categoria\`, \`promesa\` y al menos un \`diferenciador\` son
 - \`lexico\` es el vocabulario de la marca: en \`preferido\` van las palabras y
   expresiones que la marca sí usa —los términos propios de su negocio, cómo le
   llama a lo que vende—, y en \`prohibido\` las que nunca usa —promesas que no
-  puede sostener, muletillas, jerga que confunde—. Los dos son opcionales, pero
-  llénalos si conoces la empresa: es lo que evita que el contenido suene
+  puede sostener, muletillas, jerga que confunde—. Las dos claves van siempre:
+  si no tienes información, deja la lista vacía (\`[]\`) en vez de quitarla. Pero
+  llénalas si conoces la empresa, que es lo que evita que el contenido suene
   genérico.
 - \`disclaimers\` puede ir vacío.`
 
