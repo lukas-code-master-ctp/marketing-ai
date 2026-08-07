@@ -292,7 +292,43 @@ describe('EditorDePerfil', () => {
     // a secas también vive en la categoría del esqueleto.
     expect(copiado).toMatch(/perfil de marca de parcelas\b/)
     expect(copiado).toMatch(/al menos dos pilares/i)
+    // Con `role="status"`, no solo por su texto: el fallo de copiar lleva
+    // `role="alert"` y se anuncia solo; sin un rol acá, quien use lector de
+    // pantalla se entera del fracaso y no del éxito.
+    expect(screen.getByRole('status').textContent).toBe('Copiado.')
+  })
+
+  it('cargar un JSON en el formulario limpia el aviso de "Copiado."', async () => {
+    // El otro camino que muta `formulario`, y por lo tanto recalcula el
+    // prompt. Secuencia real: copias el prompt, se lo pasas a la IA, pegas lo
+    // que devolvió, cargas — y el prompt de abajo cambia entero mientras
+    // «Copiado.» sigue describiendo el texto anterior.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.resolve() },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
     expect(screen.getByText('Copiado.')).not.toBeNull()
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON')
+    const nuevo = {
+      ...PROPS.perfil,
+      posicionamiento: { ...PROPS.perfil.posicionamiento, categoria: 'Categoría que trajo la IA' },
+    }
+    fireEvent.change(area, { target: { value: JSON.stringify(nuevo) } })
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Cargar este JSON en el formulario' }),
+    )
+
+    // El formulario sí cambió —o sea que el prompt de abajo también—, y por
+    // eso el aviso ya no puede seguir en pantalla.
+    expect((screen.getByLabelText('Categoría') as HTMLInputElement).value).toBe(
+      'Categoría que trajo la IA',
+    )
+    expect(screen.queryByText('Copiado.')).toBeNull()
   })
 
   it('editar un campo después de copiar limpia el aviso de "Copiado."', async () => {

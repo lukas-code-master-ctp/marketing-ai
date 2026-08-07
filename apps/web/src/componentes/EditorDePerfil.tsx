@@ -165,6 +165,11 @@ export function EditorDePerfil({
     setVersionGuardada(null)
     setTextoAvanzadoEditado(null)
     setErrorAvanzado(null)
+    // Este es el otro camino que muta `formulario`, así que también recalcula
+    // el prompt de abajo: un «Copiado.» que quedó de una copia anterior ya no
+    // describe lo que hay en pantalla, igual que en `actualizar()`.
+    setCopiado(false)
+    setErrorDeCopia(null)
   }
 
   async function guardar() {
@@ -325,7 +330,14 @@ export function EditorDePerfil({
               >
                 Copiar prompt para IA
               </button>
-              {copiado && <span className="ml-2 text-sm text-green-700">Copiado.</span>}
+              {/* `role="status"` para que un lector de pantalla anuncie el
+                  éxito, no solo el fallo de abajo, que ya lleva
+                  `role="alert"`. */}
+              {copiado && (
+                <span role="status" className="ml-2 text-sm text-green-700">
+                  Copiado.
+                </span>
+              )}
               {errorDeCopia && (
                 <p role="alert" className="mt-2 text-sm text-red-800">
                   {errorDeCopia}
