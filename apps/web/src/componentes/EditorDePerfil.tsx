@@ -120,7 +120,7 @@ export function EditorDePerfil({
     if (!pareceUnPerfil(nuevo)) {
       setErrorAvanzado(
         'Esto no parece un perfil de marca: tiene que ser un objeto con alguna de sus ' +
-          'secciones (posicionamiento, publicos, tono, lexico, pilares, ofertas, restricciones).',
+          'secciones (posicionamiento, públicos, tono, léxico, pilares, ofertas, restricciones).',
       )
       return
     }
