@@ -30,4 +30,37 @@ describe('resolverNivel', () => {
       respaldo: 'proveedor/uno',
     })
   })
+
+  it('usa el principal como respaldo si la variable de respaldo está vacía', () => {
+    const parcial = { MODELO_REDACCION: 'proveedor/uno', MODELO_REDACCION_RESPALDO: '' }
+    expect(resolverNivel('redaccion', parcial)).toEqual({
+      principal: 'proveedor/uno',
+      respaldo: 'proveedor/uno',
+    })
+  })
+
+  it('usa el principal como respaldo si la variable de respaldo tiene solo espacios', () => {
+    const parcial = { MODELO_REDACCION: 'proveedor/uno', MODELO_REDACCION_RESPALDO: '   ' }
+    expect(resolverNivel('redaccion', parcial)).toEqual({
+      principal: 'proveedor/uno',
+      respaldo: 'proveedor/uno',
+    })
+  })
+
+  it('falla si el principal tiene solo espacios, nombrando la variable', () => {
+    expect(() => resolverNivel('redaccion', { MODELO_REDACCION: '   ' })).toThrow(
+      /MODELO_REDACCION/,
+    )
+  })
+
+  it('devuelve los valores recortados de espacios sobrantes', () => {
+    const parcial = {
+      MODELO_REDACCION: '  proveedor/uno  ',
+      MODELO_REDACCION_RESPALDO: '  proveedor/dos  ',
+    }
+    expect(resolverNivel('redaccion', parcial)).toEqual({
+      principal: 'proveedor/uno',
+      respaldo: 'proveedor/dos',
+    })
+  })
 })

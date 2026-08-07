@@ -22,9 +22,15 @@ export function resolverNivel(
   env: Record<string, string | undefined> = process.env,
 ): ModelosDelNivel {
   const variable = VARIABLE_POR_NIVEL[nivel]
-  const principal = env[variable]
+  const principal = env[variable]?.trim()
   if (!principal) {
     throw permanente(`Falta la variable de entorno ${variable} para el nivel "${nivel}"`)
   }
-  return { principal, respaldo: env[`${variable}_RESPALDO`] ?? principal }
+  // `?? principal` no basta: solo cae al principal si la variable de
+  // respaldo está ausente (`null`/`undefined`), no si está presente y vacía
+  // o llena de espacios — que es como `dotenv` carga
+  // `MODELO_RAZONAMIENTO_RESPALDO=` en el `.env` de este proyecto hoy. Es el
+  // mismo error que `drizzle.config.ts` ya sufrió con `??` en vez de `||`.
+  const respaldo = env[`${variable}_RESPALDO`]?.trim()
+  return { principal, respaldo: respaldo || principal }
 }
