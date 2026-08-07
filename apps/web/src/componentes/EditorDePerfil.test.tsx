@@ -10,6 +10,14 @@ vi.mock('../acciones.js', () => ({
 }))
 
 afterEach(cleanup)
+// Una prueba reemplaza `navigator.clipboard` con `Object.defineProperty`; sin
+// restaurarlo, la propiedad propia queda puesta para las pruebas que siguen
+// en este archivo y contamina cualquiera que dependa del comportamiento
+// original (ausente en jsdom). Borrarla revela de nuevo lo que hubiera en el
+// prototipo, que es el estado con el que arrancó cada prueba.
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'clipboard')
+})
 beforeEach(() => vi.mocked(guardarPerfilAction).mockClear())
 
 const PROPS = {
@@ -220,5 +228,55 @@ describe('EditorDePerfil', () => {
 
     expect(vi.mocked(guardarPerfilAction)).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText('Categoría').getAttribute('aria-invalid')).not.toBe('true')
+  })
+
+  it('el JSON avanzado muestra el formulario completo, con sus filas vacías', async () => {
+    // Antes mostraba lo que se GUARDARÍA, que descarta lo vacío: alguien con
+    // una tarjeta «Público 1» delante veía `"publicos": []` y concluía,
+    // razonablemente, que algo se había perdido.
+    render(<EditorDePerfil {...PROPS} perfil={null} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Perfil de marca en formato JSON') as HTMLTextAreaElement
+    const mostrado = JSON.parse(area.value)
+    expect(mostrado.publicos).toHaveLength(1)
+    expect(mostrado.pilares).toHaveLength(2)
+  })
+
+  it('guardar sigue descartando lo vacío', async () => {
+    // El cambio de la sección avanzada NO debe filtrarse al guardado.
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+
+    const [, texto] = vi.mocked(guardarPerfilAction).mock.calls[0]!
+    const enviado = JSON.parse(texto)
+    expect(enviado.publicos.every((p: { nombre: string }) => p.nombre !== '')).toBe(true)
+  })
+
+  it('ofrece el prompt, con la marca dentro', async () => {
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+
+    const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
+    expect(area.value).toContain('parcelas')
+    expect(area.value).toMatch(/al menos dos pilares/i)
+  })
+
+  it('si el portapapeles falla lo dice, y el texto sigue disponible', async () => {
+    // `navigator.clipboard` exige contexto seguro y puede estar denegado. El
+    // botón es una comodidad sobre un texto que ya se puede copiar a mano;
+    // que falle no puede dejar a nadie sin salida.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('denegado')) },
+      configurable: true,
+    })
+
+    render(<EditorDePerfil {...PROPS} />)
+    await userEvent.click(screen.getByText('Avanzado: ver o pegar el JSON'))
+    await userEvent.click(screen.getByRole('button', { name: /Copiar prompt/ }))
+
+    expect(screen.getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
+    const area = screen.getByLabelText('Prompt para una IA') as HTMLTextAreaElement
+    expect(area.value).toContain('parcelas')
   })
 })
