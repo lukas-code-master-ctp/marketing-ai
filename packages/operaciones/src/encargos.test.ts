@@ -1,5 +1,6 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { guardarEncargo, leerEncargo } from './encargos.js'
 
@@ -130,6 +131,25 @@ describe('guardarEncargo y leerEncargo', () => {
     })
   })
 
+  it('una estrategia aprobada de OTRO trimestre no congela este encargo', async () => {
+    // Sin el filtro de periodo en la consulta de congelación, la estrategia
+    // aprobada de Q3 bloquearía el encargo de Q4 y el mensaje nombraría el
+    // trimestre equivocado.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      await db.insert(esquema.strategies).values({
+        organizationId: ref.organizationId, brandId: ref.brandId, period: '2026-Q3',
+        status: 'aprobada', data: {}, brandProfileVersion: 1,
+      })
+
+      await expect(
+        guardarEncargo(db, ref.organizationId, {
+          slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO,
+        }),
+      ).resolves.toBeUndefined()
+    })
+  })
+
   it('una fila que dejó de cumplir el esquema se reporta como inválida', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
@@ -151,6 +171,45 @@ describe('guardarEncargo y leerEncargo', () => {
           slug: 'parcelas', periodo: '2026-Q9', encargo: ENCARGO,
         }),
       ).rejects.toThrow()
+      expect(await db.select().from(esquema.strategyBriefs)).toHaveLength(0)
+    })
+  })
+
+  it('otra organización con una marca del mismo slug no ve ni pisa este encargo', async () => {
+    // La propiedad que importa: resolverMarca filtra por organizationId, no
+    // solo por slug. Si alguien lo cambiara por una búsqueda de slug a secas,
+    // la organización B leería (o pisaría) el encargo de la organización A.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const refA = await sembrar(db)
+      await guardarEncargo(db, refA.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO,
+      })
+
+      const [orgB] = await db.insert(esquema.organizations)
+        .values({ name: 'Y', slug: 'y' }).returning()
+      await db.insert(esquema.brands)
+        .values({ organizationId: orgB!.id, slug: 'parcelas', name: 'Otra marca' }).returning()
+
+      const r = await leerEncargo(db, orgB!.id, { slug: 'parcelas', periodo: '2026-Q4' })
+      expect(r.tipo).toBe('ausente')
+    })
+  })
+
+  it('corregir sin usuarioId no borra el autor de la primera escritura', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const [usuario] = await db.insert(esquema.users)
+        .values({ email: 'autor@x.cl' }).returning()
+      const args = { slug: 'parcelas', periodo: '2026-Q4' }
+
+      await guardarEncargo(db, ref.organizationId, { ...args, encargo: ENCARGO }, usuario!.id)
+      await guardarEncargo(db, ref.organizationId, {
+        ...args, encargo: { ...ENCARGO, objetivo: 'Corrección sin usuario' },
+      })
+
+      const [fila] = await db.select().from(esquema.strategyBriefs)
+        .where(eq(esquema.strategyBriefs.brandId, ref.brandId))
+      expect(fila?.createdBy).toBe(usuario!.id)
     })
   })
 })

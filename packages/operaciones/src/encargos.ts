@@ -12,6 +12,12 @@ import { resolverMarca } from './marcas.js'
  * de que deje de cumplir el esquema es que una versión posterior agregue un
  * campo obligatorio. Ese día conviene decirlo en pantalla, y no mostrar un
  * formulario en blanco que hace perder lo que la persona ya había escrito.
+ *
+ * El `motivo` de `invalido` transporta `leido.error.message` de Zod: un
+ * volcado JSON en inglés, no un texto pensado para pantalla. Quien consuma
+ * este tipo tiene que escribir su propio mensaje en español a partir de él
+ * (o ignorarlo y mostrar uno genérico); imprimirlo tal cual rompe la regla
+ * de este proyecto de que todo texto que ve el usuario va en español.
  */
 export type LecturaDeEncargo =
   | { tipo: 'ausente' }
@@ -88,6 +94,14 @@ export async function guardarEncargo(
       data: leido.data,
       ...(usuarioId !== undefined ? { createdBy: usuarioId } : {}),
     })
+    // `createdAt` queda fuera del `set`: conserva el momento de la primera
+    // escritura, porque corregir un encargo no lo vuelve un encargo nuevo.
+    // `createdBy`, en cambio, sí entra al `set` a propósito: para este campo
+    // la lectura intencionada no es "quién lo escribió primero" sino "quién
+    // lo escribió por última vez" — si otra persona corrige el texto, el
+    // autor tiene que reflejar eso. Cuando la corrección llega sin
+    // `usuarioId` (el spread condicional de más abajo) la columna no se toca
+    // y conserva el autor anterior; no se sobrescribe con `null`.
     .onConflictDoUpdate({
       target: [esquema.strategyBriefs.brandId, esquema.strategyBriefs.period],
       set: {
@@ -97,7 +111,19 @@ export async function guardarEncargo(
     })
     .returning({ id: esquema.strategyBriefs.id })
 
-  // Sin fila devuelta la escritura no ocurrió, y devolver `void` en silencio
-  // haría que la pantalla anunciara un guardado que no pasó.
+  // Sin fila devuelta la escritura no ocurrió. Hoy esta guarda es
+  // inalcanzable: el `onConflictDoUpdate` de arriba no lleva `setWhere`, así
+  // que siempre inserta o actualiza y siempre devuelve una fila. Se deja
+  // igual, como red barata —una línea— para el día en que alguien le agregue
+  // un `setWhere` a este upsert. Contraste con `packages/flujos/src/p1.ts`:
+  // ahí el upsert de la estrategia sí lleva `setWhere: eq(status, 'borrador')`,
+  // así que ahí la misma guarda sí es alcanzable y la congelación es atómica
+  // (upsert y comprobación de estado son la misma operación). Acá la
+  // congelación es una comprobación previa —el `select` de `estrategia` más
+  // arriba— con una ventana entre ese `select` y este `insert` en la que,
+  // en teoría, la estrategia podría pasar a `aprobada` o `archivada` justo
+  // en el medio. Hoy nadie puede abrir esa ventana: en todo el repositorio
+  // no existe ninguna operación que ponga una estrategia en esos dos
+  // estados, así que la ventana está descrita pero no es explotable todavía.
   if (!escrita) throw permanente(`No se pudo guardar el encargo de ${args.periodo}.`)
 }
