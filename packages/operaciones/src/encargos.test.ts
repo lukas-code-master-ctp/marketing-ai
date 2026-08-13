@@ -195,7 +195,11 @@ describe('guardarEncargo y leerEncargo', () => {
     })
   })
 
-  it('corregir sin usuarioId no borra el autor de la primera escritura', async () => {
+  it('corregir sin usuarioId no borra el autor ni mueve la fecha de la primera escritura', async () => {
+    // Las dos columnas dicen cosas distintas a propósito, y el comentario del
+    // `onConflictDoUpdate` lo afirma: `createdAt` es cuándo se escribió el
+    // encargo por primera vez y `createdBy` quién lo escribió por última.
+    // Esta prueba es lo que impide que ese comentario se vuelva mentira.
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const [usuario] = await db.insert(esquema.users)
@@ -203,6 +207,9 @@ describe('guardarEncargo y leerEncargo', () => {
       const args = { slug: 'parcelas', periodo: '2026-Q4' }
 
       await guardarEncargo(db, ref.organizationId, { ...args, encargo: ENCARGO }, usuario!.id)
+      const [primera] = await db.select().from(esquema.strategyBriefs)
+        .where(eq(esquema.strategyBriefs.brandId, ref.brandId))
+
       await guardarEncargo(db, ref.organizationId, {
         ...args, encargo: { ...ENCARGO, objetivo: 'Corrección sin usuario' },
       })
@@ -210,6 +217,7 @@ describe('guardarEncargo y leerEncargo', () => {
       const [fila] = await db.select().from(esquema.strategyBriefs)
         .where(eq(esquema.strategyBriefs.brandId, ref.brandId))
       expect(fila?.createdBy).toBe(usuario!.id)
+      expect(fila?.createdAt).toEqual(primera!.createdAt)
     })
   })
 })
