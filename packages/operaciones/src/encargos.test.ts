@@ -163,6 +163,29 @@ describe('guardarEncargo y leerEncargo', () => {
     })
   })
 
+  it('un objetivo demasiado corto rechaza con un mensaje en español que nombra el campo', async () => {
+    // Antes, este mensaje era el volcado JSON de Zod: `leido.error.message`
+    // interpolado tal cual. Esta prueba es lo que impide que vuelva a serlo.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      let mensaje = ''
+      try {
+        await guardarEncargo(db, ref.organizationId, {
+          slug: 'parcelas', periodo: '2026-Q4', encargo: { ...ENCARGO, objetivo: 'Vender' },
+        })
+        throw new Error('inalcanzable: se esperaba que guardarEncargo lanzara')
+      } catch (error) {
+        mensaje = error instanceof Error ? error.message : String(error)
+      }
+
+      expect(mensaje).toContain('Objetivo del trimestre')
+      expect(mensaje).not.toContain('"code"')
+      expect(mensaje).not.toContain('"path"')
+      expect(mensaje).not.toContain('String must contain')
+      expect(await db.select().from(esquema.strategyBriefs)).toHaveLength(0)
+    })
+  })
+
   it('un periodo mal formado se rechaza antes de tocar la base', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)

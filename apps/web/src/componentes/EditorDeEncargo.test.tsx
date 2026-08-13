@@ -76,13 +76,26 @@ describe('EditorDeEncargo', () => {
     expect(screen.getByLabelText(/objetivo del trimestre/i).getAttribute('aria-invalid')).toBeNull()
   })
 
-  it('elegir un canal lo suma al encargo que se manda', async () => {
+  it('elegir un canal lo suma a los ya marcados en el encargo que se manda', async () => {
+    // No basta `toContain('linkedin')`: eso pasa igual si `alternarCanal`
+    // reemplazara el arreglo entero por `[canal]` en vez de agregarle uno,
+    // y ese cambio borraría en silencio los canales ya sembrados. La
+    // aserción tiene que mirar el contenido completo del arreglo.
     render(<EditorDeEncargo {...PROPS} />)
     await userEvent.click(screen.getByRole('checkbox', { name: /linkedin/i }))
     await userEvent.click(screen.getByRole('button', { name: 'Guardar el encargo' }))
 
     const [, , texto] = vi.mocked(guardarEncargoAction).mock.calls[0]!
-    expect(JSON.parse(texto).canalesDisponibles).toContain('linkedin')
+    expect(JSON.parse(texto).canalesDisponibles).toEqual(['instagram', 'blog', 'linkedin'])
+  })
+
+  it('desmarcar un canal lo saca del encargo que se manda y deja el otro', async () => {
+    render(<EditorDeEncargo {...PROPS} />)
+    await userEvent.click(screen.getByRole('checkbox', { name: /instagram/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar el encargo' }))
+
+    const [, , texto] = vi.mocked(guardarEncargoAction).mock.calls[0]!
+    expect(JSON.parse(texto).canalesDisponibles).toEqual(['blog'])
   })
 
   it('en solo lectura no hay forma de guardar', async () => {
@@ -106,5 +119,35 @@ describe('EditorDeEncargo', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('aprobada')
     expect(screen.queryByText(/guardado/i)).toBeNull()
+    // Sin `reintentable`, no hay razón para ofrecer el botón.
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull()
+  })
+
+  it('un guardado exitoso anuncia el aviso de éxito por rol', async () => {
+    // Antes, la única prueba sobre el éxito era negativa (`queryByText(/guardado/i)`
+    // dentro de la prueba del fallo) y estaba acoplada al literal «guardado»:
+    // renombrar el mensaje habría dejado el camino feliz sin cobertura, sin
+    // poner ninguna prueba en rojo. Esta afirma por rol, no por texto.
+    render(<EditorDeEncargo {...PROPS} />)
+    expect(screen.queryByRole('status')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar el encargo' }))
+
+    expect(screen.getByRole('status')).not.toBeNull()
+  })
+
+  it('un fallo transitorio ofrece «Reintentar», y reintentar vuelve a llamar al servidor', async () => {
+    vi.mocked(guardarEncargoAction)
+      .mockResolvedValueOnce({ ok: false, mensaje: 'La base no respondió', reintentable: true })
+      .mockResolvedValueOnce({ ok: true, datos: null })
+
+    render(<EditorDeEncargo {...PROPS} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar el encargo' }))
+    expect(screen.getByRole('alert').textContent).toContain('La base no respondió')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+
+    expect(vi.mocked(guardarEncargoAction)).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status')).not.toBeNull()
   })
 })
