@@ -8,7 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./pruebas": "./src/pruebas/entorno.ts",
-    "./esquema": "./src/esquema.ts"
+    "./canales": "./src/canales.ts"
   },
   "scripts": {
     "test": "vitest run",

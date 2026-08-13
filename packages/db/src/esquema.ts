@@ -3,9 +3,14 @@ import {
   check, date, foreignKey, index, integer, jsonb, numeric, pgTable, text,
   timestamp, unique, uuid,
 } from 'drizzle-orm/pg-core'
+import { CANALES } from './canales.js'
 
-export const CANALES = ['instagram', 'linkedin', 'facebook', 'tiktok', 'blog'] as const
-export type Canal = (typeof CANALES)[number]
+// Reexportados desde `./canales`, y no declarados acá: ese módulo existe para
+// que un componente de cliente los importe sin arrastrar el DDL de las doce
+// tablas de este archivo al bundle del navegador (ver su cabecera). Esta
+// reexportación es lo que mantiene una sola fuente de verdad: todo lo que ya
+// importaba `CANALES`/`Canal` del barril o de `./esquema` sigue resolviendo.
+export { CANALES, type Canal } from './canales.js'
 
 export const POLITICAS = ['auto', 'manual', 'asistido'] as const
 export type PoliticaDeAprobacion = (typeof POLITICAS)[number]

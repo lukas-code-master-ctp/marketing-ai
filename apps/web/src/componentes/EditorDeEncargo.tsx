@@ -1,11 +1,13 @@
 'use client'
 
-// Del submódulo `./esquema` y no del barril `@gc/db`: este es un componente
-// de cliente, e importar el barril arrastraría `cliente.ts` —el conector de
-// Cloud SQL, con `google-auth-library`— al bundle del navegador. Mismo
-// motivo por el que `EstadoDeCorrida` importa `@gc/operaciones/senales` y no
-// el barril de `@gc/operaciones`.
-import { CANALES, type Canal } from '@gc/db/esquema'
+// Del submódulo `./canales` y no del barril `@gc/db` ni de `@gc/db/esquema`:
+// este es un componente de cliente. El barril arrastraría `cliente.ts` —el
+// conector de Cloud SQL, con `google-auth-library`—, y `esquema.ts` arrastra
+// el DDL de las doce tablas (`@gc/db` no declara `sideEffects: false`, así
+// que webpack no puede descartar esos `pgTable(...)`). Mismo motivo por el
+// que `EstadoDeCorrida` importa `@gc/operaciones/senales` y no el barril de
+// `@gc/operaciones`.
+import { CANALES, type Canal } from '@gc/db/canales'
 import { useId, useState } from 'react'
 import { guardarEncargoAction } from '../acciones.js'
 import {
