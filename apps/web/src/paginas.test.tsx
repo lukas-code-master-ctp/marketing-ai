@@ -300,6 +300,56 @@ describe('la puerta del encargo en la estrategia', () => {
 
     expect(screen.queryByRole('button', { name: 'Guardar el encargo' })).toBeNull()
   })
+
+  // Hallazgo Menor 2 de la revisión de Task 8: sobre una estrategia válida y
+  // regenerable, sin encargo no aparecía ni el botón ni ningún texto — quien
+  // mira la pantalla veía su estrategia y nada que apretar, sin saber por qué.
+  it('sobre la estrategia válida sin encargo no ofrece regenerar, y dice que hace falta escribirlo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue(ESTRATEGIA_EN_BORRADOR)
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
+    expect(screen.queryByText(/para regenerar, escribe primero el encargo/i)).not.toBeNull()
+  })
+
+  // Hallazgo Menor 3: con la estrategia congelada (fuera de borrador) y el
+  // encargo corrupto a la vez, el aviso de encargo inválido decía «Vuelve a
+  // escribirlo» sobre un formulario que ya está en solo lectura — el remedio
+  // real, devolver la estrategia a borrador, lo da el otro párrafo, y las dos
+  // frases juntas se leían como una contradicción.
+  it('con la estrategia congelada y el encargo inválido no manda a reescribirlo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      tipo: 'invalida', periodo: '2026-Q4', id: 'estrategia-1', estado: 'archivada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'invalido', motivo: 'Falta el objetivo.' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByText(/no cumple su esquema/i)).not.toBeNull()
+    expect(screen.queryByText(/vuelve a escribirlo/i)).toBeNull()
+  })
+
+  // Hallazgo Menor 4: la condición del aviso de congelado era solo
+  // `encargoCongelado`, así que una estrategia aprobada de antes de este
+  // bloque —sin ninguna fila de encargo— mostraba «el encargo quedó congelado
+  // con ella» frente a un formulario vacío, que es falso: no hay nada que
+  // congelar si nunca hubo encargo.
+  it('sobre una estrategia aprobada sin ningún encargo no afirma un congelado que no existe', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      ...ESTRATEGIA_EN_BORRADOR,
+      estado: 'aprobada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByText(/el encargo quedó congelado/i)).toBeNull()
+  })
 })
 
 function slotDeGrilla(id: string, campos: Partial<SlotDeLaGrilla> = {}): SlotDeLaGrilla {

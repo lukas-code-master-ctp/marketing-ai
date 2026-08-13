@@ -70,6 +70,13 @@ export default async function PaginaDeEstrategia({
   // ofrecer un botón que sabemos que va a fallar.
   const hayEncargo = encargo.tipo === 'presente'
 
+  // Distinto de `hayEncargo`: acá cuenta también el encargo corrupto
+  // (`invalido`), porque lo que decide si el aviso de "quedó congelado" tiene
+  // sentido es si existe una fila guardada, no si esa fila es válida. Una
+  // estrategia aprobada antes de este bloque, sin ninguna fila de encargo, no
+  // tiene nada que congelar: afirmarlo sería falso.
+  const encargoExiste = encargo.tipo !== 'ausente'
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Estrategia</h1>
@@ -78,7 +85,7 @@ export default async function PaginaDeEstrategia({
 
       <section className="mb-6">
         <h2 className="mb-1 text-sm font-semibold text-gray-700">El encargo del trimestre</h2>
-        {encargoCongelado ? (
+        {encargoCongelado && encargoExiste ? (
           <p className="mb-2 text-xs text-gray-500">
             La estrategia de este periodo ya salió de borrador, así que el encargo quedó
             congelado con ella. Para editarlo, primero devuelve la estrategia a borrador.
@@ -87,7 +94,11 @@ export default async function PaginaDeEstrategia({
         {encargo.tipo === 'invalido' ? (
           <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
             El encargo guardado para este periodo no cumple su esquema, así que no se puede
-            mostrar. Vuelve a escribirlo.
+            mostrar.
+            {/* Con el encargo congelado el remedio ya lo da el párrafo de
+                arriba —devolver la estrategia a borrador—, y no reescribir el
+                encargo: las dos frases juntas se leían como una contradicción. */}
+            {encargoCongelado ? null : ' Vuelve a escribirlo.'}
           </p>
         ) : null}
         <EditorDeEncargo
@@ -152,6 +163,15 @@ export default async function PaginaDeEstrategia({
         </>
       ) : (
         <>
+          {/* Sin encargo el botón no se ofrece (misma barrera que en las otras
+              dos ramas), pero acá además hay una estrategia visible con nada
+              que apretar debajo: sin esta línea, quien mira no tiene forma de
+              saber por qué. */}
+          {regenerable && !hayEncargo && (
+            <p className="mb-4 text-right text-sm text-gray-600">
+              Para regenerar, escribe primero el encargo de arriba.
+            </p>
+          )}
           {regenerable && hayEncargo && !enVuelo && (
             <div className="mb-4 flex justify-end">
               <BotonGenerar
