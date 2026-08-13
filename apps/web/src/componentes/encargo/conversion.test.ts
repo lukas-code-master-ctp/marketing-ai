@@ -53,6 +53,21 @@ describe('desdeElEncargo', () => {
     expect(() => desdeElEncargo(5)).not.toThrow()
   })
 
+  it('no comparte el arreglo de canales con la constante del módulo', () => {
+    // `{ ...FORMULARIO_VACIO }` copia una sola capa. Sin un arreglo nuevo,
+    // marcar una casilla de canal mutándola en el sitio corrompería el
+    // «vacío» para todas las llamadas siguientes de la sesión. Las demás
+    // pruebas usan `toEqual`, que compara por valor y no ve este aliasing.
+    const uno = desdeElEncargo(null)
+    const otro = desdeElEncargo(null)
+    expect(uno.canalesDisponibles).not.toBe(FORMULARIO_VACIO.canalesDisponibles)
+    expect(uno.canalesDisponibles).not.toBe(otro.canalesDisponibles)
+
+    uno.canalesDisponibles.push('instagram')
+    expect(FORMULARIO_VACIO.canalesDisponibles).toEqual([])
+    expect(desdeElEncargo(null).canalesDisponibles).toEqual([])
+  })
+
   it('la ida y vuelta reconstruye el mismo formulario', () => {
     expect(desdeElEncargo(haciaElEncargo(LLENO))).toEqual(LLENO)
   })

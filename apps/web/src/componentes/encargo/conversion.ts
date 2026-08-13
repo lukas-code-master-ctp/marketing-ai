@@ -38,7 +38,12 @@ const texto = (v: unknown): string => (typeof v === 'string' ? v : '')
  *  encargo viejo o parcialmente roto en vez de una pantalla en blanco. */
 export function desdeElEncargo(valor: unknown): EncargoEnFormulario {
   if (typeof valor !== 'object' || valor === null || Array.isArray(valor)) {
-    return { ...FORMULARIO_VACIO }
+    // El arreglo va nuevo, no el de `FORMULARIO_VACIO`: `{ ...obj }` copia una
+    // sola capa, así que devolver el spread dejaría a quien reciba esto
+    // compartiendo el arreglo con la constante del módulo. Una casilla de
+    // canal que se marque mutándolo en el sitio corrompería el «vacío» para
+    // todas las llamadas siguientes de la sesión.
+    return { ...FORMULARIO_VACIO, canalesDisponibles: [] }
   }
   const o = valor as Record<string, unknown>
   return {
