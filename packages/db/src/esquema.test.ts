@@ -673,7 +673,7 @@ describe('catálogo de restricciones compuestas', () => {
   ]
 
   // Las cinco `(id, organization_id)` son el otro lado del trato: sin ellas
-  // ninguna de las doce compuestas de arriba podría siquiera declararse. Se
+  // ninguna de las trece compuestas de arriba podría siquiera declararse. Se
   // listan junto al resto de las únicas compuestas porque filtrar por su
   // definición volvería tautológica justo la comparación que interesa.
   const UNICAS: FilaDeRestriccion[] = [
