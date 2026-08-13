@@ -1,4 +1,5 @@
 export * from './derivados.js'
+export * from './encargo.js'
 export * from './esquemas.js'
 export * from './estrategias.js'
 export * from './periodos.js'
