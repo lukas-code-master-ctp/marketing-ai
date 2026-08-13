@@ -2,7 +2,71 @@ import { esquema, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { Encargo, validarPeriodo, type TipoEncargo } from '@gc/strategy'
 import { and, eq } from 'drizzle-orm'
+import type { z } from 'zod'
 import { resolverMarca } from './marcas.js'
+
+/**
+ * Los nombres que el formulario le muestra a la persona por cada campo del
+ * encargo. Sirven para traducir los `issues` de Zod a un mensaje que nombre
+ * el campo por su nombre humano y no por su ruta en el esquema (`comoSeMide`
+ * no le dice nada a quien llena el formulario; «Cómo sabrás que resultó» sí).
+ */
+const NOMBRE_DE_CAMPO: Record<string, string> = {
+  objetivo: 'Objetivo del trimestre',
+  comoSeMide: 'Cómo sabrás que resultó',
+  publicacionesPorSemana: 'Publicaciones por semana que puedes sostener',
+  canalesDisponibles: 'Canales disponibles este trimestre',
+  queEstaPasando: 'Qué está pasando',
+  queFunciono: 'Qué funcionó',
+  queNoFunciono: 'Qué no funcionó',
+  queEvitar: 'Qué evitar',
+  algoMas: 'Algo más',
+}
+
+function nombreDeCampo(path: (string | number)[]): string {
+  const clave = path[0]
+  if (typeof clave === 'string' && clave in NOMBRE_DE_CAMPO) return NOMBRE_DE_CAMPO[clave]!
+  return path.length > 0 ? path.join('.') : 'el encargo'
+}
+
+/**
+ * Traduce un `issue` de Zod a una frase corta en español, sin repetir el
+ * mínimo o máximo exacto que el esquema exige: decir «es demasiado corto» en
+ * vez de «necesita 10 caracteres» evita una segunda lista de reglas —escrita
+ * a mano acá— que se desincronizaría del esquema el día que ese mínimo
+ * cambie. El dato que sí se usa del `issue` (su `code` y, cuando aplica, su
+ * `type`) sale del propio `issue`, nunca escrito literal.
+ */
+function describirProblema(issue: z.ZodIssue): string {
+  switch (issue.code) {
+    case 'too_small':
+      if (issue.type === 'array') return 'no tiene ninguna opción marcada'
+      if (issue.type === 'number') return 'es demasiado bajo'
+      return 'es demasiado corto'
+    case 'too_big':
+      return issue.type === 'number' ? 'es demasiado alto' : 'es demasiado largo'
+    case 'invalid_type':
+      return issue.received === 'undefined' ? 'falta' : 'no tiene el formato esperado'
+    case 'invalid_enum_value':
+      return 'incluye un valor que no es una opción válida'
+    default:
+      return 'no es válido'
+  }
+}
+
+/**
+ * Arma, a partir de un `ZodError` de validar un `Encargo`, un mensaje en
+ * español que nombra cada campo por el rótulo que ve la persona en el
+ * formulario y describe el problema sin exponer el JSON de Zod. Sigue el
+ * mismo patrón que `validarPerfil` (`packages/brand/src/perfil.ts`): recorrer
+ * `error.issues` y armar una lista legible, una línea por campo.
+ */
+function mensajeDeEncargoInvalido(error: z.ZodError): string {
+  const detalle = error.issues
+    .map((issue) => `- ${nombreDeCampo(issue.path)}: ${describirProblema(issue)}`)
+    .join('\n')
+  return `El encargo tiene campos que corregir antes de guardarlo:\n${detalle}`
+}
 
 /**
  * Los tres estados de un encargo, con la misma forma que
@@ -13,11 +77,10 @@ import { resolverMarca } from './marcas.js'
  * campo obligatorio. Ese día conviene decirlo en pantalla, y no mostrar un
  * formulario en blanco que hace perder lo que la persona ya había escrito.
  *
- * El `motivo` de `invalido` transporta `leido.error.message` de Zod: un
- * volcado JSON en inglés, no un texto pensado para pantalla. Quien consuma
- * este tipo tiene que escribir su propio mensaje en español a partir de él
- * (o ignorarlo y mostrar uno genérico); imprimirlo tal cual rompe la regla
- * de este proyecto de que todo texto que ve el usuario va en español.
+ * El `motivo` de `invalido` sale de `mensajeDeEncargoInvalido`: ya es un
+ * texto en español, pensado para pantalla, que nombra los campos por su
+ * rótulo del formulario y no por su ruta en el esquema. A diferencia de un
+ * volcado crudo de Zod, quien consuma este tipo puede imprimirlo tal cual.
  */
 export type LecturaDeEncargo =
   | { tipo: 'ausente' }
@@ -45,7 +108,7 @@ export async function leerEncargo(
   if (!fila) return { tipo: 'ausente' }
 
   const leido = Encargo.safeParse(fila.data)
-  if (!leido.success) return { tipo: 'invalido', motivo: leido.error.message }
+  if (!leido.success) return { tipo: 'invalido', motivo: mensajeDeEncargoInvalido(leido.error) }
   return { tipo: 'presente', encargo: leido.data }
 }
 
@@ -62,7 +125,7 @@ export async function guardarEncargo(
 
   const leido = Encargo.safeParse(args.encargo)
   if (!leido.success) {
-    throw permanente(`El encargo no cumple su esquema: ${leido.error.message}`)
+    throw permanente(mensajeDeEncargoInvalido(leido.error))
   }
 
   // La congelación se comprueba acá y no en la pantalla: el bloque de solo
