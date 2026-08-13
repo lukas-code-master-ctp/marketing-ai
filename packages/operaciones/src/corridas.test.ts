@@ -12,8 +12,9 @@ import { sembrarConEstrategia } from './pruebas/siembra.js'
 /**
  * El encargo que `encolarEstrategia` ahora exige antes de encolar. Se sembró
  * en cada prueba que llama a esa función con un periodo válido, para no
- * confundir "no hay encargo" —lo que prueba `describe('encargo requerido')`—
- * con cualquier otro comportamiento que la prueba en realidad mide.
+ * confundir "no hay encargo" —lo que prueban las tres pruebas del encargo,
+ * dentro de `describe('encolarEstrategia')`— con cualquier otro
+ * comportamiento que la prueba en realidad mide.
  */
 const ENCARGO_VALIDO = {
   objetivo: 'Vender las doce parcelas que quedan del loteo norte',
@@ -123,9 +124,12 @@ describe('encolarEstrategia', () => {
         data: { objetivo: 'corto' },
       })
 
+      // El mensaje tiene que distinguirse del de «no hay encargo»: acá el
+      // encargo está escrito, y mandar a la persona a escribir uno que ya
+      // existe la deja buscando un formulario en blanco que no va a encontrar.
       await expect(
         encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' }),
-      ).rejects.toThrow(/encargo/i)
+      ).rejects.toThrow(/escrito pero ya no cumple/i)
 
       expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
     })

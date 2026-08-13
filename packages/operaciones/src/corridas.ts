@@ -169,10 +169,21 @@ export async function encolarEstrategia(
   // La guarda autoritativa vive en P1: esta es la que hace que el error se vea
   // donde se puede arreglar.
   const encargo = await leerEncargo(db, organizationId, args)
-  if (encargo.tipo !== 'presente') {
+  if (encargo.tipo === 'ausente') {
     throw permanente(
       `Para generar la estrategia de ${args.periodo} falta escribir el encargo del trimestre: ` +
         'qué quieres lograr, cómo lo medirás, cuánto puedes publicar y en qué canales.',
+    )
+  }
+  // Los dos casos que no son `presente` se distinguen a propósito. Decirle
+  // «falta escribir el encargo» a quien lo escribió —y lo tiene lleno en la
+  // pantalla— lo manda a buscar un formulario en blanco que no va a
+  // encontrar. `motivo` no se interpola: es el volcado de Zod, en inglés.
+  if (encargo.tipo === 'invalido') {
+    throw permanente(
+      `El encargo de ${args.periodo} está escrito pero ya no cumple su esquema, así que no se ` +
+        'puede usar para generar. Ábrelo, revisa que estén los cuatro campos obligatorios y ' +
+        'vuelve a guardarlo.',
     )
   }
 
