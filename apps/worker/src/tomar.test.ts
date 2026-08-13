@@ -1,7 +1,9 @@
 import { ClienteFalso } from '@gc/ai'
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
-import { encolarEstrategia, encolarGrilla, reanudarCorridaEncolada } from '@gc/operaciones'
+import {
+  encolarEstrategia, encolarGrilla, guardarEncargo, reanudarCorridaEncolada,
+} from '@gc/operaciones'
 import { sembrarConEstrategia } from '@gc/operaciones/pruebas'
 import { and, eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
@@ -41,6 +43,15 @@ const ESTRATEGIA = JSON.stringify({
   reciclaje: [],
   temasPrioritarios: ['factibilidad de agua'],
 })
+
+/** `encolarEstrategia` exige el encargo del trimestre desde este bloque. */
+const ENCARGO = {
+  objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+  comoSeMide: 'Formularios de contacto recibidos',
+  publicacionesPorSemana: 4,
+  canalesDisponibles: ['instagram', 'blog'] as const,
+  queEstaPasando: '', queFunciono: '', queNoFunciono: '', queEvitar: '', algoMas: '',
+}
 
 describe('tomarYEjecutarUna', () => {
   it('sin corridas pendientes no hace nada', async () => {
@@ -154,6 +165,9 @@ describe('tomarYEjecutarUna', () => {
   it('ejecuta una estrategia encolada y la deja persistida', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: PERIODO, encargo: ENCARGO,
+      })
       const runId = await encolarEstrategia(db, ref.organizationId, {
         slug: 'parcelas', periodo: PERIODO,
       })

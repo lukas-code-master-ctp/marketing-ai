@@ -5,8 +5,23 @@ import { describe, expect, it } from 'vitest'
 import {
   corridaDe, encolarEstrategia, encolarGrilla, reanudarCorridaEncolada, tomarCorridaPendiente,
 } from './corridas.js'
+import { guardarEncargo } from './encargos.js'
 import { crearMarca } from './marcas.js'
 import { sembrarConEstrategia } from './pruebas/siembra.js'
+
+/**
+ * El encargo que `encolarEstrategia` ahora exige antes de encolar. Se sembró
+ * en cada prueba que llama a esa función con un periodo válido, para no
+ * confundir "no hay encargo" —lo que prueba `describe('encargo requerido')`—
+ * con cualquier otro comportamiento que la prueba en realidad mide.
+ */
+const ENCARGO_VALIDO = {
+  objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+  comoSeMide: 'Formularios de contacto recibidos',
+  publicacionesPorSemana: 4,
+  canalesDisponibles: ['instagram', 'blog'] as const,
+  queEstaPasando: '', queFunciono: '', queNoFunciono: '', queEvitar: '', algoMas: '',
+}
 
 describe('encolarGrilla', () => {
   it('deja la corrida en pendiente, con la entrada que el flujo espera', async () => {
@@ -47,6 +62,9 @@ describe('encolarEstrategia', () => {
   it('deja la corrida en pendiente, con la entrada que el flujo espera', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO_VALIDO,
+      })
       const runId = await encolarEstrategia(db, ref.organizationId, {
         slug: 'parcelas', periodo: '2026-Q4',
       })
@@ -72,6 +90,58 @@ describe('encolarEstrategia', () => {
 
       const filas = await db.select().from(esquema.pipelineRuns)
       expect(filas).toHaveLength(0)
+    })
+  })
+
+  // El encargo del trimestre es obligatorio desde este bloque: sin él el
+  // modelo se inventa las métricas de los objetivos y el mix de canales. Esta
+  // guarda avisa al instante, en la pantalla; la autoritativa vive en P1.
+  it('se niega si el trimestre no tiene encargo escrito', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await expect(
+        encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' }),
+      ).rejects.toThrow(/encargo/i)
+
+      // Y no deja una corrida colgada que el worker vaya a tomar.
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
+    })
+  })
+
+  // Un encargo que dejó de cumplir su esquema es tan poco confiable como uno
+  // ausente: dejarlo pasar encolaría una corrida que el worker no puede leer.
+  // Sin esta prueba, cambiar la guarda de `!== 'presente'` a `=== 'ausente'`
+  // —una mutación tentadora, y equivocada— queda en verde: es el escenario
+  // que ese cambio deja de cubrir.
+  it('se niega si el encargo escrito ya no cumple su esquema', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await db.insert(esquema.strategyBriefs).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        period: '2026-Q4',
+        data: { objetivo: 'corto' },
+      })
+
+      await expect(
+        encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' }),
+      ).rejects.toThrow(/encargo/i)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
+    })
+  })
+
+  it('encola cuando el encargo ya está escrito', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO_VALIDO,
+      })
+
+      const runId = await encolarEstrategia(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4',
+      })
+      expect(runId).toBeTruthy()
     })
   })
 })
@@ -105,6 +175,9 @@ describe('encolar con una corrida ya viva', () => {
   it('rechaza la segunda estrategia del mismo trimestre', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO_VALIDO,
+      })
       await encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' })
 
       await expect(
@@ -174,6 +247,9 @@ describe('encolar con una corrida ya viva', () => {
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
 
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-11' })
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO_VALIDO,
+      })
       await encolarEstrategia(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' })
       await encolarGrilla(db, ref.organizationId, { slug: 'otra-marca', mes: '2026-10' })
 
@@ -353,6 +429,9 @@ describe('corridaDe', () => {
   it('encuentra la corrida de estrategia, que guarda el periodo bajo otra clave', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
+      await guardarEncargo(db, ref.organizationId, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: ENCARGO_VALIDO,
+      })
       const runId = await encolarEstrategia(db, ref.organizationId, {
         slug: 'parcelas', periodo: '2026-Q4',
       })
