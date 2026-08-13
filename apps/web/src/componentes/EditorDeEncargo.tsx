@@ -39,7 +39,7 @@ export function EditorDeEncargo({
 }) {
   const [formulario, setFormulario] = useState<EncargoEnFormulario>(() => desdeElEncargo(encargo))
   const [ocupado, setOcupado] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
   const [guardado, setGuardado] = useState(false)
 
   // Se enciende con el primer intento de guardar que encuentra campos
@@ -63,11 +63,18 @@ export function EditorDeEncargo({
   function alternarCanal(canal: string, marcado: boolean) {
     // El arreglo se reemplaza, nunca se muta en el sitio: mutarlo en el
     // lugar aliasa el arreglo que `desdeElEncargo` acaba de aislar de
-    // `FORMULARIO_VACIO`.
-    const canales = marcado
-      ? [...formulario.canalesDisponibles, canal]
-      : formulario.canalesDisponibles.filter((c) => c !== canal)
-    actualizar({ canalesDisponibles: canales })
+    // `FORMULARIO_VACIO`. Se lee `f` del actualizador funcional de
+    // `setFormulario`, no `formulario` del cierre del componente — el mismo
+    // motivo por el que `actualizar` ya lo hace así: dos alternancias
+    // encoladas en la misma pasada de eventos no deberían pisarse por leer
+    // un `formulario` desactualizado.
+    setFormulario((f) => ({
+      ...f,
+      canalesDisponibles: marcado
+        ? [...f.canalesDisponibles, canal]
+        : f.canalesDisponibles.filter((c) => c !== canal),
+    }))
+    setGuardado(false)
   }
 
   async function guardar() {
@@ -82,7 +89,7 @@ export function EditorDeEncargo({
     const r = await guardarEncargoAction(marca, periodo, JSON.stringify(haciaElEncargo(formulario)))
     setOcupado(false)
     if (r.ok) setGuardado(true)
-    else setError(r.mensaje)
+    else setError({ mensaje: r.mensaje, reintentable: r.reintentable })
   }
 
   const faltaObjetivo = mostrarObligatorios && formulario.objetivo.trim() === ''
@@ -150,7 +157,12 @@ export function EditorDeEncargo({
             <p className="mt-1 text-xs text-gray-400">Ejemplo: 4</p>
           </div>
 
-          <fieldset>
+          {/* `aria-invalid` va en el `fieldset`, que es el grupo, y no en cada
+              casilla: el error es «falta marcar al menos un canal», una
+              condición del grupo entero, no de cada control por separado. Con
+              el atributo repetido en las cinco casillas un lector de
+              pantalla anunciaba cinco controles inválidos por un solo error. */}
+          <fieldset aria-invalid={faltanCanales ? 'true' : undefined}>
             <legend className="text-sm font-medium text-gray-700">Canales disponibles este trimestre</legend>
             <p id={idCanalesAyuda} className="text-xs text-gray-500">
               Dónde puedes publicar este trimestre. Marca solo los que vas a atender.
@@ -163,7 +175,6 @@ export function EditorDeEncargo({
                     checked={formulario.canalesDisponibles.includes(canal)}
                     onChange={(e) => alternarCanal(canal, e.target.checked)}
                     aria-describedby={faltanCanales ? `${idCanalesAyuda} ${idCanalesError}` : idCanalesAyuda}
-                    aria-invalid={faltanCanales ? 'true' : undefined}
                   />
                   {ETIQUETAS_DE_CANAL[canal]}
                 </label>
@@ -248,7 +259,17 @@ export function EditorDeEncargo({
             role="alert"
             className="whitespace-pre-wrap rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800"
           >
-            {error}
+            <p>{error.mensaje}</p>
+            {error.reintentable && (
+              <button
+                type="button"
+                disabled={ocupado}
+                onClick={() => void guardar()}
+                className="mt-1 font-medium underline disabled:opacity-50"
+              >
+                Reintentar
+              </button>
+            )}
           </div>
         )}
       </div>
