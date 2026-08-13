@@ -1,11 +1,22 @@
 // @vitest-environment jsdom
-import type { CorridaEnCurso, GrillaDelMes, SlotDeLaGrilla } from '@gc/operaciones'
+import type {
+  CorridaEnCurso,
+  GrillaDelMes,
+  LecturaDeEncargo,
+  SlotDeLaGrilla,
+} from '@gc/operaciones'
 import type { LecturaDeEstrategia } from '@gc/strategy'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { corridaDe, estrategiaDelTrimestre, grillaDelMes, perfilConHistorial } from '@gc/operaciones'
+import {
+  corridaDe,
+  estrategiaDelTrimestre,
+  grillaDelMes,
+  leerEncargo,
+  perfilConHistorial,
+} from '@gc/operaciones'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
 import PaginaDePerfil from './app/(app)/[marca]/perfil/page.js'
@@ -27,6 +38,7 @@ vi.mock('@gc/operaciones', () => ({
   grillaDelMes: vi.fn(),
   estrategiaDelTrimestre: vi.fn(),
   perfilConHistorial: vi.fn(),
+  leerEncargo: vi.fn(),
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -67,14 +79,36 @@ vi.mock('next/link', () => ({
   ),
 }))
 
+// Un encargo presente por omisión: la mayoría de las pruebas de estrategia no
+// hablan del encargo, sino de la puerta de la corrida viva. Sin este valor
+// por omisión, `leerEncargo` sin sustituir devolvería `undefined` y la puerta
+// del encargo (que sí es real en la página) las pondría rojas a todas por un
+// motivo que no es el que están midiendo.
+const ENCARGO_ESCRITO: LecturaDeEncargo = {
+  tipo: 'presente',
+  encargo: {
+    objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+    comoSeMide: 'Formularios de contacto recibidos',
+    publicacionesPorSemana: 4,
+    canalesDisponibles: ['instagram', 'blog'],
+    queEstaPasando: '',
+    queFunciono: '',
+    queNoFunciono: '',
+    queEvitar: '',
+    algoMas: '',
+  },
+}
+
 afterEach(cleanup)
 beforeEach(() => {
   vi.mocked(corridaDe).mockReset()
   vi.mocked(grillaDelMes).mockReset()
   vi.mocked(estrategiaDelTrimestre).mockReset()
   vi.mocked(perfilConHistorial).mockReset()
+  vi.mocked(leerEncargo).mockReset()
   vi.mocked(marcasDeLaOrganizacion).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
+  vi.mocked(leerEncargo).mockResolvedValue(ENCARGO_ESCRITO)
 })
 
 function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
@@ -227,6 +261,44 @@ describe('el botón de generar mientras hay una corrida viva', () => {
     expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
     expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
     expect(screen.queryByText(/no valida contra su esquema/i)).not.toBeNull()
+  })
+})
+
+describe('la puerta del encargo en la estrategia', () => {
+  it('sin encargo no ofrece generar, y dice que falta escribirlo', async () => {
+    // La barrera real vive en `encolarEstrategia`; esto evita ofrecer un botón
+    // que sabemos que va a fallar un segundo después.
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Generar estrategia' })).toBeNull()
+    expect(screen.queryByText(/escribe primero el encargo/i)).not.toBeNull()
+  })
+
+  it('con encargo escrito vuelve a ofrecer generar', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Generar estrategia' })).not.toBeNull()
+  })
+
+  it('con la estrategia fuera de borrador el encargo queda de solo lectura', async () => {
+    // `archivada` y no `aprobada` a propósito: la condición correcta es «el
+    // estado no es borrador», y con `aprobada` las dos redacciones coinciden.
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      ...ESTRATEGIA_EN_BORRADOR,
+      estado: 'archivada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Guardar el encargo' })).toBeNull()
   })
 })
 

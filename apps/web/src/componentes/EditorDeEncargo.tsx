@@ -1,6 +1,11 @@
 'use client'
 
-import { CANALES, type Canal } from '@gc/db'
+// Del submódulo `./esquema` y no del barril `@gc/db`: este es un componente
+// de cliente, e importar el barril arrastraría `cliente.ts` —el conector de
+// Cloud SQL, con `google-auth-library`— al bundle del navegador. Mismo
+// motivo por el que `EstadoDeCorrida` importa `@gc/operaciones/senales` y no
+// el barril de `@gc/operaciones`.
+import { CANALES, type Canal } from '@gc/db/esquema'
 import { useId, useState } from 'react'
 import { guardarEncargoAction } from '../acciones.js'
 import {

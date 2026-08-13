@@ -1,10 +1,11 @@
-import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
+import { corridaDe, estrategiaDelTrimestre, leerEncargo } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la grilla y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
 import type { TipoEstrategia } from '@gc/strategy'
 import { mesActual } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 import { BotonGenerar } from '../../../../componentes/BotonGenerar.js'
+import { EditorDeEncargo } from '../../../../componentes/EditorDeEncargo.js'
 import { EstadoDeCorrida } from '../../../../componentes/EstadoDeCorrida.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
@@ -54,21 +55,61 @@ export default async function PaginaDeEstrategia({
   // equivocado.
   const enVuelo = corridaViva(corrida)
 
+  const encargo = await leerEncargo(db, organizationId, {
+    slug: marca,
+    periodo: resultado.periodo,
+  })
+
+  // El encargo se congela con la estrategia: la condición es «el estado no es
+  // borrador», no «el estado es aprobada», porque una archivada tampoco se
+  // regenera y su encargo tampoco tiene por qué cambiar.
+  const encargoCongelado = resultado.tipo !== 'ausente' && resultado.estado !== 'borrador'
+
+  // Sin encargo no se ofrece generar. La barrera real está en
+  // `encolarEstrategia`, que falla con un `permanente`; esto solo evita
+  // ofrecer un botón que sabemos que va a fallar.
+  const hayEncargo = encargo.tipo === 'presente'
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Estrategia</h1>
 
       {corrida && <EstadoDeCorrida corrida={corrida} ruta={`/${marca}/estrategia`} />}
 
+      <section className="mb-6">
+        <h2 className="mb-1 text-sm font-semibold text-gray-700">El encargo del trimestre</h2>
+        {encargoCongelado ? (
+          <p className="mb-2 text-xs text-gray-500">
+            La estrategia de este periodo ya salió de borrador, así que el encargo quedó
+            congelado con ella. Para editarlo, primero devuelve la estrategia a borrador.
+          </p>
+        ) : null}
+        {encargo.tipo === 'invalido' ? (
+          <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            El encargo guardado para este periodo no cumple su esquema, así que no se puede
+            mostrar. Vuelve a escribirlo.
+          </p>
+        ) : null}
+        <EditorDeEncargo
+          marca={marca}
+          periodo={resultado.periodo}
+          encargo={encargo.tipo === 'presente' ? encargo.encargo : null}
+          soloLectura={encargoCongelado}
+        />
+      </section>
+
       {resultado.tipo === 'ausente' ? (
         <div className="mt-4 rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
           <p className="mb-3">
             La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.
+            {!hayEncargo &&
+              ' Escribe primero el encargo de arriba: la estrategia se genera a partir de él.'}
           </p>
           {/* El botón encola y devuelve; quien la genera es el worker. El
               avance aparece arriba, en `EstadoDeCorrida`. Mientras esa corrida
-              siga viva no se ofrece de nuevo. */}
-          {!enVuelo && (
+              siga viva no se ofrece de nuevo. Sin encargo tampoco: encolar
+              fallaría de inmediato en el motor. */}
+          {hayEncargo && !enVuelo && (
             <div className="flex justify-center">
               <BotonGenerar
                 marca={marca}
@@ -93,7 +134,7 @@ export default async function PaginaDeEstrategia({
             {/* Con una corrida en vuelo no se ofrece el botón ni se explica
                 por qué no se puede regenerar: el motivo sería el equivocado.
                 Lo que hay que mirar está arriba, en `EstadoDeCorrida`. */}
-            {enVuelo ? null : regenerable ? (
+            {enVuelo ? null : regenerable && hayEncargo ? (
               <BotonGenerar
                 marca={marca}
                 periodo={resultado.periodo}
@@ -111,7 +152,7 @@ export default async function PaginaDeEstrategia({
         </>
       ) : (
         <>
-          {regenerable && !enVuelo && (
+          {regenerable && hayEncargo && !enVuelo && (
             <div className="mb-4 flex justify-end">
               <BotonGenerar
                 marca={marca}
