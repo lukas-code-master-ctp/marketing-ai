@@ -9,7 +9,7 @@ import { permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { Estrategia, validarPeriodo, type TipoEstrategia } from '@gc/strategy'
+import { Encargo, Estrategia, validarPeriodo, type TipoEncargo, type TipoEstrategia } from '@gc/strategy'
 import type { Dependencias } from './tipos.js'
 
 export const TAREA_ESTRATEGIA = definirTarea({
@@ -67,6 +67,8 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         throw estrategiaNoRegenerable(entrada, estadoPrevio, ctx.brandSlug)
       }
 
+      const encargo = await encargoDelTrimestre(ctx.db, entrada.brandId, entrada.period)
+
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
       const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId, ctx.brandSlug)
@@ -78,6 +80,8 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
           rol: 'usuario',
           texto: [
             contextoDeMarca(perfil),
+            '',
+            textoDelEncargo(encargo),
             '',
             `## Encargo`,
             `Genera la estrategia de contenido para el periodo ${entrada.period}.`,
@@ -153,6 +157,58 @@ async function estadoDeLaEstrategia(
       and(eq(esquema.strategies.brandId, brandId), eq(esquema.strategies.period, period)),
     )
   return fila?.status ?? null
+}
+
+async function encargoDelTrimestre(
+  db: BaseDeDatos, brandId: string, period: string,
+): Promise<TipoEncargo> {
+  const [fila] = await db
+    .select({ data: esquema.strategyBriefs.data })
+    .from(esquema.strategyBriefs)
+    .where(and(
+      eq(esquema.strategyBriefs.brandId, brandId),
+      eq(esquema.strategyBriefs.period, period),
+    ))
+    .limit(1)
+
+  if (!fila) {
+    throw permanente(
+      `No hay encargo escrito para ${period}. La estrategia se genera a partir de lo que ` +
+        'quieres lograr el trimestre, así que sin eso no hay de dónde partir.',
+    )
+  }
+
+  const leido = Encargo.safeParse(fila.data)
+  if (!leido.success) {
+    throw permanente(`El encargo de ${period} no cumple su esquema: ${leido.error.message}`)
+  }
+  return leido.data
+}
+
+/**
+ * El encargo, como sección propia del mensaje.
+ *
+ * Va separado de `contextoDeMarca` a propósito: mezclarlos invita al modelo a
+ * tratar como permanente algo que dura tres meses. Y el título no dice
+ * «Encargo» porque el mensaje ya tiene una sección con ese nombre —la que pide
+ * generar el periodo— y dos secciones homónimas se leen como una sola.
+ */
+function textoDelEncargo(e: TipoEncargo): string {
+  const opcional = (etiqueta: string, valor: string) =>
+    valor.trim() === '' ? [] : [`- ${etiqueta}: ${valor}`]
+
+  return [
+    '## Lo que la marca quiere lograr este trimestre',
+    `- Objetivo: ${e.objetivo}`,
+    `- Cómo se mide: ${e.comoSeMide}`,
+    `- Capacidad total: ${e.publicacionesPorSemana} publicaciones por semana, sumando canales`,
+    `- Canales disponibles: ${e.canalesDisponibles.join(', ')}`,
+    ...opcional('Qué está pasando', e.queEstaPasando),
+    ...opcional('Qué funcionó el trimestre pasado', e.queFunciono),
+    ...opcional('Qué no funcionó', e.queNoFunciono),
+    ...opcional('Qué evitar este trimestre', e.queEvitar),
+    ...opcional('Además', e.algoMas),
+  ].join('\n')
 }
 
 /**
