@@ -83,7 +83,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
             '',
             textoDelEncargo(encargo),
             '',
-            `## Encargo`,
+            `## Lo que tienes que producir`,
             `Genera la estrategia de contenido para el periodo ${entrada.period}.`,
           ].join('\n'),
         },
@@ -189,16 +189,19 @@ async function encargoDelTrimestre(
  * El encargo, como sección propia del mensaje.
  *
  * Va separado de `contextoDeMarca` a propósito: mezclarlos invita al modelo a
- * tratar como permanente algo que dura tres meses. Y el título no dice
- * «Encargo» porque el mensaje ya tiene una sección con ese nombre —la que pide
- * generar el periodo— y dos secciones homónimas se leen como una sola.
+ * tratar como permanente algo que dura tres meses. El título es
+ * «El encargo del trimestre» porque el instructivo del sistema nombra «el
+ * encargo» al pedir el tope de publicaciones por semana, los canales y la
+ * métrica: tiene que coincidir con el título real de la sección que los
+ * declara, y no con el de la instrucción final que solo pide generar el
+ * periodo.
  */
 function textoDelEncargo(e: TipoEncargo): string {
   const opcional = (etiqueta: string, valor: string) =>
     valor.trim() === '' ? [] : [`- ${etiqueta}: ${valor}`]
 
   return [
-    '## Lo que la marca quiere lograr este trimestre',
+    '## El encargo del trimestre',
     `- Objetivo: ${e.objetivo}`,
     `- Cómo se mide: ${e.comoSeMide}`,
     `- Capacidad total: ${e.publicacionesPorSemana} publicaciones por semana, sumando canales`,

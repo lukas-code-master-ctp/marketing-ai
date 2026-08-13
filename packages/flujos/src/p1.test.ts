@@ -248,9 +248,10 @@ describe('flujo P1 · estrategia', () => {
       // el instructivo del sistema también habla de canales y de capacidad, y
       // afirmar contra todo pasaría aunque el encargo no viajara.
       const mensajeUsuario = cliente.peticiones[0]!.mensajes.find((m) => m.rol === 'usuario')!.texto
+      expect(mensajeUsuario).toContain('## El encargo del trimestre')
       expect(mensajeUsuario).toContain('Vender las doce parcelas que quedan del loteo norte')
       expect(mensajeUsuario).toContain('Formularios de contacto recibidos')
-      expect(mensajeUsuario).toContain('4')
+      expect(mensajeUsuario).toContain('4 publicaciones por semana')
       expect(mensajeUsuario).toContain('instagram')
       expect(mensajeUsuario).toContain('Los carruseles largos no los vio nadie')
     })
