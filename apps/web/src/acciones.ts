@@ -13,6 +13,7 @@ import {
   editarSlot,
   encolarEstrategia,
   encolarGrilla,
+  guardarEncargo,
   reabrirGrilla,
   reanudarCorridaEncolada,
 } from '@gc/operaciones'
@@ -237,5 +238,33 @@ export async function guardarPerfilAction(
 
     const version = await cargarPerfilDeObjeto(db, organizationId, { slug, perfil }, usuarioId)
     return { version }
+  })
+}
+
+/**
+ * La gemela de `guardarPerfilAction` para el encargo del trimestre: mismo
+ * estilo de firma (texto JSON, no un objeto), por la misma razón — es lo que
+ * `ejecutar` ya sabe traducir, y evita inventar una segunda forma para lo
+ * mismo. `guardarEncargo` valida contra el esquema y congela la escritura si
+ * la estrategia del periodo ya salió de `borrador`; el mensaje que lanza en
+ * ese caso llega tal cual al cliente.
+ */
+export async function guardarEncargoAction(
+  slug: string,
+  periodo: string,
+  textoJson: string,
+): Promise<Resultado<null>> {
+  return ejecutar(`/${slug}/estrategia`, async (db, organizationId, usuarioId) => {
+    let encargo: unknown
+    try {
+      encargo = JSON.parse(textoJson)
+    } catch (error) {
+      throw new Error(
+        `El texto no es JSON válido: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    await guardarEncargo(db, organizationId, { slug, periodo, encargo }, usuarioId)
+    return null
   })
 }
