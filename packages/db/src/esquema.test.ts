@@ -574,7 +574,7 @@ describe('estado pendiente en pipeline_runs', () => {
 
 /**
  * Catálogo, no comportamiento. Las pruebas de arriba solo se disparan cuando
- * alguien borra o inserta la fila justa, así que siete de las doce compuestas
+ * alguien borra o inserta la fila justa, así que siete de las trece compuestas
  * no las cubre ninguna. Bastaría un `drizzle-kit generate` que reescriba una
  * migración para que la barrera desapareciera con la suite en verde.
  *
@@ -664,6 +664,12 @@ describe('catálogo de restricciones compuestas', () => {
       definicion:
         'FOREIGN KEY (brand_id, organization_id) REFERENCES brands(id, organization_id) ON DELETE CASCADE',
     },
+    {
+      tabla: 'strategy_briefs',
+      conname: 'strategy_briefs_brand_org_fk',
+      definicion:
+        'FOREIGN KEY (brand_id, organization_id) REFERENCES brands(id, organization_id) ON DELETE CASCADE',
+    },
   ]
 
   // Las cinco `(id, organization_id)` son el otro lado del trato: sin ellas
@@ -726,6 +732,11 @@ describe('catálogo de restricciones compuestas', () => {
       conname: 'strategies_id_organization_id_unique',
       definicion: 'UNIQUE (id, organization_id)',
     },
+    {
+      tabla: 'strategy_briefs',
+      conname: 'strategy_briefs_brand_id_period_unique',
+      definicion: 'UNIQUE (brand_id, period)',
+    },
   ]
 
   const leer = async (db: BaseDeDatos, tipo: 'f' | 'u') => {
@@ -740,7 +751,7 @@ describe('catálogo de restricciones compuestas', () => {
     return filas as unknown as FilaDeRestriccion[]
   }
 
-  it('declara exactamente las doce foráneas compuestas esperadas', async () => {
+  it('declara exactamente las trece foráneas compuestas esperadas', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       expect(await leer(db, 'f')).toEqual(FK)
     })
@@ -805,6 +816,43 @@ describe('users y autoría', () => {
       // lo que aprobó. Si esto fuera CASCADE, el plan desaparecería con ella.
       expect(despues).toBeTruthy()
       expect(despues!.approvedBy).toBeNull()
+    })
+  })
+})
+
+describe('strategy_briefs', () => {
+  it('tiene la única de marca y periodo, y la foránea compuesta con la marca', async () => {
+    // La foránea compuesta es lo que impide que un encargo apunte a una marca
+    // de otra organización: sin ella, la tenencia dependería de que cada
+    // consulta se acuerde de filtrar.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const filas = await db.execute(sql`
+        select conname from pg_constraint
+        where conrelid = 'strategy_briefs'::regclass
+      `)
+      const nombres = filas.rows.map((f) => String(f.conname))
+      expect(nombres).toContain('strategy_briefs_brand_id_period_unique')
+      expect(nombres).toContain('strategy_briefs_brand_org_fk')
+    })
+  })
+
+  it('rechaza un encargo cuya marca es de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [orgA] = await db.insert(esquema.organizations)
+        .values({ name: 'A', slug: 'a' }).returning()
+      const [orgB] = await db.insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' }).returning()
+      const [marca] = await db.insert(esquema.brands)
+        .values({ organizationId: orgA!.id, slug: 'm', name: 'M' }).returning()
+
+      await expect(
+        db.insert(esquema.strategyBriefs).values({
+          organizationId: orgB!.id,
+          brandId: marca!.id,
+          period: '2026-Q4',
+          data: {},
+        }),
+      ).rejects.toThrow()
     })
   })
 })

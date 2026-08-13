@@ -166,6 +166,33 @@ export const strategies = pgTable('strategies', {
   }).onDelete('cascade'),
 }))
 
+/**
+ * Lo que la persona responde antes de generar la estrategia de un trimestre.
+ * Una fila por marca y periodo, igual que `strategies`.
+ *
+ * No lleva la única `(id, organization_id)` que sí tienen `strategies` y
+ * `brands`: esa existe para que otras tablas puedan apuntar a ellas con una
+ * foránea compuesta, y nada apunta a un encargo. Agregarla «por simetría»
+ * sería un índice que nadie usa.
+ */
+export const strategyBriefs = pgTable('strategy_briefs', {
+  id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  brandId: uuid('brand_id').notNull(),
+  period: text('period').notNull(),
+  data: jsonb('data').notNull(),
+  createdAt: creadoEn(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+}, (t) => ({
+  periodoPorMarca: unique().on(t.brandId, t.period),
+  marcaPorOrg: foreignKey({
+    columns: [t.brandId, t.organizationId],
+    foreignColumns: [brands.id, brands.organizationId],
+    name: 'strategy_briefs_brand_org_fk',
+  }).onDelete('cascade'),
+}))
+
 export const contentPlans = pgTable('content_plans', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
@@ -364,5 +391,5 @@ export const aiCalls = pgTable('ai_calls', {
 
 export const esquema = {
   organizations, users, brands, brandProfiles, channelAccounts, approvalPolicies,
-  strategies, contentPlans, planSlots, pipelineRuns, pipelineSteps, aiCalls,
+  strategies, strategyBriefs, contentPlans, planSlots, pipelineRuns, pipelineSteps, aiCalls,
 }
