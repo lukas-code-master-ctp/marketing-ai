@@ -8,11 +8,25 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { generarEstrategia, generarGrilla } from '@gc/flujos'
 import {
-  cargarPerfilDeObjeto, crearMarca, resolverOrganizacion, verGrilla,
+  cargarPerfilDeObjeto, crearMarca, guardarEncargo, resolverOrganizacion, verGrilla,
 } from '@gc/operaciones'
 
 const MUESTRAS = fileURLToPath(new URL('../../../packages/strategy/muestras', import.meta.url))
 const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
+
+// P1 exige un encargo escrito para el periodo (bloque «el encargo del
+// trimestre»): sin esto la marcha en seco se niega antes de llegar al modelo.
+const ENCARGO = {
+  objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+  comoSeMide: 'Formularios de contacto recibidos',
+  publicacionesPorSemana: 4,
+  canalesDisponibles: ['instagram', 'blog', 'linkedin'],
+  queEstaPasando: 'Empieza la temporada alta de visitas',
+  queFunciono: '',
+  queNoFunciono: '',
+  queEvitar: '',
+  algoMas: '',
+}
 
 describe('marcha en seco de punta a punta', () => {
   it('va del perfil a la grilla sin gastar un solo token', async () => {
@@ -22,6 +36,7 @@ describe('marcha en seco de punta a punta', () => {
 
       const marca = await crearMarca(db, organizationId, { slug: 'parcelas', nombre: 'Compra Tu Parcela' })
       await cargarPerfilDeObjeto(db, organizationId, { slug: 'parcelas', perfil: PERFIL_VALIDO })
+      await guardarEncargo(db, organizationId, { slug: 'parcelas', periodo: '2026-Q3', encargo: ENCARGO })
 
       const estrategia = await generarEstrategia(db, cliente, organizationId, {
         slug: 'parcelas', periodo: '2026-Q3', env: ENV,

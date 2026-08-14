@@ -1,10 +1,11 @@
-import { corridaDe, estrategiaDelTrimestre } from '@gc/operaciones'
+import { corridaDe, estrategiaDelTrimestre, leerEncargo } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la grilla y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
 import type { TipoEstrategia } from '@gc/strategy'
 import { mesActual } from '../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../datos.js'
 import { BotonGenerar } from '../../../../componentes/BotonGenerar.js'
+import { EditorDeEncargo } from '../../../../componentes/EditorDeEncargo.js'
 import { EstadoDeCorrida } from '../../../../componentes/EstadoDeCorrida.js'
 
 // Árbol de rutas propio: el `force-dynamic` de `/` y el de `[marca]/grilla/[mes]`
@@ -54,21 +55,94 @@ export default async function PaginaDeEstrategia({
   // equivocado.
   const enVuelo = corridaViva(corrida)
 
+  const encargo = await leerEncargo(db, organizationId, {
+    slug: marca,
+    periodo: resultado.periodo,
+  })
+
+  // El encargo se congela con la estrategia: la condición es «el estado no es
+  // borrador», no «el estado es aprobada», porque una archivada tampoco se
+  // regenera y su encargo tampoco tiene por qué cambiar.
+  const encargoCongelado = resultado.tipo !== 'ausente' && resultado.estado !== 'borrador'
+
+  // Sin encargo no se ofrece generar. La barrera real está en
+  // `encolarEstrategia`, que falla con un `permanente`; esto solo evita
+  // ofrecer un botón que sabemos que va a fallar.
+  const hayEncargo = encargo.tipo === 'presente'
+
+  // Distinto de `hayEncargo`: acá cuenta también el encargo corrupto
+  // (`invalido`), porque lo que decide si el aviso de "quedó congelado" tiene
+  // sentido es si existe una fila guardada, no si esa fila es válida. Una
+  // estrategia aprobada antes de este bloque, sin ninguna fila de encargo, no
+  // tiene nada que congelar: afirmarlo sería falso.
+  const encargoExiste = encargo.tipo !== 'ausente'
+
   return (
     <div className="p-6">
       <h1 className="mb-1 text-xl font-semibold text-gray-900">Estrategia</h1>
 
       {corrida && <EstadoDeCorrida corrida={corrida} ruta={`/${marca}/estrategia`} />}
 
+      <section className="mb-6">
+        <h2 className="mb-1 text-sm font-semibold text-gray-700">El encargo del trimestre</h2>
+        {encargoCongelado && encargoExiste ? (
+          <p className="mb-2 text-xs text-gray-500">
+            La estrategia de este periodo ya salió de borrador, así que el encargo quedó
+            congelado con ella. Para editarlo, primero devuelve la estrategia a borrador.
+          </p>
+        ) : null}
+        {encargo.tipo === 'invalido' ? (
+          <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            El encargo guardado para este periodo no cumple su esquema. Abajo está lo que sí se
+            pudo leer.
+            {/* Con el encargo congelado el remedio ya lo da el párrafo de
+                arriba —devolver la estrategia a borrador—, y no reescribir el
+                encargo: las dos frases juntas se leían como una contradicción. */}
+            {encargoCongelado ? null : ' Vuelve a escribirlo.'}
+          </p>
+        ) : null}
+        {/* Plegado por defecto en cuanto hay un encargo escrito: acá se viene
+            sobre todo a leer y aprobar la estrategia, no a rellenar el
+            formulario de nuevo en cada visita. `open` sigue a `hayEncargo` y
+            no a `encargoExiste`: un encargo corrupto también necesita quedar
+            abierto, porque hay que mirarlo para corregirlo. */}
+        <details open={!hayEncargo}>
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">
+            {encargo.tipo === 'presente'
+              ? `Objetivo: ${encargo.encargo.objetivo}`
+              : encargo.tipo === 'invalido'
+                ? 'El encargo guardado no se pudo leer del todo. Revísalo abajo.'
+                : 'Falta escribir el encargo de este trimestre.'}
+          </summary>
+          <div className="mt-2">
+            <EditorDeEncargo
+              marca={marca}
+              periodo={resultado.periodo}
+              encargo={
+                encargo.tipo === 'ausente'
+                  ? null
+                  : encargo.tipo === 'invalido'
+                    ? encargo.datos
+                    : encargo.encargo
+              }
+              soloLectura={encargoCongelado}
+            />
+          </div>
+        </details>
+      </section>
+
       {resultado.tipo === 'ausente' ? (
         <div className="mt-4 rounded border border-dashed border-gray-300 p-8 text-center text-gray-600">
           <p className="mb-3">
             La marca no tiene estrategia cargada para el trimestre {resultado.periodo}.
+            {!hayEncargo &&
+              ' Escribe primero el encargo de arriba: la estrategia se genera a partir de él.'}
           </p>
           {/* El botón encola y devuelve; quien la genera es el worker. El
               avance aparece arriba, en `EstadoDeCorrida`. Mientras esa corrida
-              siga viva no se ofrece de nuevo. */}
-          {!enVuelo && (
+              siga viva no se ofrece de nuevo. Sin encargo tampoco: encolar
+              fallaría de inmediato en el motor. */}
+          {hayEncargo && !enVuelo && (
             <div className="flex justify-center">
               <BotonGenerar
                 marca={marca}
@@ -92,8 +166,21 @@ export default async function PaginaDeEstrategia({
             </p>
             {/* Con una corrida en vuelo no se ofrece el botón ni se explica
                 por qué no se puede regenerar: el motivo sería el equivocado.
-                Lo que hay que mirar está arriba, en `EstadoDeCorrida`. */}
-            {enVuelo ? null : regenerable ? (
+                Lo que hay que mirar está arriba, en `EstadoDeCorrida`. Las
+                otras dos ramas de abajo tienen que quedar separadas: antes
+                `!regenerable` y `!hayEncargo` compartían un mismo `else`, así
+                que una estrategia en borrador sin encargo mostraba «Está en
+                estado «Borrador» y el motor solo regenera una que esté en
+                borrador» — una frase que se desmiente sola, porque borrador
+                es justo el estado que sí se regenera. */}
+            {enVuelo ? null : !regenerable ? (
+              <p>
+                Está en estado «{ETIQUETAS_DE_ESTADO[resultado.estado] ?? resultado.estado}» y el
+                motor solo regenera una que esté en borrador.
+              </p>
+            ) : !hayEncargo ? (
+              <p>Para regenerar, escribe primero el encargo de arriba.</p>
+            ) : (
               <BotonGenerar
                 marca={marca}
                 periodo={resultado.periodo}
@@ -101,17 +188,21 @@ export default async function PaginaDeEstrategia({
                 etiqueta="Regenerar estrategia"
                 advertencia={`Regenerar la estrategia de ${resultado.periodo} reemplaza la que hay guardada.`}
               />
-            ) : (
-              <p>
-                Está en estado «{ETIQUETAS_DE_ESTADO[resultado.estado] ?? resultado.estado}» y el
-                motor solo regenera una que esté en borrador.
-              </p>
             )}
           </div>
         </>
       ) : (
         <>
-          {regenerable && !enVuelo && (
+          {/* Sin encargo el botón no se ofrece (misma barrera que en las otras
+              dos ramas), pero acá además hay una estrategia visible con nada
+              que apretar debajo: sin esta línea, quien mira no tiene forma de
+              saber por qué. */}
+          {regenerable && !hayEncargo && (
+            <p className="mb-4 text-right text-sm text-gray-600">
+              Para regenerar, escribe primero el encargo de arriba.
+            </p>
+          )}
+          {regenerable && hayEncargo && !enVuelo && (
             <div className="mb-4 flex justify-end">
               <BotonGenerar
                 marca={marca}

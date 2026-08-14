@@ -19,6 +19,7 @@
     "@gc/db": "workspace:*",
     "@gc/shared": "workspace:*",
     "@gc/strategy": "workspace:*",
-    "drizzle-orm": "^0.36.0"
+    "drizzle-orm": "^0.36.0",
+    "zod": "^3.23.8"
   }
 }

@@ -2,6 +2,7 @@ import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
 import { and, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
+import { leerEncargo } from './encargos.js'
 import { resolverMarca } from './marcas.js'
 import {
   describirAntiguedad, ESTADOS_VIVOS, MINUTOS_SIN_SENAL_PARA_ABANDONO,
@@ -162,6 +163,31 @@ export async function encolarEstrategia(
 ): Promise<string> {
   validarPeriodo(args.periodo)
   const ref = await resolverMarca(db, organizationId, args.slug)
+
+  // Se comprueba antes de encolar para que el aviso llegue en la pantalla, en
+  // vez de que el worker despierte, falle y lo deje anotado en una corrida.
+  // La guarda autoritativa vive en P1: esta es la que hace que el error se vea
+  // donde se puede arreglar.
+  const encargo = await leerEncargo(db, organizationId, args)
+  if (encargo.tipo === 'ausente') {
+    throw permanente(
+      `Para generar la estrategia de ${args.periodo} falta escribir el encargo del trimestre: ` +
+        'qué quieres lograr, cómo lo medirás, cuánto puedes publicar y en qué canales. ' +
+        `Escríbelo en la pantalla de estrategia de la marca, en \`/${args.slug}/estrategia\`.`,
+    )
+  }
+  // Los dos casos que no son `presente` se distinguen a propósito. Decirle
+  // «falta escribir el encargo» a quien lo escribió —y lo tiene lleno en la
+  // pantalla— lo manda a buscar un formulario en blanco que no va a
+  // encontrar. `motivo` no se interpola: es el volcado de Zod, en inglés.
+  if (encargo.tipo === 'invalido') {
+    throw permanente(
+      `El encargo de ${args.periodo} está escrito pero ya no cumple su esquema, así que no se ` +
+        `puede usar para generar. Ábrelo en \`/${args.slug}/estrategia\`, revisa que estén los ` +
+        'cuatro campos obligatorios y vuelve a guardarlo.',
+    )
+  }
+
   return encolar(
     db, organizationId, 'p1_estrategia', { brandId: ref.brandId, slug: args.slug }, args.periodo,
   )

@@ -1,11 +1,22 @@
 // @vitest-environment jsdom
-import type { CorridaEnCurso, GrillaDelMes, SlotDeLaGrilla } from '@gc/operaciones'
+import type {
+  CorridaEnCurso,
+  GrillaDelMes,
+  LecturaDeEncargo,
+  SlotDeLaGrilla,
+} from '@gc/operaciones'
 import type { LecturaDeEstrategia } from '@gc/strategy'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { corridaDe, estrategiaDelTrimestre, grillaDelMes, perfilConHistorial } from '@gc/operaciones'
+import {
+  corridaDe,
+  estrategiaDelTrimestre,
+  grillaDelMes,
+  leerEncargo,
+  perfilConHistorial,
+} from '@gc/operaciones'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
 import PaginaDePerfil from './app/(app)/[marca]/perfil/page.js'
@@ -27,6 +38,7 @@ vi.mock('@gc/operaciones', () => ({
   grillaDelMes: vi.fn(),
   estrategiaDelTrimestre: vi.fn(),
   perfilConHistorial: vi.fn(),
+  leerEncargo: vi.fn(),
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -67,14 +79,36 @@ vi.mock('next/link', () => ({
   ),
 }))
 
+// Un encargo presente por omisión: la mayoría de las pruebas de estrategia no
+// hablan del encargo, sino de la puerta de la corrida viva. Sin este valor
+// por omisión, `leerEncargo` sin sustituir devolvería `undefined` y la puerta
+// del encargo (que sí es real en la página) las pondría rojas a todas por un
+// motivo que no es el que están midiendo.
+const ENCARGO_ESCRITO: LecturaDeEncargo = {
+  tipo: 'presente',
+  encargo: {
+    objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+    comoSeMide: 'Formularios de contacto recibidos',
+    publicacionesPorSemana: 4,
+    canalesDisponibles: ['instagram', 'blog'],
+    queEstaPasando: '',
+    queFunciono: '',
+    queNoFunciono: '',
+    queEvitar: '',
+    algoMas: '',
+  },
+}
+
 afterEach(cleanup)
 beforeEach(() => {
   vi.mocked(corridaDe).mockReset()
   vi.mocked(grillaDelMes).mockReset()
   vi.mocked(estrategiaDelTrimestre).mockReset()
   vi.mocked(perfilConHistorial).mockReset()
+  vi.mocked(leerEncargo).mockReset()
   vi.mocked(marcasDeLaOrganizacion).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
+  vi.mocked(leerEncargo).mockResolvedValue(ENCARGO_ESCRITO)
 })
 
 function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
@@ -227,6 +261,174 @@ describe('el botón de generar mientras hay una corrida viva', () => {
     expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
     expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
     expect(screen.queryByText(/no valida contra su esquema/i)).not.toBeNull()
+  })
+})
+
+describe('la puerta del encargo en la estrategia', () => {
+  // Hallazgo Importante 1 de la revisión adversarial: la rama de estrategia
+  // inválida metía `hayEncargo` dentro del mismo ternario que `regenerable`,
+  // así que sin encargo pero con la estrategia en borrador caía al `else` de
+  // «no regenerable» e imprimía «Está en estado «Borrador» y el motor solo
+  // regenera una que esté en borrador» — una frase que se desmiente sola,
+  // porque borrador es justo el estado que sí se regenera, y que esconde la
+  // causa real (falta el encargo).
+  it('sobre una estrategia inválida en borrador sin encargo pide el encargo y no un motivo que se desmiente solo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      tipo: 'invalida', periodo: '2026-Q4', id: 'estrategia-1', estado: 'borrador',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
+    expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
+    expect(screen.queryByText(/para regenerar, escribe primero el encargo/i)).not.toBeNull()
+  })
+
+  it('sin encargo no ofrece generar, y dice que falta escribirlo', async () => {
+    // La barrera real vive en `encolarEstrategia`; esto evita ofrecer un botón
+    // que sabemos que va a fallar un segundo después.
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Generar estrategia' })).toBeNull()
+    expect(screen.queryByText(/escribe primero el encargo/i)).not.toBeNull()
+  })
+
+  it('con encargo escrito vuelve a ofrecer generar', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Generar estrategia' })).not.toBeNull()
+  })
+
+  it('con la estrategia fuera de borrador el encargo queda de solo lectura', async () => {
+    // `archivada` y no `aprobada` a propósito: la condición correcta es «el
+    // estado no es borrador», y con `aprobada` las dos redacciones coinciden.
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      ...ESTRATEGIA_EN_BORRADOR,
+      estado: 'archivada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Guardar el encargo' })).toBeNull()
+  })
+
+  // Hallazgo Menor 2 de la revisión de Task 8: sobre una estrategia válida y
+  // regenerable, sin encargo no aparecía ni el botón ni ningún texto — quien
+  // mira la pantalla veía su estrategia y nada que apretar, sin saber por qué.
+  it('sobre la estrategia válida sin encargo no ofrece regenerar, y dice que hace falta escribirlo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue(ESTRATEGIA_EN_BORRADOR)
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
+    expect(screen.queryByText(/para regenerar, escribe primero el encargo/i)).not.toBeNull()
+  })
+
+  // Hallazgo Menor 3: con la estrategia congelada (fuera de borrador) y el
+  // encargo corrupto a la vez, el aviso de encargo inválido decía «Vuelve a
+  // escribirlo» sobre un formulario que ya está en solo lectura — el remedio
+  // real, devolver la estrategia a borrador, lo da el otro párrafo, y las dos
+  // frases juntas se leían como una contradicción.
+  it('con la estrategia congelada y el encargo inválido no manda a reescribirlo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      tipo: 'invalida', periodo: '2026-Q4', id: 'estrategia-1', estado: 'archivada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({
+      tipo: 'invalido', motivo: 'Falta el objetivo.', datos: null,
+    })
+
+    await renderEstrategia()
+
+    expect(screen.queryByText(/no cumple su esquema/i)).not.toBeNull()
+    expect(screen.queryByText(/vuelve a escribirlo/i)).toBeNull()
+  })
+
+  // Hallazgo Menor 4: la condición del aviso de congelado era solo
+  // `encargoCongelado`, así que una estrategia aprobada de antes de este
+  // bloque —sin ninguna fila de encargo— mostraba «el encargo quedó congelado
+  // con ella» frente a un formulario vacío, que es falso: no hay nada que
+  // congelar si nunca hubo encargo.
+  it('sobre una estrategia aprobada sin ningún encargo no afirma un congelado que no existe', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      ...ESTRATEGIA_EN_BORRADOR,
+      estado: 'aprobada',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByText(/el encargo quedó congelado/i)).toBeNull()
+  })
+
+  // Hallazgo Importante 2: `page.tsx` pasaba `null` a `EditorDeEncargo`
+  // siempre que el encargo no fuera `presente`, así que un encargo corrupto
+  // —pero parcialmente legible— hacía salir el formulario en blanco: había
+  // que reescribir los nueve campos aunque ocho estuvieran bien. La variante
+  // `invalido` ahora lleva la fila cruda en `datos`, y `desdeElEncargo` (que
+  // nunca lanza) carga lo que se pueda campo por campo.
+  it('con un encargo inválido pero parcialmente legible, el formulario llega con lo que sí se pudo leer', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({
+      tipo: 'invalido',
+      motivo:
+        'El encargo tiene campos que corregir antes de guardarlo:\n' +
+        '- Cómo sabrás que resultó: falta',
+      // Solo `objetivo` es válido; el resto de los campos obligatorios falta,
+      // que es justo la clase de fila corrupta que `Encargo.safeParse`
+      // rechazaría.
+      datos: { objetivo: 'Vender las doce parcelas que quedan del loteo norte' },
+    })
+
+    await renderEstrategia()
+
+    const objetivo = screen.getByLabelText('Objetivo del trimestre') as HTMLTextAreaElement
+    expect(objetivo.value).toBe('Vender las doce parcelas que quedan del loteo norte')
+  })
+})
+
+describe('el bloque plegable del encargo', () => {
+  // El spec (§«La pantalla») pide que con encargo el bloque nazca plegado,
+  // mostrando el objetivo en una línea, y que sin encargo nazca abierto: acá
+  // se viene sobre todo a leer y aprobar la estrategia, y pasar nueve campos
+  // de formulario en cada visita es la fricción que el plegado evita.
+  it('nace plegado cuando ya hay un encargo escrito', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    // `ENCARGO_ESCRITO`, el valor por omisión de `beforeEach`, ya tiene un
+    // encargo `presente`.
+
+    await renderEstrategia()
+
+    const resumen = screen.getByText(
+      /Objetivo: Vender las doce parcelas que quedan del loteo norte/,
+    )
+    expect(resumen.closest('details')?.open).toBe(false)
+  })
+
+  it('nace abierto cuando todavía no hay encargo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    const resumen = screen.getByText(/Falta escribir el encargo de este trimestre/)
+    expect(resumen.closest('details')?.open).toBe(true)
   })
 })
 

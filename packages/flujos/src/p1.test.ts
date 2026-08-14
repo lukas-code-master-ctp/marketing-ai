@@ -21,6 +21,28 @@ const ESTRATEGIA_JSON = JSON.stringify({
   temasPrioritarios: ['Factibilidad de agua', 'Regularización de roles'],
 })
 
+const ENCARGO = {
+  objetivo: 'Vender las doce parcelas que quedan del loteo norte',
+  comoSeMide: 'Formularios de contacto recibidos',
+  publicacionesPorSemana: 4,
+  canalesDisponibles: ['instagram', 'blog'],
+  queEstaPasando: 'Empieza la temporada alta de visitas',
+  queFunciono: '',
+  queNoFunciono: 'Los carruseles largos no los vio nadie',
+  queEvitar: '',
+  algoMas: '',
+}
+
+async function sembrarEncargo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  ref: { organizationId: string; brandId: string },
+  period = '2026-Q4',
+) {
+  await db.insert(esquema.strategyBriefs).values({
+    organizationId: ref.organizationId, brandId: ref.brandId, period, data: ENCARGO,
+  })
+}
+
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
@@ -29,6 +51,7 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
     .returning()
   const ref = { organizationId: org!.id, brandId: marca!.id }
   await guardarPerfil(db, ref, PERFIL_VALIDO)
+  await sembrarEncargo(db, ref)
   return ref
 }
 
@@ -208,6 +231,48 @@ describe('flujo P1 · estrategia', () => {
 
       expect(cliente.peticiones).toHaveLength(0)
       expect(await db.select().from(esquema.aiCalls)).toHaveLength(0)
+    })
+  })
+
+  it('manda el encargo del trimestre al modelo, aparte del contexto de marca', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([ESTRATEGIA_JSON])
+      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+
+      await ejecutarFlujo(
+        db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA,
+      )
+
+      // Se afirma sobre el mensaje del usuario, no sobre toda la conversación:
+      // el instructivo del sistema también habla de canales y de capacidad, y
+      // afirmar contra todo pasaría aunque el encargo no viajara.
+      const mensajeUsuario = cliente.peticiones[0]!.mensajes.find((m) => m.rol === 'usuario')!.texto
+      expect(mensajeUsuario).toContain('## El encargo del trimestre')
+      expect(mensajeUsuario).toContain('Vender las doce parcelas que quedan del loteo norte')
+      expect(mensajeUsuario).toContain('Formularios de contacto recibidos')
+      expect(mensajeUsuario).toContain('4 publicaciones por semana')
+      expect(mensajeUsuario).toContain('instagram')
+      expect(mensajeUsuario).toContain('Los carruseles largos no los vio nadie')
+    })
+  })
+
+  it('se niega, sin llamar al modelo, si el trimestre no tiene encargo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([ESTRATEGIA_JSON])
+      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+
+      // `sembrar` escribió el encargo de 2026-Q4; este es otro trimestre.
+      // `ejecutarFlujo` no devuelve un resultado con `estado: 'fallido'` para
+      // un paso que lanza: relanza el error, como en el resto de las pruebas
+      // de este archivo que verifican rechazo (p. ej. la de periodo inválido).
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q1' }, ref, SIN_ESPERA),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      // Lo que importa no es que falle, sino que falle ANTES de pagar.
+      expect(cliente.peticiones).toHaveLength(0)
     })
   })
 
