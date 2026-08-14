@@ -144,8 +144,21 @@ export default async function PaginaDeEstrategia({
             </p>
             {/* Con una corrida en vuelo no se ofrece el botón ni se explica
                 por qué no se puede regenerar: el motivo sería el equivocado.
-                Lo que hay que mirar está arriba, en `EstadoDeCorrida`. */}
-            {enVuelo ? null : regenerable && hayEncargo ? (
+                Lo que hay que mirar está arriba, en `EstadoDeCorrida`. Las
+                otras dos ramas de abajo tienen que quedar separadas: antes
+                `!regenerable` y `!hayEncargo` compartían un mismo `else`, así
+                que una estrategia en borrador sin encargo mostraba «Está en
+                estado «Borrador» y el motor solo regenera una que esté en
+                borrador» — una frase que se desmiente sola, porque borrador
+                es justo el estado que sí se regenera. */}
+            {enVuelo ? null : !regenerable ? (
+              <p>
+                Está en estado «{ETIQUETAS_DE_ESTADO[resultado.estado] ?? resultado.estado}» y el
+                motor solo regenera una que esté en borrador.
+              </p>
+            ) : !hayEncargo ? (
+              <p>Para regenerar, escribe primero el encargo de arriba.</p>
+            ) : (
               <BotonGenerar
                 marca={marca}
                 periodo={resultado.periodo}
@@ -153,11 +166,6 @@ export default async function PaginaDeEstrategia({
                 etiqueta="Regenerar estrategia"
                 advertencia={`Regenerar la estrategia de ${resultado.periodo} reemplaza la que hay guardada.`}
               />
-            ) : (
-              <p>
-                Está en estado «{ETIQUETAS_DE_ESTADO[resultado.estado] ?? resultado.estado}» y el
-                motor solo regenera una que esté en borrador.
-              </p>
             )}
           </div>
         </>

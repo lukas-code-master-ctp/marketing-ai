@@ -265,6 +265,27 @@ describe('el botón de generar mientras hay una corrida viva', () => {
 })
 
 describe('la puerta del encargo en la estrategia', () => {
+  // Hallazgo Importante 1 de la revisión adversarial: la rama de estrategia
+  // inválida metía `hayEncargo` dentro del mismo ternario que `regenerable`,
+  // así que sin encargo pero con la estrategia en borrador caía al `else` de
+  // «no regenerable» e imprimía «Está en estado «Borrador» y el motor solo
+  // regenera una que esté en borrador» — una frase que se desmiente sola,
+  // porque borrador es justo el estado que sí se regenera, y que esconde la
+  // causa real (falta el encargo).
+  it('sobre una estrategia inválida en borrador sin encargo pide el encargo y no un motivo que se desmiente solo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({
+      tipo: 'invalida', periodo: '2026-Q4', id: 'estrategia-1', estado: 'borrador',
+    })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    expect(screen.queryByRole('button', { name: 'Regenerar estrategia' })).toBeNull()
+    expect(screen.queryByText(/solo regenera una que esté en borrador/i)).toBeNull()
+    expect(screen.queryByText(/para regenerar, escribe primero el encargo/i)).not.toBeNull()
+  })
+
   it('sin encargo no ofrece generar, y dice que falta escribirlo', async () => {
     // La barrera real vive en `encolarEstrategia`; esto evita ofrecer un botón
     // que sabemos que va a fallar un segundo después.
