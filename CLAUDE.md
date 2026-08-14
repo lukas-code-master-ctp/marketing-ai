@@ -2,7 +2,7 @@
 
 Sistema que automatiza la creación y publicación de contenido en redes para tres startups, cada una con su propio branding. Orquestado por IA vía OpenRouter.
 
-**Estado: motor completo, app web desplegada, y el worker fuera de cualquier máquina local.** Genera estrategia trimestral y grilla mensual; las revisas, editas el perfil de marca con un formulario guiado y las apruebas en el navegador. **Está desplegada** en `https://marketing-ai-web.vercel.app`, contra la base de Cloud SQL: las siete migraciones aplicadas, el inicio de sesión con Google funcionando de punta a punta, y la organización `principal` con la marca `parcelas` creada desde el CLI apuntado a la base remota. El worker (bloque 1C-B) dejó de ser un proceso que alguien tiene que tener corriendo a mano: vive como servicio de Cloud Run, lo despierta Cloud Tasks cuando la web encola algo, y Cloud Scheduler lo llama cada cinco minutos como red de seguridad. La lista de redes autorizadas de la instancia de Cloud SQL sigue **vacía**. Publicar en redes es Fase 3 y no existe todavía.
+**Estado: motor completo, app web desplegada, y el worker fuera de cualquier máquina local.** Genera estrategia trimestral y grilla mensual; las revisas, editas el perfil de marca con un formulario guiado y las apruebas en el navegador. **Está desplegada** en `https://marketing-ai-web.vercel.app`, contra la base de Cloud SQL: las ocho migraciones aplicadas, el inicio de sesión con Google funcionando de punta a punta, y la organización `principal` con las marcas `parcelas` y `tapcar`. El worker (bloque 1C-B) dejó de ser un proceso que alguien tiene que tener corriendo a mano: vive como servicio de Cloud Run, lo despierta Cloud Tasks cuando la web encola algo, y Cloud Scheduler lo llama cada cinco minutos como red de seguridad. La lista de redes autorizadas de la instancia de Cloud SQL sigue **vacía**. Publicar en redes es Fase 3 y no existe todavía.
 
 ## Documentos que mandan
 
@@ -386,13 +386,42 @@ migrar por `crearConexion()` —el mismo código que usa la app— sin binarios
 extra y sin tocar la lista de redes autorizadas. Un script de veinte líneas
 que importe `migrate` de `drizzle-orm/node-postgres/migrator` y
 `crearConexion` de `@gc/db`, con las cinco variables de Cloud SQL en el
-entorno, hace el trabajo. **Así se aplicaron las siete migraciones el
-2026-08-05**, y quedó comprobado: 12 tablas, 12 claves foráneas compuestas,
-9 restricciones `CHECK` y las tres columnas de autoría. Escribe el mismo
-registro que `drizzle-kit` —`drizzle.__drizzle_migrations`— así que los dos
-caminos son intercambiables.
+entorno, hace el trabajo. **Así se aplicaron las siete primeras migraciones el
+2026-08-05** —12 tablas, 12 claves foráneas compuestas, 9 restricciones
+`CHECK` y las tres columnas de autoría— **y la octava el 2026-08-14**, que
+dejó la instancia en 13 tablas, 13 foráneas compuestas y `strategy_briefs`
+con sus cinco restricciones. Escribe el mismo registro que `drizzle-kit`
+—`drizzle.__drizzle_migrations`— así que los dos caminos son intercambiables.
 
-Dos cosas que ese camino enseñó y conviene saber antes de repetirlo: hay que
+**La credencial que usa este camino no es la que renueva `gcloud auth login`,
+y esa confusión cuesta media hora.** El conector de Cloud SQL autentica con
+las **Application Default Credentials**, que viven en otro archivo y se
+renuevan con otro comando:
+
+```
+gcloud auth application-default login
+```
+
+Con las del CLI al día pero las ADC vencidas, el migrador falla con
+`invalid_grant` y un volcado de `gaxios` que no menciona ni ADC ni Cloud SQL —
+parece un problema de IAM o de permisos sobre la instancia, y no lo es. Para
+saber en cuál de las dos estás parado antes de diagnosticar nada:
+`gcloud auth application-default print-access-token`.
+
+**Y hace falta decirle a `destinoDeConexion` que hay identidad ambiente.** Esa
+función (`packages/db/src/destino.ts`) exige `GOOGLE_CREDENCIALES_JSON` salvo
+que `K_SERVICE` esté presente, porque esa es la señal de estar dentro de Cloud
+Run. Corriendo el migrador desde una máquina local, sin el JSON de la cuenta
+de servicio a mano, alcanza con exportar `K_SERVICE` con cualquier valor: el
+`GoogleAuth` que arma `crearConexion` cae entonces a las ADC. Es un rodeo
+—la variable se llama por Cloud Run y no estás en Cloud Run— pero es
+exactamente el mismo camino de código, y evita tener que sacar el JSON de
+Vercel para una operación de dos minutos. Las otras cuatro variables
+(`CLOUD_SQL_INSTANCIA`, `CLOUD_SQL_USUARIO`, `CLOUD_SQL_BASE` y
+`CLOUD_SQL_CLAVE`) sí van, y la clave se lee del secreto
+`cloud-sql-clave` de Secret Manager, no de ningún archivo.
+
+Dos cosas más que ese camino enseñó y conviene saber antes de repetirlo: hay que
 correrlo con `tsx` **desde dentro del workspace** (un script suelto en otra
 carpeta no resuelve `drizzle-orm` ni `@gc/db`), y el binario vive en
 `apps/worker/node_modules/.bin/tsx`, no en la raíz. Y el **primer intento
