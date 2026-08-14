@@ -101,12 +101,34 @@ export default async function PaginaDeEstrategia({
             {encargoCongelado ? null : ' Vuelve a escribirlo.'}
           </p>
         ) : null}
-        <EditorDeEncargo
-          marca={marca}
-          periodo={resultado.periodo}
-          encargo={encargo.tipo === 'presente' ? encargo.encargo : null}
-          soloLectura={encargoCongelado}
-        />
+        {/* Plegado por defecto en cuanto hay un encargo escrito: acá se viene
+            sobre todo a leer y aprobar la estrategia, no a rellenar el
+            formulario de nuevo en cada visita. `open` sigue a `hayEncargo` y
+            no a `encargoExiste`: un encargo corrupto también necesita quedar
+            abierto, porque hay que mirarlo para corregirlo. */}
+        <details open={!hayEncargo}>
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">
+            {encargo.tipo === 'presente'
+              ? `Objetivo: ${encargo.encargo.objetivo}`
+              : encargo.tipo === 'invalido'
+                ? 'El encargo guardado no se pudo leer del todo. Revísalo abajo.'
+                : 'Falta escribir el encargo de este trimestre.'}
+          </summary>
+          <div className="mt-2">
+            <EditorDeEncargo
+              marca={marca}
+              periodo={resultado.periodo}
+              encargo={
+                encargo.tipo === 'ausente'
+                  ? null
+                  : encargo.tipo === 'invalido'
+                    ? encargo.datos
+                    : encargo.encargo
+              }
+              soloLectura={encargoCongelado}
+            />
+          </div>
+        </details>
       </section>
 
       {resultado.tipo === 'ausente' ? (

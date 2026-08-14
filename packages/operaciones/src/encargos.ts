@@ -81,10 +81,18 @@ function mensajeDeEncargoInvalido(error: z.ZodError): string {
  * texto en español, pensado para pantalla, que nombra los campos por su
  * rótulo del formulario y no por su ruta en el esquema. A diferencia de un
  * volcado crudo de Zod, quien consuma este tipo puede imprimirlo tal cual.
+ *
+ * `datos` lleva la fila cruda, tal como salió de la base, sin validar. Existe
+ * para que quien la muestre pueda pasarla por `desdeElEncargo`
+ * (`apps/web/src/componentes/encargo/conversion.ts`), que carga lo que se
+ * pueda campo por campo y nunca lanza. Sin este campo, un encargo inválido
+ * llegaba a la pantalla como `null` y el formulario salía en blanco — que es
+ * justo lo que el comentario de arriba dice que este estado existe para
+ * evitar.
  */
 export type LecturaDeEncargo =
   | { tipo: 'ausente' }
-  | { tipo: 'invalido'; motivo: string }
+  | { tipo: 'invalido'; motivo: string; datos: unknown }
   | { tipo: 'presente'; encargo: TipoEncargo }
 
 export async function leerEncargo(
@@ -108,7 +116,9 @@ export async function leerEncargo(
   if (!fila) return { tipo: 'ausente' }
 
   const leido = Encargo.safeParse(fila.data)
-  if (!leido.success) return { tipo: 'invalido', motivo: mensajeDeEncargoInvalido(leido.error) }
+  if (!leido.success) {
+    return { tipo: 'invalido', motivo: mensajeDeEncargoInvalido(leido.error), datos: fila.data }
+  }
   return { tipo: 'presente', encargo: leido.data }
 }
 

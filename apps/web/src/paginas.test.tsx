@@ -346,7 +346,9 @@ describe('la puerta del encargo en la estrategia', () => {
       tipo: 'invalida', periodo: '2026-Q4', id: 'estrategia-1', estado: 'archivada',
     })
     vi.mocked(corridaDe).mockResolvedValue(null)
-    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'invalido', motivo: 'Falta el objetivo.' })
+    vi.mocked(leerEncargo).mockResolvedValue({
+      tipo: 'invalido', motivo: 'Falta el objetivo.', datos: null,
+    })
 
     await renderEstrategia()
 
@@ -370,6 +372,63 @@ describe('la puerta del encargo en la estrategia', () => {
     await renderEstrategia()
 
     expect(screen.queryByText(/el encargo quedó congelado/i)).toBeNull()
+  })
+
+  // Hallazgo Importante 2: `page.tsx` pasaba `null` a `EditorDeEncargo`
+  // siempre que el encargo no fuera `presente`, así que un encargo corrupto
+  // —pero parcialmente legible— hacía salir el formulario en blanco: había
+  // que reescribir los nueve campos aunque ocho estuvieran bien. La variante
+  // `invalido` ahora lleva la fila cruda en `datos`, y `desdeElEncargo` (que
+  // nunca lanza) carga lo que se pueda campo por campo.
+  it('con un encargo inválido pero parcialmente legible, el formulario llega con lo que sí se pudo leer', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({
+      tipo: 'invalido',
+      motivo:
+        'El encargo tiene campos que corregir antes de guardarlo:\n' +
+        '- Cómo sabrás que resultó: falta',
+      // Solo `objetivo` es válido; el resto de los campos obligatorios falta,
+      // que es justo la clase de fila corrupta que `Encargo.safeParse`
+      // rechazaría.
+      datos: { objetivo: 'Vender las doce parcelas que quedan del loteo norte' },
+    })
+
+    await renderEstrategia()
+
+    const objetivo = screen.getByLabelText('Objetivo del trimestre') as HTMLTextAreaElement
+    expect(objetivo.value).toBe('Vender las doce parcelas que quedan del loteo norte')
+  })
+})
+
+describe('el bloque plegable del encargo', () => {
+  // El spec (§«La pantalla») pide que con encargo el bloque nazca plegado,
+  // mostrando el objetivo en una línea, y que sin encargo nazca abierto: acá
+  // se viene sobre todo a leer y aprobar la estrategia, y pasar nueve campos
+  // de formulario en cada visita es la fricción que el plegado evita.
+  it('nace plegado cuando ya hay un encargo escrito', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    // `ENCARGO_ESCRITO`, el valor por omisión de `beforeEach`, ya tiene un
+    // encargo `presente`.
+
+    await renderEstrategia()
+
+    const resumen = screen.getByText(
+      /Objetivo: Vender las doce parcelas que quedan del loteo norte/,
+    )
+    expect(resumen.closest('details')?.open).toBe(false)
+  })
+
+  it('nace abierto cuando todavía no hay encargo', async () => {
+    vi.mocked(estrategiaDelTrimestre).mockResolvedValue({ tipo: 'ausente', periodo: '2026-Q4' })
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(leerEncargo).mockResolvedValue({ tipo: 'ausente' })
+
+    await renderEstrategia()
+
+    const resumen = screen.getByText(/Falta escribir el encargo de este trimestre/)
+    expect(resumen.closest('details')?.open).toBe(true)
   })
 })
 
