@@ -172,7 +172,8 @@ export async function encolarEstrategia(
   if (encargo.tipo === 'ausente') {
     throw permanente(
       `Para generar la estrategia de ${args.periodo} falta escribir el encargo del trimestre: ` +
-        'qué quieres lograr, cómo lo medirás, cuánto puedes publicar y en qué canales.',
+        'qué quieres lograr, cómo lo medirás, cuánto puedes publicar y en qué canales. ' +
+        `Escríbelo en la pantalla de estrategia de la marca, en \`/${args.slug}/estrategia\`.`,
     )
   }
   // Los dos casos que no son `presente` se distinguen a propósito. Decirle
@@ -182,8 +183,8 @@ export async function encolarEstrategia(
   if (encargo.tipo === 'invalido') {
     throw permanente(
       `El encargo de ${args.periodo} está escrito pero ya no cumple su esquema, así que no se ` +
-        'puede usar para generar. Ábrelo, revisa que estén los cuatro campos obligatorios y ' +
-        'vuelve a guardarlo.',
+        `puede usar para generar. Ábrelo en \`/${args.slug}/estrategia\`, revisa que estén los ` +
+        'cuatro campos obligatorios y vuelve a guardarlo.',
     )
   }
 

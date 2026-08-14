@@ -67,7 +67,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
         throw estrategiaNoRegenerable(entrada, estadoPrevio, ctx.brandSlug)
       }
 
-      const encargo = await encargoDelTrimestre(ctx.db, entrada.brandId, entrada.period)
+      const encargo = await encargoDelTrimestre(ctx.db, entrada.brandId, entrada.period, ctx.brandSlug)
 
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
@@ -160,7 +160,7 @@ async function estadoDeLaEstrategia(
 }
 
 async function encargoDelTrimestre(
-  db: BaseDeDatos, brandId: string, period: string,
+  db: BaseDeDatos, brandId: string, period: string, brandSlug?: string,
 ): Promise<TipoEncargo> {
   const [fila] = await db
     .select({ data: esquema.strategyBriefs.data })
@@ -174,15 +174,33 @@ async function encargoDelTrimestre(
   if (!fila) {
     throw permanente(
       `No hay encargo escrito para ${period}. La estrategia se genera a partir de lo que ` +
-        'quieres lograr el trimestre, así que sin eso no hay de dónde partir.',
+        'quieres lograr el trimestre, así que sin eso no hay de dónde partir. ' +
+        `Escríbelo en ${pantallaDelEncargo(brandSlug)}.`,
     )
   }
 
   const leido = Encargo.safeParse(fila.data)
   if (!leido.success) {
-    throw permanente(`El encargo de ${period} no cumple su esquema: ${leido.error.message}`)
+    throw permanente(
+      `El encargo de ${period} no cumple su esquema: ${leido.error.message} ` +
+        `Corrígelo en ${pantallaDelEncargo(brandSlug)}.`,
+    )
   }
   return leido.data
+}
+
+/**
+ * Nombra la pantalla donde se escribe el encargo, para quien corre
+ * `pnpm cli estrategia:generar` y no tiene el formulario a la vista. Con
+ * `brandSlug` —lo normal, porque el CLI y la web siempre lo conocen antes de
+ * encolar— da la ruta exacta; sin él (una corrida reanudada de una versión
+ * más vieja de la corrida, por ejemplo) queda una referencia genérica en vez
+ * de una ruta con `undefined` adentro.
+ */
+function pantallaDelEncargo(brandSlug?: string): string {
+  return brandSlug !== undefined
+    ? `la pantalla de estrategia de la marca (\`/${brandSlug}/estrategia\`)`
+    : 'la pantalla de estrategia de la marca, en la web'
 }
 
 /**
