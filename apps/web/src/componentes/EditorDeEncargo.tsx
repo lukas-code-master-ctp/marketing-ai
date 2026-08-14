@@ -72,9 +72,11 @@ export function EditorDeEncargo({
     // lugar aliasa el arreglo que `desdeElEncargo` acaba de aislar de
     // `FORMULARIO_VACIO`. Se lee `f` del actualizador funcional de
     // `setFormulario`, no `formulario` del cierre del componente — el mismo
-    // motivo por el que `actualizar` ya lo hace así: dos alternancias
-    // encoladas en la misma pasada de eventos no deberían pisarse por leer
-    // un `formulario` desactualizado.
+    // motivo por el que `actualizar` ya lo hace así. No es que exista un modo
+    // de falla real que esto atrape (dos clics son dos eventos, y React no
+    // comparte estado desactualizado entre uno y otro): es disciplina, para
+    // no depender de esa garantía y quedar corregido si alguna vez deja de
+    // valer.
     setFormulario((f) => ({
       ...f,
       canalesDisponibles: marcado
@@ -166,9 +168,12 @@ export function EditorDeEncargo({
 
           {/* `aria-invalid` va en el `fieldset`, que es el grupo, y no en cada
               casilla: el error es «falta marcar al menos un canal», una
-              condición del grupo entero, no de cada control por separado. Con
-              el atributo repetido en las cinco casillas un lector de
-              pantalla anunciaba cinco controles inválidos por un solo error. */}
+              condición del grupo entero, no de cada control por separado. No
+              es que esto garantice un anuncio de lector de pantalla —
+              `aria-invalid` no es una propiedad ARIA global y el rol `group`
+              no está entre los que la admiten, así que un lector puede
+              ignorarlo—; lo que sí anuncia el error es lo de abajo: cada
+              casilla con `aria-describedby` al párrafo con `role="alert"`. */}
           <fieldset aria-invalid={faltanCanales ? 'true' : undefined}>
             <legend className="text-sm font-medium text-gray-700">Canales disponibles este trimestre</legend>
             <p id={idCanalesAyuda} className="text-xs text-gray-500">
