@@ -1,7 +1,7 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { describe, expect, it } from 'vitest'
-import { crearMarca, resolverOrganizacion } from './marcas.js'
+import { crearMarca, resolverMarca, resolverOrganizacion } from './marcas.js'
 
 const SIN_ENV = {}
 
@@ -129,6 +129,32 @@ describe('marcas por organización', () => {
       expect(enAlfa.brandId).not.toBe(enBeta.brandId)
       expect(enAlfa.organizationId).toBe(alfa.id)
       expect(enBeta.organizationId).toBe(beta.id)
+    })
+  })
+
+  // `resolverMarca` es el único cuello de botella que garantiza que una
+  // organización no vea las marcas de otra: todo lo que lee o escribe una
+  // marca por su slug pasa por acá antes de tocar la base. Sin esta prueba,
+  // quitarle el filtro por `organizationId` a su `where` queda en verde: el
+  // resto de la suite ejercita `resolverMarca` con una sola organización a la
+  // vez, así que nunca hay dos marcas del mismo slug compitiendo por la fila.
+  it('no devuelve la marca de otra organización aunque el slug coincida', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const filas = await db
+        .insert(esquema.organizations)
+        .values([{ name: 'A', slug: 'alfa' }, { name: 'B', slug: 'beta' }])
+        .returning()
+      const alfa = filas.find((o) => o.slug === 'alfa')!
+      const beta = filas.find((o) => o.slug === 'beta')!
+
+      const enAlfa = await crearMarca(db, alfa.id, { slug: 'parcelas', nombre: 'En alfa' })
+      const enBeta = await crearMarca(db, beta.id, { slug: 'parcelas', nombre: 'En beta' })
+
+      const resuelta = await resolverMarca(db, beta.id, 'parcelas')
+
+      expect(resuelta.brandId).toBe(enBeta.brandId)
+      expect(resuelta.brandId).not.toBe(enAlfa.brandId)
+      expect(resuelta.organizationId).toBe(beta.id)
     })
   })
 
