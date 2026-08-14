@@ -160,6 +160,11 @@ describe('guardarEncargo y leerEncargo', () => {
 
       const r = await leerEncargo(db, ref.organizationId, { slug: 'parcelas', periodo: '2026-Q4' })
       expect(r.tipo).toBe('invalido')
+      // La fila cruda viaja en `datos`: es lo que deja que el formulario se
+      // siembre con lo que sí se pudo leer en vez de salir en blanco, que es
+      // la única razón por la que este estado existe. Sin esta aserción, la
+      // mitad productora del arreglo no la fija nada.
+      expect(r).toMatchObject({ datos: { objetivo: 'corto' } })
     })
   })
 

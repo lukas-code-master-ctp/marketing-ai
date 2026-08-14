@@ -93,8 +93,8 @@ export default async function PaginaDeEstrategia({
         ) : null}
         {encargo.tipo === 'invalido' ? (
           <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-            El encargo guardado para este periodo no cumple su esquema, así que no se puede
-            mostrar.
+            El encargo guardado para este periodo no cumple su esquema. Abajo está lo que sí se
+            pudo leer.
             {/* Con el encargo congelado el remedio ya lo da el párrafo de
                 arriba —devolver la estrategia a borrador—, y no reescribir el
                 encargo: las dos frases juntas se leían como una contradicción. */}

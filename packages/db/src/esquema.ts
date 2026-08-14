@@ -6,7 +6,7 @@ import {
 import { CANALES } from './canales.js'
 
 // Reexportados desde `./canales`, y no declarados acá: ese módulo existe para
-// que un componente de cliente los importe sin arrastrar el DDL de las doce
+// que un componente de cliente los importe sin arrastrar el DDL de las trece
 // tablas de este archivo al bundle del navegador (ver su cabecera). Esta
 // reexportación es lo que mantiene una sola fuente de verdad: todo lo que ya
 // importaba `CANALES`/`Canal` del barril o de `./esquema` sigue resolviendo.
