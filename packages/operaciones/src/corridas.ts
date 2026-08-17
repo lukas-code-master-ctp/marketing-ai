@@ -1,7 +1,7 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, ne, or, sql } from 'drizzle-orm'
 import { leerEncargo } from './encargos.js'
 import { resolverMarca } from './marcas.js'
 import {
@@ -15,8 +15,8 @@ import {
  */
 export type EstadoDeCorrida = (typeof ESTADOS_PIPELINE)[number]
 
-/** Los dos flujos que la web sabe encolar, con los nombres que `pipeline_runs.flow` guarda. */
-export type FlujoEncolable = 'p1_estrategia' | 'p2_grilla'
+/** Los tres flujos que la web sabe encolar, con los nombres que `pipeline_runs.flow` guarda. */
+export type FlujoEncolable = 'p1_estrategia' | 'p2_grilla' | 'p3_pieza'
 
 export interface CorridaEnCurso {
   id: string
@@ -80,6 +80,11 @@ const PERIODO_EN_LA_ENTRADA = {
     clave: 'mes',
     coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
     genera: 'la grilla',
+  },
+  p3_pieza: {
+    clave: 'mes',
+    coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
+    genera: 'las piezas',
   },
 } as const satisfies Record<FlujoEncolable, unknown>
 
@@ -203,6 +208,112 @@ export async function encolarGrilla(
   return encolar(
     db, organizationId, 'p2_grilla', { brandId: ref.brandId, slug: args.slug }, args.mes,
   )
+}
+
+/**
+ * Encola una corrida de `p3_pieza` por cada slot no descartado del mes que
+ * todavía no tiene texto ni corrida viva. Es la decisión de arquitectura del
+ * bloque: una pieza es una corrida independiente, no un paso dentro de una
+ * corrida de la grilla entera, así que un slot que falla no arrastra a los
+ * otros y regenerar una sola pieza es encolar una corrida más.
+ *
+ * **No usa el ayudante `encolar`.** Ese ayudante rechaza una segunda corrida
+ * viva de la misma marca, el mismo flujo y el mismo periodo — exactamente lo
+ * que hace falta permitir acá, porque veinte piezas del mismo mes son veinte
+ * corridas de `p3_pieza` del mismo mes. La guarda equivalente es más angosta,
+ * por slot: no encolar el slot que ya tiene una corrida viva, y no encolar el
+ * que ya tiene pieza.
+ *
+ * **Exige que la grilla del mes esté `aprobada`.** Generar piezas sobre un
+ * borrador invita a seguir editando la grilla después y a que esa edición
+ * —o una regeneración— tire veinte textos que ya se pagaron. La guarda es
+ * autoritativa acá, no solo un aviso en pantalla, porque no hay ningún P3
+ * que la repita más abajo.
+ */
+export async function encolarPiezas(
+  db: BaseDeDatos,
+  organizationId: string,
+  args: { slug: string; mes: string },
+): Promise<{ encoladas: number }> {
+  validarMes(args.mes)
+  const ref = await resolverMarca(db, organizationId, args.slug)
+
+  const [plan] = await db
+    .select({ id: esquema.contentPlans.id, status: esquema.contentPlans.status })
+    .from(esquema.contentPlans)
+    .where(
+      and(
+        eq(esquema.contentPlans.organizationId, organizationId),
+        eq(esquema.contentPlans.brandId, ref.brandId),
+        eq(esquema.contentPlans.month, `${args.mes}-01`),
+      ),
+    )
+
+  if (!plan || plan.status !== 'aprobada') {
+    throw permanente(
+      `La grilla de ${args.mes} para la marca ${args.slug} está en estado ` +
+        `"${plan?.status ?? 'sin generar'}" y las piezas solo se generan sobre una grilla ` +
+        'aprobada. Apruébala primero en su pantalla: generar sobre un borrador invita a ' +
+        'seguir editando la grilla después y a tirar textos que ya se pagaron.',
+    )
+  }
+
+  const slotsVigentes = await db
+    .select({ id: esquema.planSlots.id })
+    .from(esquema.planSlots)
+    .where(
+      and(
+        eq(esquema.planSlots.contentPlanId, plan.id),
+        eq(esquema.planSlots.organizationId, organizationId),
+        ne(esquema.planSlots.status, 'descartado'),
+      ),
+    )
+  const idsDeSlots = slotsVigentes.map((s) => s.id)
+  if (idsDeSlots.length === 0) return { encoladas: 0 }
+
+  const conPieza = await db
+    .select({ planSlotId: esquema.contentPieces.planSlotId })
+    .from(esquema.contentPieces)
+    .where(
+      and(
+        eq(esquema.contentPieces.organizationId, organizationId),
+        inArray(esquema.contentPieces.planSlotId, idsDeSlots),
+      ),
+    )
+  const idsConPieza = new Set(conPieza.map((p) => p.planSlotId))
+
+  // El `slotId` se lee del `input` con la misma extracción de jsonb que usa
+  // el resto del archivo: no hace falta cruzar por `mes` además, porque cada
+  // slot pertenece a un único plan y su id ya lo desambigua.
+  const corridasVivas = await db
+    .select({ slotId: sql<string>`${esquema.pipelineRuns.input}->>'slotId'` })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+        eq(esquema.pipelineRuns.brandId, ref.brandId),
+        eq(esquema.pipelineRuns.flow, 'p3_pieza'),
+        inArray(esquema.pipelineRuns.status, [...ESTADOS_VIVOS]),
+      ),
+    )
+  const idsConCorridaViva = new Set(corridasVivas.map((c) => c.slotId))
+
+  const candidatos = idsDeSlots.filter(
+    (id) => !idsConPieza.has(id) && !idsConCorridaViva.has(id),
+  )
+  if (candidatos.length === 0) return { encoladas: 0 }
+
+  await db.insert(esquema.pipelineRuns).values(
+    candidatos.map((slotId) => ({
+      organizationId,
+      brandId: ref.brandId,
+      flow: 'p3_pieza' as const,
+      status: 'pendiente' as const,
+      input: { slotId, mes: args.mes, brandId: ref.brandId },
+    })),
+  )
+
+  return { encoladas: candidatos.length }
 }
 
 /** Las columnas que devuelve el `RETURNING`, en `snake_case` como salen de la base. */

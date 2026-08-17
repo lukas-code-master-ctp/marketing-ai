@@ -3,7 +3,8 @@ import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
-  corridaDe, encolarEstrategia, encolarGrilla, reanudarCorridaEncolada, tomarCorridaPendiente,
+  corridaDe, encolarEstrategia, encolarGrilla, encolarPiezas, reanudarCorridaEncolada,
+  tomarCorridaPendiente,
 } from './corridas.js'
 import { guardarEncargo } from './encargos.js'
 import { crearMarca } from './marcas.js'
@@ -845,6 +846,163 @@ describe('reanudarCorridaEncolada', () => {
         .from(esquema.pipelineRuns)
         .where(eq(esquema.pipelineRuns.id, runId))
       expect(fila!.status).toBe('fallido')
+    })
+  })
+})
+
+const MES_DE_PIEZAS = '2026-09'
+
+/**
+ * Un plan del mes con tres slots: dos vigentes y uno descartado, en el mismo
+ * espíritu que el ayudante local de `piezas.test.ts` (Task 3) — que no se
+ * reutiliza acá porque no se exporta desde ese archivo. `sembrarConEstrategia`
+ * ya deja la organización, la marca y el perfil; esto agrega el plan y sus
+ * slots, con el estado que cada prueba necesita.
+ */
+async function sembrarPlanConSlots(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+  brandId: string,
+  status: 'borrador' | 'aprobada',
+) {
+  const [plan] = await db
+    .insert(esquema.contentPlans)
+    .values({ organizationId, brandId, month: `${MES_DE_PIEZAS}-01`, status })
+    .returning()
+
+  const slots = await db
+    .insert(esquema.planSlots)
+    .values([
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-01T10:00:00Z'), channel: 'linkedin', format: 'post',
+        pillar: 'educacion', angle: 'Ángulo uno', brief: 'Brief del primer slot',
+      },
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-05T10:00:00Z'), channel: 'blog', format: 'articulo',
+        pillar: 'educacion', angle: 'Ángulo dos', brief: 'Brief del segundo slot',
+      },
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-10T10:00:00Z'), channel: 'facebook', format: 'post',
+        pillar: 'educacion', angle: 'Ángulo tres', brief: 'Brief del tercer slot',
+        status: 'descartado',
+      },
+    ])
+    .returning()
+
+  return { planId: plan!.id, slots }
+}
+
+const PIEZA_DE_PRUEBA = {
+  canal: 'linkedin' as const,
+  gancho: 'El gancho de la pieza',
+  cuerpo: 'El cuerpo largo de la pieza, con más de veinte caracteres.',
+  hashtags: ['#parcelas', '#chile'],
+}
+
+describe('encolarPiezas', () => {
+  it('se niega si la grilla no está aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'borrador')
+
+      await expect(
+        encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: MES_DE_PIEZAS }),
+      ).rejects.toThrow(/aprobada|borrador/i)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
+    })
+  })
+
+  it('encola una corrida por slot no descartado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(2)
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(2)
+    })
+  })
+
+  it('no encola los slots que ya tienen pieza', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      await db.insert(esquema.contentPieces).values({
+        organizationId: ref.organizationId,
+        planSlotId: slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_DE_PRUEBA,
+        brandProfileVersion: 1,
+      })
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(1)
+    })
+  })
+
+  it('no encola un slot que ya tiene una corrida viva', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      const vigentes = slots.filter((s) => s.status !== 'descartado')
+      await db.insert(esquema.pipelineRuns).values(
+        vigentes.map((s) => ({
+          organizationId: ref.organizationId,
+          brandId: ref.brandId,
+          flow: 'p3_pieza' as const,
+          status: 'pendiente' as const,
+          input: { slotId: s.id, mes: MES_DE_PIEZAS, brandId: ref.brandId },
+        })),
+      )
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(0)
+    })
+  })
+
+  it('la entrada de cada corrida lleva slotId, mes y brandId', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      const idsVigentes = slots.filter((s) => s.status !== 'descartado').map((s) => s.id)
+
+      await encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: MES_DE_PIEZAS })
+
+      const filas = await db.select().from(esquema.pipelineRuns)
+      expect(filas).toHaveLength(2)
+      for (const fila of filas) {
+        const input = fila.input as { slotId: string; mes: string; brandId: string }
+        expect(Object.keys(input).sort()).toEqual(['brandId', 'mes', 'slotId'])
+        expect(idsVigentes).toContain(input.slotId)
+        expect(input.mes).toBe(MES_DE_PIEZAS)
+        expect(input.brandId).toBe(ref.brandId)
+      }
+    })
+  })
+
+  it('un mes mal formado se rechaza antes de tocar la base', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+
+      await expect(
+        encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: '2026-13' }),
+      ).rejects.toThrow()
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
     })
   })
 })
