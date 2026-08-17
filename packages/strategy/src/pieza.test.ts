@@ -31,11 +31,29 @@ describe('PiezaDeContenido', () => {
   })
 
   it('rechaza los campos de un canal en otro', () => {
-    // Es el punto entero del discriminado: sin él, una pieza de LinkedIn
-    // guardada en una fila de Instagram pasaría la validación y la pantalla
-    // renderizaría campos vacíos sin decir por qué.
+    // Estos dos casos rechazan porque a la forma del canal destino le faltan
+    // campos propios (a Instagram le faltan `caption` y `diapositivas`; a
+    // LinkedIn, `gancho`) — eso ya lo exigiría el esquema sin `.strict()`.
+    // Lo que `.strict()` aporta —rechazar campos sobrantes cuando los propios
+    // ya están completos— lo cubre la prueba siguiente.
     expect(PiezaDeContenido.safeParse({ ...LINKEDIN, canal: 'instagram' }).success).toBe(false)
     expect(PiezaDeContenido.safeParse({ ...BLOG, canal: 'linkedin' }).success).toBe(false)
+  })
+
+  it('rechaza los campos sobrantes de otro canal aunque los propios estén completos', () => {
+    // Es el punto entero del discriminado: sin `.strict()`, una pieza de
+    // LinkedIn guardada en una fila de Instagram pasaría la validación y la
+    // pantalla renderizaría campos vacíos sin decir por qué. Acá la forma de
+    // Instagram trae los tres campos que exige, así que el único motivo de
+    // rechazo posible es `gancho` y `cuerpo`, que sobran.
+    expect(PiezaDeContenido.safeParse({
+      canal: 'instagram',
+      caption: 'Un texto de largo suficiente.',
+      hashtags: ['tapcar'],
+      diapositivas: [],
+      gancho: LINKEDIN.gancho,
+      cuerpo: LINKEDIN.cuerpo,
+    }).success).toBe(false)
   })
 
   it('rechaza un canal que el sistema no publica', () => {
