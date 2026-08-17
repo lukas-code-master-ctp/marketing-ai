@@ -177,6 +177,49 @@ describe('EstadoDeCorrida', () => {
     expect(container.textContent).toBe('')
   })
 
+  it('el panel de generando dice cuánto lleva, con minutos y segundos', () => {
+    // 252 segundos son los 4,2 minutos que tardó la primera grilla real. El
+    // texto se afirma completo a propósito: `/4/` calzaría con cualquier cosa
+    // —incluido un periodo como 2026-Q4— y este repositorio ya pagó cuatro
+    // veces una aserción que parecía verificar el lugar correcto.
+    render(
+      <EstadoDeCorrida
+        corrida={corrida({ estado: 'en_curso', pasoActual: 'proponer_grilla', encoladaHace: 252 })}
+        ruta="/parcelas/grilla/2026-10"
+      />,
+    )
+    expect(screen.queryByText(/proponiendo la grilla… \(4 min 12 s\)/i)).not.toBeNull()
+  })
+
+  it('bajo el minuto dice solo segundos', () => {
+    render(
+      <EstadoDeCorrida
+        corrida={corrida({ estado: 'en_curso', pasoActual: 'generar_estrategia', encoladaHace: 9 })}
+        ruta="/parcelas/estrategia"
+      />,
+    )
+    expect(screen.queryByText(/generando la estrategia… \(9 s\)/i)).not.toBeNull()
+  })
+
+  it('en cola también dice cuánto lleva', () => {
+    render(<EstadoDeCorrida corrida={corrida({ encoladaHace: 12 })} ruta="/parcelas/estrategia" />)
+    expect(screen.queryByText(/en cola… \(12 s\)/i)).not.toBeNull()
+  })
+
+  it('el panel de interrumpida sigue redondeando a minutos, sin segundos', () => {
+    // Los dos formateadores conviven en el mismo componente. Si alguien
+    // reemplaza el de allá por el nuevo, este texto pasa a decir
+    // «15 min 1 s» y esta prueba lo dice.
+    render(
+      <EstadoDeCorrida
+        corrida={corrida({ estado: 'en_curso', pasoActual: 'proponer_grilla', segundosSinSenal: 901 })}
+        ruta="/parcelas/grilla/2026-10"
+      />,
+    )
+    expect(screen.queryByText(/15 minutos/)).not.toBeNull()
+    expect(screen.queryByText(/15 min 1 s/)).toBeNull()
+  })
+
   // Las dos mitades importan por igual, y la segunda es la que se descubre
   // semanas después: un intervalo que nadie limpia sigue pidiendo renders del
   // servidor para siempre, sobre una corrida que ya terminó.
