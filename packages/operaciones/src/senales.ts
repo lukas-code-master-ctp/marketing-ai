@@ -44,6 +44,30 @@ export function describirAntiguedad(segundos: number): string {
 }
 
 /**
+ * Duración en palabras, para un contador que se mira avanzar.
+ *
+ * Difiere de `describirAntiguedad` a propósito, y la diferencia es el motivo
+ * de que existan las dos: aquella redondea a minutos, porque habla de un
+ * pasado difuso —«no da señales desde hace 15 minutos»—, y ahí «15 min 3 s»
+ * sería precisión falsa. Esta muestra los segundos siempre, porque su único
+ * trabajo es demostrar que algo sigue vivo: con el refresco de dos segundos
+ * del panel, el número se mueve, y un número que se mueve es la diferencia
+ * entre «está trabajando» y «se colgó».
+ *
+ * Por eso los segundos tampoco se omiten cuando son cero: `1 min` a secas
+ * quedaría inmóvil sesenta segundos.
+ *
+ * El recorte de la entrada es el mismo que aplica su vecina —relojes
+ * desfasados entre la base y el proceso pueden dar un negativo— y conviene
+ * que las dos coincidan en eso.
+ */
+export function describirDuracion(segundos: number): string {
+  const s = Math.max(0, Math.floor(segundos))
+  if (s < 60) return `${s} s`
+  return `${Math.floor(s / 60)} min ${s % 60} s`
+}
+
+/**
  * Los estados en los que una corrida sigue viva: nadie sabe todavía que
  * terminó.
  *
