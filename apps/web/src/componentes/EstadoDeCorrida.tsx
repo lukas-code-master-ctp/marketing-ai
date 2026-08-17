@@ -6,6 +6,7 @@ import type { CorridaEnCurso } from '@gc/operaciones'
 // importa nada en tiempo de ejecución justamente para poder entrar aquí.
 import {
   describirAntiguedad,
+  describirDuracion,
   SEGUNDOS_SIN_SENAL_PARA_ABANDONO,
 } from '@gc/operaciones/senales'
 import { useRouter } from 'next/navigation'
@@ -146,11 +147,19 @@ export function EstadoDeCorrida({ corrida, ruta }: { corrida: CorridaEnCurso; ru
     )
   }
 
+  // La duración va detrás del paso y entre paréntesis, no como frase aparte:
+  // es tiempo **transcurrido**, y una frase suelta se leería como una promesa
+  // de cuánto falta —que este sistema no puede sostener—. Sale de
+  // `encoladaHace`, o sea desde que se encoló y no desde que empezó el paso:
+  // lo que le sirve a quien mira es cuánto lleva esperando desde que apretó
+  // el botón. Reanudar reinicia esa marca, así que el contador vuelve a cero.
+  const cuantoLleva = describirDuracion(corrida.encoladaHace)
+
   return (
     <div className="mb-4 rounded border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
       {corrida.estado === 'pendiente'
-        ? 'En cola…'
-        : `${corrida.pasoActual ? (PASOS_EN_PROSA[corrida.pasoActual] ?? corrida.pasoActual) : 'Generando'}…`}
+        ? `En cola… (${cuantoLleva})`
+        : `${corrida.pasoActual ? (PASOS_EN_PROSA[corrida.pasoActual] ?? corrida.pasoActual) : 'Generando'}… (${cuantoLleva})`}
     </div>
   )
 }
