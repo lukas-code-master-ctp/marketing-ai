@@ -12,9 +12,12 @@ const PIEZA_LINKEDIN = {
   hashtags: ['#parcelas', '#chile'],
 }
 
-async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+async function sembrar(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizacion: { slug: string; nombre: string } = { slug: 'x', nombre: 'X' },
+) {
   const [org] = await db.insert(esquema.organizations)
-    .values({ name: 'X', slug: 'x' }).returning()
+    .values({ name: organizacion.nombre, slug: organizacion.slug }).returning()
   const [marca] = await db.insert(esquema.brands)
     .values({ organizationId: org!.id, slug: 'parcelas', name: 'CTP' }).returning()
   const [plan] = await db.insert(esquema.contentPlans)
@@ -141,6 +144,48 @@ describe('resumenDePiezas', () => {
       expect(r.enVuelo).toBe(0)
     })
   })
+
+  it('otra organización con una marca del mismo slug ve solo su propio resumen', async () => {
+    // El mismo espíritu que la prueba de tenencia en encargos.test.ts:
+    // resolverMarca filtra por organizationId, no solo por slug. La versión
+    // que solo comprueba "B no ve nada" no basta acá: como brandId es un UUID
+    // globalmente único, si resolverMarca resolviera la marca de la
+    // organización A para una llamada de B, las cinco condiciones
+    // `eq(..., organizationId)` de piezas.ts —que ya usan el organizationId
+    // correcto, el que llega como argumento— igual filtrarían todo a cero, y
+    // la prueba pasaría en verde sin haber probado nada. Por eso B necesita
+    // sus propios datos: si resolverMarca le entrega el brandId equivocado,
+    // el resumen de B deja de ver también los suyos, y eso sí lo pone rojo.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const refA = await sembrar(db)
+      await db.insert(esquema.contentPieces).values({
+        organizationId: refA.organizationId,
+        planSlotId: refA.slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_LINKEDIN,
+        brandProfileVersion: 1,
+      })
+      await insertarCorrida(db, {
+        organizationId: refA.organizationId, brandId: refA.brandId,
+        slotId: refA.slots[1]!.id, mes: MES, status: 'fallido',
+      })
+
+      const refB = await sembrar(db, { slug: 'y', nombre: 'Y' })
+      await db.insert(esquema.contentPieces).values({
+        organizationId: refB.organizationId,
+        planSlotId: refB.slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_LINKEDIN,
+        brandProfileVersion: 1,
+      })
+
+      // B tiene los mismos dos slots vigentes que A (misma siembra), pero
+      // solo una pieza y ninguna corrida fallida: si B viera lo de A, alguno
+      // de estos cuatro números cambiaría.
+      const r = await resumenDePiezas(db, refB.organizationId, { slug: 'parcelas', mes: MES })
+      expect(r).toEqual({ total: 2, listas: 1, fallidas: 0, enVuelo: 0 })
+    })
+  })
 })
 
 describe('piezasDelMes', () => {
@@ -175,6 +220,40 @@ describe('piezasDelMes', () => {
 
       const mapa = await piezasDelMes(db, ref.organizationId, { slug: 'parcelas', mes: MES })
       expect(mapa.size).toBe(0)
+    })
+  })
+
+  it('otra organización con una marca del mismo slug ve solo su propia pieza', async () => {
+    // Mismo escenario que la prueba análoga de resumenDePiezas, y por el
+    // mismo motivo: piezasDelMes junta contentPieces con planSlots y
+    // contentPlans, y las tres condiciones `eq(..., organizationId)` de esa
+    // consulta ya usan el organizationId correcto (el argumento), así que una
+    // B sin datos propios pasaría en verde aunque resolverMarca resolviera
+    // mal la marca. Dándole a B su propia pieza, el mapa que le corresponde
+    // tiene que traer esa pieza y ninguna otra.
+    await conBaseDeDatosDePrueba(async (db) => {
+      const refA = await sembrar(db)
+      await db.insert(esquema.contentPieces).values({
+        organizationId: refA.organizationId,
+        planSlotId: refA.slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_LINKEDIN,
+        brandProfileVersion: 1,
+      })
+
+      const refB = await sembrar(db, { slug: 'y', nombre: 'Y' })
+      await db.insert(esquema.contentPieces).values({
+        organizationId: refB.organizationId,
+        planSlotId: refB.slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_LINKEDIN,
+        brandProfileVersion: 1,
+      })
+
+      const mapa = await piezasDelMes(db, refB.organizationId, { slug: 'parcelas', mes: MES })
+      expect(mapa.size).toBe(1)
+      expect(mapa.has(refB.slots[0]!.id)).toBe(true)
+      expect(mapa.has(refA.slots[0]!.id)).toBe(false)
     })
   })
 })
