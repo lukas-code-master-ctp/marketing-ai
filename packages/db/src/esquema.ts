@@ -6,7 +6,7 @@ import {
 import { CANALES } from './canales.js'
 
 // Reexportados desde `./canales`, y no declarados acá: ese módulo existe para
-// que un componente de cliente los importe sin arrastrar el DDL de las trece
+// que un componente de cliente los importe sin arrastrar el DDL de las catorce
 // tablas de este archivo al bundle del navegador (ver su cabecera). Esta
 // reexportación es lo que mantiene una sola fuente de verdad: todo lo que ya
 // importaba `CANALES`/`Canal` del barril o de `./esquema` sigue resolviendo.
@@ -431,6 +431,6 @@ export const aiCalls = pgTable('ai_calls', {
 
 export const esquema = {
   organizations, users, brands, brandProfiles, channelAccounts, approvalPolicies,
-  strategies, strategyBriefs, contentPlans, planSlots, pipelineRuns, pipelineSteps, aiCalls,
-  contentPieces,
+  strategies, strategyBriefs, contentPlans, planSlots, contentPieces,
+  pipelineRuns, pipelineSteps, aiCalls,
 }
