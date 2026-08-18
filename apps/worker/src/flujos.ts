@@ -1,4 +1,4 @@
-import { crearFlujoEstrategia, crearFlujoGrilla, type Dependencias } from '@gc/flujos'
+import { crearFlujoEstrategia, crearFlujoGrilla, crearFlujoPieza, type Dependencias } from '@gc/flujos'
 import type { DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
 
@@ -13,6 +13,7 @@ import { permanente } from '@gc/shared'
 export function flujoDe(nombre: string, deps: Dependencias): DefinicionDeFlujo {
   if (nombre === 'p1_estrategia') return crearFlujoEstrategia(deps)
   if (nombre === 'p2_grilla') return crearFlujoGrilla(deps)
+  if (nombre === 'p3_pieza') return crearFlujoPieza(deps)
 
   throw permanente(
     `El worker no sabe ejecutar el flujo "${nombre}". Es una fila corrupta o de una ` +
