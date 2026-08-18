@@ -256,7 +256,7 @@ anotada en `pendientes.md`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 14 tablas, 9 migraciones
+@gc/db          esquema Drizzle, 16 tablas, 10 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados
