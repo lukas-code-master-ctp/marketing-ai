@@ -107,17 +107,24 @@ function campos(pieza: TipoPieza) {
  */
 function textoPlano(pieza: TipoPieza): string {
   switch (pieza.canal) {
-    case 'linkedin':
-      return [pieza.gancho, '', pieza.cuerpo, '', formatoHashtags(pieza.hashtags)].join('\n')
-    case 'facebook':
-      return [pieza.cuerpo, '', formatoHashtags(pieza.hashtags)].join('\n')
+    case 'linkedin': {
+      const partes = [pieza.gancho, '', pieza.cuerpo]
+      agregarHashtags(partes, pieza.hashtags)
+      return partes.join('\n')
+    }
+    case 'facebook': {
+      const partes = [pieza.cuerpo]
+      agregarHashtags(partes, pieza.hashtags)
+      return partes.join('\n')
+    }
     case 'instagram': {
       // Sin las diapositivas, un carrusel copiaba caption y hashtags nada
       // más: para ese formato las diapositivas son el entregable principal,
       // y se veían en pantalla (`CampoLista`, arriba) sin viajar al
       // portapapeles (Importante 3 de la revisión de la rama). Numeradas
       // porque así se leen en pantalla y así se pegan en el orden que van.
-      const partes = [pieza.caption, '', formatoHashtags(pieza.hashtags)]
+      const partes = [pieza.caption]
+      agregarHashtags(partes, pieza.hashtags)
       if (pieza.diapositivas.length > 0) {
         partes.push('', ...pieza.diapositivas.map((texto, i) => `${i + 1}. ${texto}`))
       }
@@ -132,6 +139,20 @@ function textoPlano(pieza: TipoPieza): string {
       return _exhaustivo
     }
   }
+}
+
+/**
+ * Agrega la línea en blanco y los hashtags a `partes`, pero solo si hay
+ * alguno. El esquema permite el arreglo vacío —el instructivo dice «hasta
+ * treinta», no «al menos uno»— y sin esta guarda un carrusel u otra pieza
+ * sin hashtags copiaba líneas en blanco de más: `formatoHashtags([])` es
+ * `''`, así que el `join('\n')` de abajo las dejaba en el texto igual
+ * (Menor F de la revisión de la rama). Muta `partes` en vez de devolver un
+ * valor porque el llamador de Instagram sigue agregando las diapositivas
+ * después, con el mismo patrón que ya usa esa rama.
+ */
+function agregarHashtags(partes: string[], hashtags: string[]): void {
+  if (hashtags.length > 0) partes.push('', formatoHashtags(hashtags))
 }
 
 function formatoHashtags(hashtags: string[]): string {

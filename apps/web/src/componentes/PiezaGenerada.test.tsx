@@ -145,6 +145,38 @@ describe('PiezaGenerada', () => {
     )
   })
 
+  // Menor F de la revisión de la rama: `formatoHashtags([])` es `''`, y el
+  // `join('\n')` de `textoPlano` la dejaba en el texto igual que si hubiera
+  // hashtags de verdad — un carrusel sin hashtags copiaba tres líneas en
+  // blanco entre el caption y las diapositivas. El esquema permite el
+  // arreglo vacío (el instructivo dice «hasta treinta», no «al menos uno»),
+  // así que es un caso alcanzable, no uno inventado.
+  it('copiar un carrusel sin hashtags no deja líneas en blanco de más', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+    const piezaSinHashtags: TipoPieza = {
+      ...PIEZA_INSTAGRAM_CON_DIAPOSITIVAS,
+      hashtags: [],
+    }
+
+    render(<PiezaGenerada pieza={piezaSinHashtags} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toBe(
+      [
+        piezaSinHashtags.caption,
+        '',
+        '1. Señal uno: no hay factibilidad sanitaria.',
+        '2. Señal dos: no hay factibilidad eléctrica.',
+        '3. Señal tres: el plano no está regularizado.',
+      ].join('\n'),
+    )
+  })
+
   it('si el portapapeles falla lo dice y el texto sigue en pantalla', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: () => Promise.reject(new Error('denegado')) },
