@@ -1,9 +1,10 @@
 import { esquema, ESTADOS_PIPELINE, type BaseDeDatos } from '@gc/db'
 import { permanente } from '@gc/shared'
 import { validarMes, validarPeriodo } from '@gc/strategy'
-import { and, desc, eq, getTableColumns, inArray, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
 import { leerEncargo } from './encargos.js'
 import { resolverMarca } from './marcas.js'
+import { slotsVigentesDelMes } from './piezas.js'
 import {
   describirAntiguedad, ESTADOS_VIVOS, MINUTOS_SIN_SENAL_PARA_ABANDONO,
 } from './senales.js'
@@ -229,6 +230,26 @@ export async function encolarGrilla(
  * —o una regeneración— tire veinte textos que ya se pagaron. La guarda es
  * autoritativa acá, no solo un aviso en pantalla, porque no hay ningún P3
  * que la repita más abajo.
+ *
+ * Los slots vigentes del mes y cuáles ya tienen pieza salen de
+ * `slotsVigentesDelMes` (`piezas.ts`), y no de una consulta propia: es el
+ * mismo criterio que usa `resumenDePiezas` para contar, escrito una sola vez.
+ *
+ * **Queda una ventana de carrera, y es más ancha que la de `encolar`.** Hace
+ * cuatro `SELECT` secuenciales —el estado del plan, los slots vigentes, las
+ * piezas existentes, las corridas vivas— antes de su único `INSERT`, así que
+ * dos peticiones simultáneas pueden pasar las cuatro por delante de la otra
+ * antes de que cualquiera escriba. El remedio es el mismo que el de
+ * `encolar`: un índice único parcial, acá sobre
+ * `(brand_id, flow, input->>'slotId')` limitado a los estados vivos, o sea
+ * una migración; no se escribió a propósito y está registrado en
+ * `pendientes.md`. Lo que sí cierra es el caso real —dos clics
+ * separados por segundos, desde dos pestañas—, que es por donde ocurre. Lo
+ * que no cierra es peor que en `encolar`: ahí dos clics simultáneos duplican
+ * como mucho una corrida; acá el `INSERT` es uno solo con hasta veinte filas,
+ * y dos peticiones que lean el mismo conjunto de candidatos antes de que
+ * cualquiera escriba pueden duplicarlas todas — o sea pagar el modelo dos
+ * veces por el mes entero, no por una pieza.
  */
 export async function encolarPiezas(
   db: BaseDeDatos,
@@ -258,29 +279,10 @@ export async function encolarPiezas(
     )
   }
 
-  const slotsVigentes = await db
-    .select({ id: esquema.planSlots.id })
-    .from(esquema.planSlots)
-    .where(
-      and(
-        eq(esquema.planSlots.contentPlanId, plan.id),
-        eq(esquema.planSlots.organizationId, organizationId),
-        ne(esquema.planSlots.status, 'descartado'),
-      ),
-    )
-  const idsDeSlots = slotsVigentes.map((s) => s.id)
+  const { ids: idsDeSlots, conPieza: idsConPieza } = await slotsVigentesDelMes(
+    db, organizationId, { brandId: ref.brandId, mes: args.mes },
+  )
   if (idsDeSlots.length === 0) return { encoladas: 0 }
-
-  const conPieza = await db
-    .select({ planSlotId: esquema.contentPieces.planSlotId })
-    .from(esquema.contentPieces)
-    .where(
-      and(
-        eq(esquema.contentPieces.organizationId, organizationId),
-        inArray(esquema.contentPieces.planSlotId, idsDeSlots),
-      ),
-    )
-  const idsConPieza = new Set(conPieza.map((p) => p.planSlotId))
 
   // El `slotId` se lee del `input` con la misma extracción de jsonb que usa
   // el resto del archivo: no hace falta cruzar por `mes` además, porque cada

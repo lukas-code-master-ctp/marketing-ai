@@ -23,12 +23,63 @@ export interface ResumenDePiezas {
 }
 
 /**
+ * Los slots no descartados del plan del mes, y cuáles de esos ya tienen
+ * pieza — el criterio que `resumenDePiezas` y `encolarPiezas` necesitan por
+ * igual, escrito una sola vez para que no queden dos definiciones del mismo
+ * filtro sincronizadas a mano. `resumenDePiezas` lo usa para contar;
+ * `encolarPiezas`, para decidir a quién encolar.
+ *
+ * Dos consultas, en el mismo espíritu que `grillaDelMes`: los slots no
+ * descartados (un solo `SELECT` con el `JOIN` a `content_plans`, para no
+ * traer primero el plan y después sus slots) y las piezas que cuelgan de
+ * esos slots. Las dos filtran por `organizationId` además de por la marca
+ * resuelta, siguiendo el patrón de `encargos.ts`.
+ *
+ * `conPieza` es un `Set`, no un conteo: `content_pieces.plan_slot_id` es
+ * `unique`, así que su tamaño ya es el número de slots con pieza, y a
+ * `encolarPiezas` le hace falta el conjunto en sí para filtrar candidatos.
+ */
+export async function slotsVigentesDelMes(
+  db: BaseDeDatos,
+  organizationId: string,
+  args: { brandId: string; mes: string },
+): Promise<{ ids: string[]; conPieza: Set<string> }> {
+  const slotsVigentes = await db
+    .select({ id: esquema.planSlots.id })
+    .from(esquema.planSlots)
+    .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
+    .where(
+      and(
+        eq(esquema.contentPlans.brandId, args.brandId),
+        eq(esquema.contentPlans.organizationId, organizationId),
+        eq(esquema.contentPlans.month, `${args.mes}-01`),
+        eq(esquema.planSlots.organizationId, organizationId),
+        ne(esquema.planSlots.status, 'descartado'),
+      ),
+    )
+
+  const ids = slotsVigentes.map((s) => s.id)
+
+  const piezas = ids.length === 0
+    ? []
+    : await db
+        .select({ planSlotId: esquema.contentPieces.planSlotId })
+        .from(esquema.contentPieces)
+        .where(
+          and(
+            eq(esquema.contentPieces.organizationId, organizationId),
+            inArray(esquema.contentPieces.planSlotId, ids),
+          ),
+        )
+
+  return { ids, conPieza: new Set(piezas.map((p) => p.planSlotId)) }
+}
+
+/**
  * Tres consultas, en el mismo espíritu que `grillaDelMes`: los slots no
- * descartados del plan del mes (un solo `SELECT` con el `JOIN` a
- * `content_plans`, para no traer primero el plan y después sus slots), las
- * piezas que cuelgan de esos slots, y las corridas de `p3_pieza` de ese mes
- * agrupadas por estado. Las tres filtran por `organizationId` además de por
- * la marca resuelta, siguiendo el patrón de `encargos.ts`.
+ * descartados del plan del mes y las piezas que cuelgan de ellos —las dos
+ * de `slotsVigentesDelMes`—, y las corridas de `p3_pieza` de ese mes
+ * agrupadas por estado.
  */
 export async function resumenDePiezas(
   db: BaseDeDatos,
@@ -38,33 +89,9 @@ export async function resumenDePiezas(
   validarMes(args.mes)
   const ref = await resolverMarca(db, organizationId, args.slug)
 
-  const slotsVigentes = await db
-    .select({ id: esquema.planSlots.id })
-    .from(esquema.planSlots)
-    .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
-    .where(
-      and(
-        eq(esquema.contentPlans.brandId, ref.brandId),
-        eq(esquema.contentPlans.organizationId, organizationId),
-        eq(esquema.contentPlans.month, `${args.mes}-01`),
-        eq(esquema.planSlots.organizationId, organizationId),
-        ne(esquema.planSlots.status, 'descartado'),
-      ),
-    )
-
-  const idsDeSlots = slotsVigentes.map((s) => s.id)
-
-  const piezas = idsDeSlots.length === 0
-    ? []
-    : await db
-        .select({ id: esquema.contentPieces.id })
-        .from(esquema.contentPieces)
-        .where(
-          and(
-            eq(esquema.contentPieces.organizationId, organizationId),
-            inArray(esquema.contentPieces.planSlotId, idsDeSlots),
-          ),
-        )
+  const { ids: idsDeSlots, conPieza } = await slotsVigentesDelMes(
+    db, organizationId, { brandId: ref.brandId, mes: args.mes },
+  )
 
   const corridasPorEstado = await db
     .select({
@@ -90,7 +117,7 @@ export async function resumenDePiezas(
     else if (vivos.has(fila.status)) enVuelo += fila.cantidad
   }
 
-  return { total: slotsVigentes.length, listas: piezas.length, fallidas, enVuelo }
+  return { total: idsDeSlots.length, listas: conPieza.size, fallidas, enVuelo }
 }
 
 /**
