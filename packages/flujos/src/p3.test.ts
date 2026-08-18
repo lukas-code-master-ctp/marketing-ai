@@ -1,6 +1,6 @@
-import { ClienteFalso } from '@gc/ai'
+import { ClienteDeMuestra, ClienteFalso } from '@gc/ai'
 import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
-import { CANALES, esquema } from '@gc/db'
+import { CANALES, esquema, type Canal } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
 import { sql } from 'drizzle-orm'
@@ -8,7 +8,9 @@ import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { crearFlujoPieza } from './p3.js'
+import { crearFlujoPieza, type SalidaP3 } from './p3.js'
+
+const MUESTRAS = fileURLToPath(new URL('../../strategy/muestras', import.meta.url))
 
 const ENV = { MODELO_REDACCION: 'proveedor/redactor' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
@@ -116,7 +118,7 @@ async function sembrarSlot(
   db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
   ref: { organizationId: string; brandId: string },
   overrides: {
-    channel?: 'linkedin' | 'blog'
+    channel?: Canal
     planId?: string
     status?: 'planificado' | 'descartado'
   } = {},
@@ -426,5 +428,37 @@ describe('flujo P3 · pieza', () => {
       const contenido = await readFile(ruta, 'utf8')
       expect(contenido).toContain(TITULO)
     }
+  })
+
+  describe('marcha en seco', () => {
+    // No arma el JSON a mano como el resto del archivo: lee las mismas cinco
+    // muestras que `IA_EN_SECO=true` sirve de verdad en el CLI y en el worker
+    // (`packages/strategy/muestras/generar_pieza_<canal>.json`, una por
+    // canal porque `nombreEsquema` sale del nombre de la tarea y ese nombre
+    // ya lleva el canal — ver el comentario de `pasoGenerar` en `p3.ts`). Con
+    // esto, esta prueba es la que confirma que las cinco existen y que cada
+    // una valida contra el esquema `.strict()` de su propio canal —
+    // `ejecutarTarea` la rechazaría si no calzara, y la corrida no llegaría a
+    // `completado`—, no solo que el archivo existe en el disco.
+    it.each(CANALES)('la muestra de %s corre el flujo completo sin gastar tokens', async (canal) => {
+      await conBaseDeDatosDePrueba(async (db) => {
+        const ref = await sembrar(db)
+        const { slotId } = await sembrarSlot(db, ref, { channel: canal })
+        const cliente = new ClienteDeMuestra(MUESTRAS)
+        const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+        const r = await ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
+        )
+
+        expect(r.estado).toBe('completado')
+        const salida = r.salida as SalidaP3
+        expect(salida.channel).toBe(canal)
+        expect(salida.pieza.canal).toBe(canal)
+
+        const [llamada] = await db.select().from(esquema.aiCalls)
+        expect(Number(llamada!.costUsd)).toBe(0)
+      })
+    })
   })
 })
