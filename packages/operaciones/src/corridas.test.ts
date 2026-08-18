@@ -947,29 +947,57 @@ describe('encolarPiezas', () => {
       })
 
       expect(resultado.encoladas).toBe(1)
+      // No basta con el conteo: la fila real tiene que ser la del slot sin
+      // pieza (slots[1]) y no la del que ya la tiene (slots[0]).
+      const filas = await db.select().from(esquema.pipelineRuns)
+      expect(filas).toHaveLength(1)
+      expect((filas[0]!.input as { slotId: string }).slotId).toBe(slots[1]!.id)
     })
   })
 
-  it('no encola un slot que ya tiene una corrida viva', async () => {
+  // La guarda es **por slot**, no por lote: un slot con corrida viva no
+  // bloquea a los demás. Sembrar los dos slots vigentes ocupados —como hacía
+  // la versión anterior de esta prueba— deja `encoladas === 0` indistinguible
+  // de una guarda más amplia y equivocada («si hay cualquier corrida viva de
+  // esta marca y este mes, no encoles nada»), que es exactamente el
+  // comportamiento de `encolar` que `encolarPiezas` existe para no repetir.
+  // Por eso acá se ocupa un solo slot y se afirma que el otro sí se encola.
+  it('no encola el slot que ya tiene una corrida viva, y sí encola el otro', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
       const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
-      const vigentes = slots.filter((s) => s.status !== 'descartado')
-      await db.insert(esquema.pipelineRuns).values(
-        vigentes.map((s) => ({
-          organizationId: ref.organizationId,
-          brandId: ref.brandId,
-          flow: 'p3_pieza' as const,
-          status: 'pendiente' as const,
-          input: { slotId: s.id, mes: MES_DE_PIEZAS, brandId: ref.brandId },
-        })),
-      )
+      const [ocupado, libre] = slots.filter((s) => s.status !== 'descartado')
+      await db.insert(esquema.pipelineRuns).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        flow: 'p3_pieza' as const,
+        status: 'pendiente' as const,
+        input: { slotId: ocupado!.id, mes: MES_DE_PIEZAS, brandId: ref.brandId },
+      })
 
       const resultado = await encolarPiezas(db, ref.organizationId, {
         slug: 'parcelas', mes: MES_DE_PIEZAS,
       })
 
-      expect(resultado.encoladas).toBe(0)
+      expect(resultado.encoladas).toBe(1)
+
+      // Dos filas en total: la sembrada (el slot ocupado) y la que acaba de
+      // insertar `encolarPiezas` (el slot libre). Comprobar las filas reales
+      // —no solo el conteo devuelto— es lo que distingue "se encoló el slot
+      // correcto" de "se encoló cualquier cosa una vez".
+      const todas = await db.select().from(esquema.pipelineRuns)
+      expect(todas).toHaveLength(2)
+      const filaDelOcupado = todas.find(
+        (f) => (f.input as { slotId: string }).slotId === ocupado!.id,
+      )
+      const filaDelLibre = todas.find(
+        (f) => (f.input as { slotId: string }).slotId === libre!.id,
+      )
+      expect(filaDelOcupado).toBeTruthy()
+      expect(filaDelLibre).toBeTruthy()
+      // La fila del slot libre es la que insertó `encolarPiezas`: nace en
+      // `pendiente`. La del ocupado es la sembrada por la prueba y no la tocó.
+      expect(filaDelLibre!.status).toBe('pendiente')
     })
   })
 
