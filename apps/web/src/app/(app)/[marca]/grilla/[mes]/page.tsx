@@ -1,8 +1,13 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { corridaDe, grillaDelMes, resumenDePiezas } from '@gc/operaciones'
+import { corridaDe, grillaDelMes, piezasDelMes, resumenDePiezas } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la estrategia y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
+// `@gc/operaciones` no reexporta `TipoPieza`: `piezasDelMes` lo usa en su
+// firma pero no lo vuelve a exportar. Este es un componente de servidor, así
+// que —a diferencia de `RejillaDelMes.tsx` y `PanelDeDetalle.tsx`— importar
+// de `@gc/strategy` acá no arrastra nada al bundle del navegador.
+import type { TipoPieza } from '@gc/strategy'
 import { generarPiezasAccion } from '../../../../../acciones.js'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../../datos.js'
@@ -67,6 +72,15 @@ export default async function PaginaDeGrilla({
   // porque el cálculo es barato y el estado ya decide por su cuenta si se
   // muestra algo con él.
   const resumenPiezas = await resumenDePiezas(db, organizationId, { slug: marca, mes })
+
+  // El mapa de `planSlotId` a pieza, para que `RejillaDelMes` se lo pase a
+  // `PanelDeDetalle` del slot que esté abierto (Task 7). Solo tiene sentido
+  // pedirlo cuando hay grilla que mostrar —sin ella no se monta
+  // `RejillaDelMes` más abajo—, así que se condiciona igual que la sección de
+  // la rejilla en vez de repetir el gasto de `resumenPiezas` de arriba.
+  const piezas = grilla.estado !== null
+    ? await piezasDelMes(db, organizationId, { slug: marca, mes })
+    : new Map<string, TipoPieza>()
 
   // El botón se apaga en cuanto no queda nada por encolar: cada slot vigente
   // ya tiene pieza o ya tiene una corrida viva detrás. Encolar de nuevo ahí
@@ -248,6 +262,7 @@ export default async function PaginaDeGrilla({
           estado={grilla.estado}
           semanas={semanas}
           slots={grilla.slots}
+          piezas={piezas}
         />
       )}
     </div>

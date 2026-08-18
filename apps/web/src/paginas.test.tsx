@@ -17,6 +17,7 @@ import {
   grillaDelMes,
   leerEncargo,
   perfilConHistorial,
+  piezasDelMes,
   resumenDePiezas,
 } from '@gc/operaciones'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
@@ -42,6 +43,7 @@ vi.mock('@gc/operaciones', () => ({
   perfilConHistorial: vi.fn(),
   leerEncargo: vi.fn(),
   resumenDePiezas: vi.fn(),
+  piezasDelMes: vi.fn(),
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -112,12 +114,16 @@ beforeEach(() => {
   vi.mocked(leerEncargo).mockReset()
   vi.mocked(marcasDeLaOrganizacion).mockReset()
   vi.mocked(resumenDePiezas).mockReset()
+  vi.mocked(piezasDelMes).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
   vi.mocked(leerEncargo).mockResolvedValue(ENCARGO_ESCRITO)
   // Por omisión, ningún slot y ninguna pieza: así las pruebas que no hablan de
   // piezas —casi todas las de este archivo— no ven aparecer ni el botón ni
   // ningún texto de avance por un resumen que no fijaron.
   vi.mocked(resumenDePiezas).mockResolvedValue({ total: 0, listas: 0, fallidas: 0, enVuelo: 0 })
+  // Por la misma razón: un mapa vacío por omisión, para que ninguna pieza
+  // aparezca en el panel de detalle de las pruebas que no la fijan.
+  vi.mocked(piezasDelMes).mockResolvedValue(new Map())
 })
 
 function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
