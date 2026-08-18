@@ -917,7 +917,7 @@ describe('content_pieces', () => {
           organizationId: otra!.id, planSlotId: slotId, channel: 'linkedin',
           data: {}, brandProfileVersion: 1,
         }),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/content_pieces_slot_org_fk/)
     })
   })
 
@@ -929,7 +929,7 @@ describe('content_pieces', () => {
           insert into content_pieces (organization_id, plan_slot_id, channel, data, brand_profile_version)
           values (${organizationId}, ${slotId}, 'podcast', '{}'::jsonb, 1)
         `),
-      ).rejects.toThrow()
+      ).rejects.toThrow(/content_pieces_channel_check/)
     })
   })
 
@@ -941,7 +941,9 @@ describe('content_pieces', () => {
         data: {}, brandProfileVersion: 1,
       }
       await db.insert(esquema.contentPieces).values(fila)
-      await expect(db.insert(esquema.contentPieces).values(fila)).rejects.toThrow()
+      await expect(
+        db.insert(esquema.contentPieces).values(fila),
+      ).rejects.toThrow(/content_pieces_plan_slot_id_unique/)
     })
   })
 })
