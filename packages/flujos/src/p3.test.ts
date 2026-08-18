@@ -1,10 +1,12 @@
 import { ClienteFalso } from '@gc/ai'
 import { PERFIL_VALIDO, guardarPerfil } from '@gc/brand'
-import { esquema } from '@gc/db'
+import { CANALES, esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
 import { ejecutarFlujo } from '@gc/pipeline'
 import { sql } from 'drizzle-orm'
+import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoPieza } from './p3.js'
 
@@ -41,6 +43,19 @@ const PIEZA_LINKEDIN_JSON = JSON.stringify({
   hashtags: ['#factibilidad', '#parcelas', '#trazabilidad'],
 })
 
+// Deliberadamente distinta de `PIEZA_LINKEDIN_JSON` en los tres campos —no
+// solo el texto, también el arreglo de hashtags—: la prueba de regeneración
+// necesita una segunda corrida cuyo resultado sea inconfundible del primero,
+// para poder afirmar que la fila se reemplazó y no solo que sigue habiendo
+// una sola.
+const PIEZA_LINKEDIN_JSON_V2 = JSON.stringify({
+  gancho: 'El certificado de factibilidad no es un trámite: es la prueba.',
+  cuerpo:
+    'Regenerado: sin el certificado de factibilidad de la DGA no hay forma de comprobar que ' +
+    'la parcela tiene agua. Exígelo antes de firmar cualquier promesa de compraventa.',
+  hashtags: ['#dga', '#agua'],
+})
+
 const PIEZA_BLOG_JSON = JSON.stringify({
   titulo: 'El documento que debes exigir antes de comprar una parcela',
   bajada: 'Sin el certificado de factibilidad de la DGA, ninguna promesa de compraventa es segura.',
@@ -68,10 +83,43 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
   return ref
 }
 
+/**
+ * Una segunda marca de la misma organización, con su propio perfil y su
+ * propia estrategia vigente — igual que la organización `principal` real,
+ * que tiene `parcelas` y `tapcar`. Con perfil y estrategia propios, y no
+ * ausentes: si le faltaran, un `input` con el `brandId` de esta marca fallaría
+ * igual con el `brandId` sin revalidar en `cargarSlot` —porque no habría
+ * perfil vigente que cargar— y la prueba que usa esto pasaría por la razón
+ * equivocada, sin ejercitar la revalidación que dice cubrir.
+ */
+async function sembrarOtraMarca(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [marca] = await db
+    .insert(esquema.brands)
+    .values({ organizationId, slug: 'tapcar', name: 'TapCar' })
+    .returning()
+  const ref = { organizationId, brandId: marca!.id }
+  await guardarPerfil(db, ref, PERFIL_VALIDO)
+  await db.insert(esquema.strategies).values({
+    organizationId,
+    brandId: ref.brandId,
+    period: '2026-Q3',
+    data: ESTRATEGIA,
+    brandProfileVersion: 1,
+  })
+  return ref
+}
+
 async function sembrarSlot(
   db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
   ref: { organizationId: string; brandId: string },
-  overrides: { channel?: 'linkedin' | 'blog'; planId?: string } = {},
+  overrides: {
+    channel?: 'linkedin' | 'blog'
+    planId?: string
+    status?: 'planificado' | 'descartado'
+  } = {},
 ) {
   // `(brand_id, month)` es único en content_plans: si ya se conoce el plan
   // del mes (dos slots del mismo mes, como en la prueba del instructivo por
@@ -101,6 +149,7 @@ async function sembrarSlot(
       pillar: 'educacion',
       angle: ANGULO,
       brief: BRIEF,
+      status: overrides.status ?? 'planificado',
     })
     .returning()
 
@@ -166,7 +215,20 @@ describe('flujo P3 · pieza', () => {
       const sistemaBlog = clienteBlog.peticiones[0]!.mensajes.find((m) => m.rol === 'sistema')!.texto
       const sistemaLinkedin =
         clienteLinkedin.peticiones[0]!.mensajes.find((m) => m.rol === 'sistema')!.texto
-      expect(sistemaBlog).not.toBe(sistemaLinkedin)
+
+      // No basta con que difieran: dos instructivos podrían diferir en una
+      // sola coma y esta prueba seguiría verde. Se ata cada uno a una regla
+      // que solo tiene sentido en su propio canal —el `gancho` no existe en
+      // el esquema del blog, el Markdown con `##` no existe en el de
+      // LinkedIn— para confirmar que cada corrida usó el instructivo que le
+      // corresponde y no el del otro canal por accidente.
+      expect(sistemaBlog).toContain('redactor de contenido para el blog')
+      expect(sistemaBlog).toContain('con subtítulos que organicen el artículo')
+      expect(sistemaBlog).not.toContain('gancho')
+
+      expect(sistemaLinkedin).toContain('redactor de contenido para LinkedIn')
+      expect(sistemaLinkedin).toContain('gancho')
+      expect(sistemaLinkedin).not.toContain('Markdown')
     })
   })
 
@@ -221,12 +283,31 @@ describe('flujo P3 · pieza', () => {
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const entrada = { slotId, mes: '2026-09', brandId: ref.brandId }
 
-      for (const _ of [1, 2]) {
-        const flujo = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]), env: ENV })
-        await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
-      }
+      const flujo1 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]), env: ENV })
+      await ejecutarFlujo(db, flujo1, entrada, ref, SIN_ESPERA)
 
-      expect(await db.select().from(esquema.contentPieces)).toHaveLength(1)
+      // Una segunda versión del perfil, para que la segunda corrida resuelva
+      // un `brandProfileVersion` distinto de la primera: sin este cambio,
+      // `channel` y `brandProfileVersion` valdrían lo mismo en las dos
+      // corridas, y una aserción sobre ellos no distinguiría un `set` que sí
+      // actualiza de uno que no hace nada.
+      await guardarPerfil(db, ref, PERFIL_VALIDO)
+
+      // `PIEZA_LINKEDIN_JSON_V2` es deliberadamente distinto del primero: con
+      // `onConflictDoNothing` —o un `set: {}`— seguiría habiendo una sola
+      // fila, pero con el contenido del primer intento. `toHaveLength(1)`
+      // sola no distingue "reemplaza" de "ignora la segunda"; lo que sigue,
+      // sobre `fila.data`, `fila.channel` y `fila.brandProfileVersion`, sí.
+      const flujo2 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON_V2]), env: ENV })
+      await ejecutarFlujo(db, flujo2, entrada, ref, SIN_ESPERA)
+
+      const filas = await db.select().from(esquema.contentPieces)
+      expect(filas).toHaveLength(1)
+
+      const [fila] = filas
+      expect(fila!.channel).toBe('linkedin')
+      expect(fila!.brandProfileVersion).toBe(2)
+      expect(fila!.data).toEqual({ canal: 'linkedin', ...JSON.parse(PIEZA_LINKEDIN_JSON_V2) })
     })
   })
 
@@ -244,5 +325,106 @@ describe('flujo P3 · pieza', () => {
 
       expect(cliente.peticiones).toHaveLength(0)
     })
+  })
+
+  // Los tres casos que siguen son la revalidación que `cargarSlot` hace
+  // dentro de la misma consulta: lo mismo que `slotsVigentesDelMes`
+  // (`@gc/operaciones`) ya filtra al armar los candidatos que `encolarPiezas`
+  // encola, pero que `id` + `organization_id` no vuelven a comprobar entre
+  // que la corrida se encola y el worker la ejecuta, minutos después.
+
+  it('se niega, sin llamar al modelo, si el slot está descartado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      // Alcanzable hoy: descartar un slot es una acción de la web, y puede
+      // pasar con la corrida ya `pendiente` en la cola.
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin', status: 'descartado' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
+        ),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect(cliente.peticiones).toHaveLength(0)
+    })
+  })
+
+  it('se niega, sin llamar al modelo, si el slot pertenece a otra marca', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+
+      // Con perfil y estrategia propios: la organización `principal` real
+      // tiene dos marcas, `parcelas` y `tapcar`, así que un `input` con el
+      // `brandId` de la otra no es hipotético. Si esta marca no tuviera
+      // perfil ni estrategia, la corrida fallaría igual sin pasar por la
+      // revalidación de `cargarSlot` —fallaría antes, al cargar el perfil—,
+      // así que esta prueba no probaría lo que dice probar.
+      const refOtraMarca = await sembrarOtraMarca(db, ref.organizationId)
+
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-09', brandId: refOtraMarca.brandId }, refOtraMarca,
+          SIN_ESPERA,
+        ),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect(cliente.peticiones).toHaveLength(0)
+    })
+  })
+
+  it('se niega, sin llamar al modelo, si el mes no coincide con el del plan del slot', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      // `sembrarSlot` cuelga el slot de un plan de `2026-09`.
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+      // `2026-08` y no `2026-10`: los dos son un mes distinto del `2026-09`
+      // del plan, pero `2026-08` cae en el mismo trimestre —`2026-Q3`— que sí
+      // tiene estrategia sembrada. Con un mes de otro trimestre, sin la
+      // revalidación esta corrida fallaría igual, solo que por «no hay
+      // estrategia vigente» en vez de por el mes desalineado, y la prueba
+      // pasaría por la razón equivocada.
+      await expect(
+        ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-08', brandId: ref.brandId }, ref, SIN_ESPERA,
+        ),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      expect(cliente.peticiones).toHaveLength(0)
+    })
+  })
+
+  it('el título de sección que arma el mensaje coincide con el que nombran los cinco instructivos', async () => {
+    const TITULO = 'El slot a escribir'
+
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
+
+      const mensajeUsuario = cliente.peticiones[0]!.mensajes.find((m) => m.rol === 'usuario')!.texto
+      expect(mensajeUsuario).toContain(`## ${TITULO}`)
+    })
+
+    // El mismo defecto ya se materializó una vez en P1: el título que arma
+    // el mensaje y el que nombran los instructivos se desalinearon sin que
+    // nada avisara. Acá se comprueba contra los cinco `.md`, no solo contra
+    // el de LinkedIn que ya corrió arriba.
+    for (const canal of CANALES) {
+      const ruta = fileURLToPath(new URL(`./prompts/pieza-${canal}.md`, import.meta.url))
+      const contenido = await readFile(ruta, 'utf8')
+      expect(contenido).toContain(TITULO)
+    }
   })
 })

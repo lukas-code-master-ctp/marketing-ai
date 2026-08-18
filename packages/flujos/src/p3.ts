@@ -67,7 +67,7 @@ export function crearFlujoPieza(deps: Dependencias): DefinicionDeFlujo {
       // Se consulta el slot antes del presupuesto y de cualquier llamada al
       // modelo: sin él no hay ni canal para elegir el instructivo ni ángulo ni
       // brief que escribir, así que fallar antes evita pagar por nada.
-      const slot = await cargarSlot(ctx.db, entrada.slotId, ctx.organizationId)
+      const slot = await cargarSlot(ctx.db, ctx.organizationId, entrada)
 
       await exigirPresupuesto(ctx.db, entrada.brandId, new Date(), ctx.brandSlug)
 
@@ -77,8 +77,14 @@ export function crearFlujoPieza(deps: Dependencias): DefinicionDeFlujo {
       )
       const instrucciones = await readFile(rutaPrompt(slot.channel), 'utf8')
 
+      // Un nombre por canal, no uno solo compartido: `nombreEsquema` sale de
+      // este nombre (`ejecutar.ts`) y `ClienteDeMuestra` lee
+      // `<carpeta>/<nombreEsquema>.json`, así que un nombre único para los
+      // cinco canales exigiría que una sola muestra satisficiera cinco
+      // esquemas `.strict()` incompatibles. De paso desagrega el costo por
+      // canal en `ai_calls.task`.
       const tarea = definirTarea({
-        nombre: 'generar_pieza',
+        nombre: `generar_pieza_${slot.channel}`,
         nivel: 'redaccion',
         esquema: esquemaDePieza(slot.channel),
         temperatura: 0.7,
@@ -153,10 +159,28 @@ export function crearFlujoPieza(deps: Dependencias): DefinicionDeFlujo {
   return { nombre: 'p3_pieza', pasos: [pasoGenerar, pasoPersistir] }
 }
 
+/**
+ * Carga el slot y revalida, dentro de la misma consulta, todo lo que
+ * `slotsVigentesDelMes` (`@gc/operaciones`, de donde salen los candidatos que
+ * encola `encolarPiezas`) ya filtró al armar la lista de candidatos: que el
+ * slot no esté descartado, que pertenezca a la marca de la entrada y que su
+ * plan sea el del mes de la entrada.
+ *
+ * Entre encolar y ejecutar pasan minutos —en producción despierta Cloud
+ * Tasks, y Cloud Scheduler pasa cada cinco minutos como red de seguridad—, y
+ * `id` + `organization_id` no alcanzan para saber que esas tres condiciones
+ * siguen valiendo: alguien pudo descartar el slot desde la web con la corrida
+ * ya `pendiente`, y sin esta revalidación P3 pagaría el modelo y escribiría
+ * una `content_pieces` para un slot descartado. `brandId` y `mes` no filtran
+ * la fila —eso ocultaría cuál de las tres condiciones falló bajo un genérico
+ * "no se encontró"— sino que se comprueban después, para poder decir cuál se
+ * incumplió: sin eso, un `input` con la marca o el mes equivocado manda a
+ * buscar el error en el lugar equivocado.
+ */
 async function cargarSlot(
   db: BaseDeDatos,
-  slotId: string,
   organizationId: string,
+  entrada: EntradaP3,
 ): Promise<FilaDeSlot> {
   const [fila] = await db
     .select({
@@ -166,18 +190,51 @@ async function cargarSlot(
       angle: esquema.planSlots.angle,
       brief: esquema.planSlots.brief,
       scheduledFor: esquema.planSlots.scheduledFor,
+      status: esquema.planSlots.status,
+      brandId: esquema.contentPlans.brandId,
+      month: esquema.contentPlans.month,
     })
     .from(esquema.planSlots)
-    .where(and(eq(esquema.planSlots.id, slotId), eq(esquema.planSlots.organizationId, organizationId)))
+    .innerJoin(esquema.contentPlans, eq(esquema.planSlots.contentPlanId, esquema.contentPlans.id))
+    .where(
+      and(
+        eq(esquema.planSlots.id, entrada.slotId),
+        eq(esquema.planSlots.organizationId, organizationId),
+      ),
+    )
 
   if (!fila) {
     throw permanente(
-      `El slot ${slotId} no existe o no pertenece a esta organización. La pieza se genera a ` +
-        'partir de lo que la grilla planificó para ese slot, así que sin él no hay de dónde partir.',
+      `El slot ${entrada.slotId} no existe o no pertenece a esta organización. La pieza se genera ` +
+        'a partir de lo que la grilla planificó para ese slot, así que sin él no hay de dónde partir.',
     )
   }
 
-  return fila
+  if (fila.status === 'descartado') {
+    throw permanente(
+      `El slot ${entrada.slotId} está descartado: alguien lo sacó de la grilla después de que esta ` +
+        'corrida quedó encolada. No se genera una pieza para un slot que ya no forma parte del plan.',
+    )
+  }
+
+  if (fila.brandId !== entrada.brandId) {
+    throw permanente(
+      `El slot ${entrada.slotId} pertenece a la marca ${fila.brandId}, no a ${entrada.brandId} ` +
+        'como dice la entrada de esta corrida. Generar con la marca equivocada usaría su perfil y ' +
+        'su léxico prohibido para el texto de otra marca.',
+    )
+  }
+
+  if (fila.month !== `${entrada.mes}-01`) {
+    throw permanente(
+      `El slot ${entrada.slotId} pertenece al plan de ${fila.month.slice(0, 7)}, no al de ` +
+        `${entrada.mes} como dice la entrada de esta corrida. Un mes desalineado elegiría el ` +
+        'trimestre de estrategia equivocado sin avisar.',
+    )
+  }
+
+  const { channel, format, pillar, angle, brief, scheduledFor } = fila
+  return { channel, format, pillar, angle, brief, scheduledFor }
 }
 
 /**
