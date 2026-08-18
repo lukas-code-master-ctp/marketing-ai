@@ -16,7 +16,12 @@ import { z } from 'zod'
  * conector, que corre antes de generar e informa al generador. Repetirlos acá
  * sería la cuarta lista de reglas sincronizada a mano de este repositorio —
  * `pendientes.md` ya registra tres—. En este bloque viajan en el prompt como
- * instrucción, y un copy demasiado largo se ve al leerlo.
+ * instrucción, con un número concreto por campo: los cinco instructivos de
+ * `packages/flujos/src/prompts/pieza-*.md` los declaran (por ejemplo, el
+ * `cuerpo` de LinkedIn no pasa de 1200 caracteres). Este esquema no los
+ * valida —nada en el modelo obliga a que el modelo los respete—, así que
+ * mientras no exista el conector de Fase 3, un copy que se pasa de esos
+ * números solo se nota leyéndolo.
  */
 
 const cuerpoLargo = z.string().min(20)
