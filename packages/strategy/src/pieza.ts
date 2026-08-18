@@ -47,10 +47,19 @@ export function esquemaDePieza(canal: Canal): z.ZodTypeAny {
 /**
  * La pieza tal como se guarda: la forma del canal más el canal adentro.
  *
- * El discriminante viaja **dentro de `data`** y no solo en la columna, para
- * que validar una fila leída de la base no exija consultar su slot — y para
- * que una pieza de LinkedIn guardada en una fila de Instagram se rechace en
- * vez de renderizarse con los campos vacíos.
+ * El discriminante viaja **dentro de `data`** y no solo en la columna
+ * `channel` de `content_pieces`, para que validar una fila leída de la base
+ * no exija consultar su slot: `PiezaDeContenido.safeParse(fila.data)` basta
+ * por sí solo, sin un `join` ni una segunda consulta.
+ *
+ * Lo que este discriminante interno **no** compra es detectar una fila
+ * inconsistente: `piezasDelMes` (`packages/operaciones/src/piezas.ts`) valida
+ * `data` contra esta unión, que pasa en cuanto `data` es autoconsistente —no
+ * compara `data.canal` contra la columna `channel` de la misma fila ni
+ * contra el canal real del slot. Una pieza de LinkedIn guardada por error en
+ * una fila de Instagram no se rechaza: se muestra tal cual, con los campos
+ * de LinkedIn. (Antes esta misma nota afirmaba lo contrario; era falso —
+ * Menor 8 de la revisión de la rama.)
  *
  * Las cinco variantes van literales y no derivadas de `CANALES.map(...)`:
  * con la versión de Zod de este proyecto, `z.discriminatedUnion` exige que

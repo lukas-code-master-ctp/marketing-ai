@@ -59,10 +59,22 @@ export interface CorridaTomada {
 
 /**
  * Cada flujo guarda su periodo dentro de `input` bajo una clave distinta, y
- * este es el único sitio donde eso se declara. Antes estaba escrito tres veces
- * —al encolar la estrategia, al encolar la grilla, y en el selector de rama de
+ * este es el único sitio donde eso se declara **para `encolar` y
+ * `corridaDe`**. Antes estaba escrito tres veces ahí —al encolar la
+ * estrategia, al encolar la grilla, y en el selector de rama de
  * `corridaDe`—, así que la escritura y la lectura podían separarse sin que
  * nada lo notara: el `input` viaja como jsonb y `tsc` no ve dentro.
+ *
+ * Para `p3_pieza` la promesa ya no alcanza: `encolarPiezas` no pasa por
+ * `encolar` —arma su propio `INSERT` con `mes: args.mes` escrito a mano,
+ * porque encola muchas filas por slot en vez de una por periodo— y
+ * `resumenDePiezas` (`packages/operaciones/src/piezas.ts`) repite la misma
+ * clave en un fragmento `sql` propio para agrupar por estado. Sumada a la
+ * entrada `p3_pieza` de abajo son tres declaraciones de `'mes'`, no una: el
+ * número exacto que este ayudante existe para evitar, y hoy solo lo logra
+ * para los otros dos flujos. Las pruebas de los tres sitios sí lo cubren —lo
+ * que falta es la frase, no una guarda—, pero conviene no citarla como si
+ * `p3_pieza` también estuviera resuelto.
  *
  * `coincide` devuelve el fragmento con la clave escrita **literal** y no
  * interpolada: `sql.raw` la metería sin escapar, y pasarla como parámetro
@@ -82,6 +94,15 @@ const PERIODO_EN_LA_ENTRADA = {
     coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
     genera: 'la grilla',
   },
+  // Inalcanzable hoy: ni `encolar` ni `corridaDe` se llaman nunca con
+  // `p3_pieza` —`encolarPiezas` arma su propio `INSERT` (ver el docstring de
+  // arriba) y nada en la web pide `corridaDe` para este flujo—, así que esta
+  // entrada existe solo para que el `satisfies Record<FlujoEncolable,
+  // unknown>` de abajo siga siendo exhaustivo. Su `genera: 'las piezas'`
+  // tampoco sirve si algún día se usa: produciría «Ya se está generando
+  // **las piezas** de 2026-09», que no concuerda («generando» pide
+  // singular: «la pieza» o, mejor, una frase que no fuerce el artículo).
+  // Antes de conectar este flujo a `encolar` o a `corridaDe`, corrígela.
   p3_pieza: {
     clave: 'mes',
     coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,

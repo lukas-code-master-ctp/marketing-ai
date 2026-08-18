@@ -16,7 +16,19 @@ export interface ResumenDePiezas {
   total: number
   /** Cuántos ya tienen pieza. */
   listas: number
-  /** Corridas de `p3_pieza` del mes que terminaron fallidas. */
+  /**
+   * Corridas de `p3_pieza` del mes que terminaron fallidas — cuenta
+   * **corridas**, no slots, y ninguna corrida fallida se limpia nunca.
+   * `mostrarBotonPiezas` (`page.tsx`) reencola solo los slots sin pieza ni
+   * corrida viva, así que reintentar una pieza que falló dos veces antes de
+   * salir bien deja `fallidas` en 2 para siempre, y con varias tandas se
+   * acumula sin techo — un número que crece con el tiempo aunque el mes
+   * termine con sus veinte piezas escritas. Documentado a propósito y sin
+   * arreglar (Menor 9 de la revisión de `feat/piezas-y-su-texto`; el
+   * arreglo real —descontar los fallidos ya reemplazados por una corrida
+   * posterior que sí completó ese slot, o no contar corridas cuyo slot ya
+   * tiene pieza— queda en `pendientes.md`).
+   */
   fallidas: number
   /** Corridas de `p3_pieza` del mes todavía vivas. */
   enVuelo: number
@@ -128,6 +140,20 @@ export async function resumenDePiezas(
  * en vez de lanzar: es el mismo criterio con el que `leerEncargo` distingue
  * una fila inválida de una ausente, pero acá no hay una pantalla que explique
  * la diferencia todavía, así que omitir es lo honesto.
+ *
+ * **No excluye los slots descartados** — a diferencia de `slotsVigentesDelMes`,
+ * que sí filtra `ne(status, 'descartado')` y es lo que alimenta `total` y
+ * `listas` en `resumenDePiezas`. Un slot que tenía pieza y se descartó
+ * después sigue devolviendo su pieza acá, así que `PanelDeDetalle` la
+ * muestra igual (`RejillaDelMes` no la esconde por estar descartado el
+ * slot). Consecuencia benigna —una pieza vieja de un slot que ya no cuenta,
+ * no una pieza equivocada— pero asimétrica con el resumen: la pantalla
+ * puede mostrar más piezas de las que el resumen cuenta (Menor 12 de la
+ * revisión de la rama). No se igualó a propósito: unificar el criterio con
+ * `slotsVigentesDelMes` exigiría el mismo `JOIN` a `content_plans` que esa
+ * función ya hace por separado, y esta consulta no lo necesitaba hasta hoy
+ * — queda para cuando alguien note la asimetría desde la pantalla, no desde
+ * el código.
  */
 export async function piezasDelMes(
   db: BaseDeDatos,
