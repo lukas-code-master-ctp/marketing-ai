@@ -17,6 +17,16 @@ function Campo({ etiqueta, valor }: { etiqueta: string; valor: string }) {
 }
 
 /**
+ * Antepone `#` a un hashtag que no lo trae. Un solo lugar para el criterio:
+ * lo usan tanto `CampoLista` (lo que se ve en pantalla) como `textoPlano` (lo
+ * que se copia), y antes cada uno tenía su propia copia — producían lo mismo
+ * hoy, pero divergían en silencio si alguien cambiaba el criterio en una sola.
+ */
+function conNumeral(hashtag: string): string {
+  return hashtag.startsWith('#') ? hashtag : `#${hashtag}`
+}
+
+/**
  * Una lista corta —hashtags, diapositivas— que no se renderiza cuando viene
  * vacía: una etiqueta «Diapositivas» sin nada debajo no informa nada, y para
  * los canales que no tienen ese campo (p. ej. TikTok no tiene diapositivas)
@@ -28,9 +38,7 @@ function CampoLista({ etiqueta, valores }: { etiqueta: string; valores: string[]
   return (
     <div>
       <p className="mb-1 text-sm font-medium text-gray-700">{etiqueta}</p>
-      <p className="text-sm text-gray-800">
-        {valores.map((v) => (v.startsWith('#') ? v : `#${v}`)).join(' ')}
-      </p>
+      <p className="text-sm text-gray-800">{valores.map(conNumeral).join(' ')}</p>
     </div>
   )
 }
@@ -117,7 +125,7 @@ function textoPlano(pieza: TipoPieza): string {
 }
 
 function formatoHashtags(hashtags: string[]): string {
-  return hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ')
+  return hashtags.map(conNumeral).join(' ')
 }
 
 /**
