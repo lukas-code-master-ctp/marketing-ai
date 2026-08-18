@@ -6,7 +6,7 @@ import {
 import { CANALES } from './canales.js'
 
 // Reexportados desde `./canales`, y no declarados acá: ese módulo existe para
-// que un componente de cliente los importe sin arrastrar el DDL de las catorce
+// que un componente de cliente los importe sin arrastrar el DDL de las dieciséis
 // tablas de este archivo al bundle del navegador (ver su cabecera). Esta
 // reexportación es lo que mantiene una sola fuente de verdad: todo lo que ya
 // importaba `CANALES`/`Canal` del barril o de `./esquema` sigue resolviendo.
@@ -14,6 +14,18 @@ export { CANALES, type Canal } from './canales.js'
 
 export const POLITICAS = ['auto', 'manual', 'asistido'] as const
 export type PoliticaDeAprobacion = (typeof POLITICAS)[number]
+
+export const NIVELES = ['razonamiento', 'redaccion', 'utilitario'] as const
+export type Nivel = (typeof NIVELES)[number]
+
+/**
+ * `imagen` no la usa nadie hoy y está a propósito: el bloque 2D trae los
+ * modelos de imagen, que no son otro nivel sino otra modalidad —`@gc/ai`
+ * pide JSON y valida con Zod; un modelo de imagen devuelve una imagen—.
+ * Sin este valor, 2D tendría que migrar la tabla antes de sembrar su
+ * primera fila.
+ */
+export const MODALIDADES = ['chat', 'imagen'] as const
 
 const id = () => uuid('id').primaryKey().default(sql`gen_random_uuid()`)
 const creadoEn = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
@@ -429,8 +441,58 @@ export const aiCalls = pgTable('ai_calls', {
   }).onDelete('set null'),
 }))
 
+/**
+ * El menú de modelos entre los que se puede elegir. **Global, sin
+ * organización**: es configuración del sistema y no datos de un inquilino,
+ * así que las tres marcas eligen del mismo menú.
+ *
+ * Los precios son por millón de tokens y están para poder elegir, no para
+ * calcular: lo que se cobró de verdad lo registra `ai_calls` llamada por
+ * llamada.
+ */
+export const modelCatalog = pgTable('model_catalog', {
+  id: id(),
+  level: text('level', { enum: NIVELES }).notNull(),
+  modelId: text('model_id').notNull(),
+  label: text('label').notNull(),
+  description: text('description').notNull(),
+  modality: text('modality', { enum: MODALIDADES }).notNull().default('chat'),
+  priceInputUsd: numeric('price_input_usd', { precision: 10, scale: 4 }).notNull(),
+  priceOutputUsd: numeric('price_output_usd', { precision: 10, scale: 4 }).notNull(),
+  createdAt: creadoEn(),
+}, (t) => ({
+  nivelValido: chequeoEnum('model_catalog_level_check', 'level', NIVELES),
+  modalidadValida: chequeoEnum('model_catalog_modality_check', 'modality', MODALIDADES),
+  unicoPorNivel: unique('model_catalog_level_model_unique').on(t.level, t.modelId),
+}))
+
+/**
+ * Qué eligió cada organización para cada nivel. El respaldo es opcional
+ * porque hoy lo es: `MODELO_RAZONAMIENTO_RESPALDO` está puesta y
+ * `MODELO_REDACCION_RESPALDO` vacía, y las dos son estados válidos.
+ *
+ * Las dos foráneas son simples y no compuestas: `organizations` es la raíz
+ * de la tenencia y `model_catalog` es global, así que no hay un par
+ * (id, organization_id) que exigir.
+ */
+export const organizationModels = pgTable('organization_models', {
+  id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  level: text('level', { enum: NIVELES }).notNull(),
+  principalId: uuid('principal_id').notNull()
+    .references(() => modelCatalog.id, { onDelete: 'restrict' }),
+  respaldoId: uuid('respaldo_id')
+    .references(() => modelCatalog.id, { onDelete: 'restrict' }),
+  updatedAt: creadoEn(),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+}, (t) => ({
+  nivelValido: chequeoEnum('organization_models_level_check', 'level', NIVELES),
+  unicoPorNivel: unique('organization_models_org_level_unique').on(t.organizationId, t.level),
+}))
+
 export const esquema = {
   organizations, users, brands, brandProfiles, channelAccounts, approvalPolicies,
   strategies, strategyBriefs, contentPlans, planSlots, contentPieces,
-  pipelineRuns, pipelineSteps, aiCalls,
+  pipelineRuns, pipelineSteps, aiCalls, modelCatalog, organizationModels,
 }
