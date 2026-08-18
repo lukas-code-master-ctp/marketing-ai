@@ -1,5 +1,6 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { ErrorDeDominio } from '@gc/shared'
 import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
@@ -1021,14 +1022,39 @@ describe('encolarPiezas', () => {
     })
   })
 
+  // Importante 5 de la revisión de la rama: `rejects.toThrow()` sin patrón
+  // acepta cualquier excepción, y sin `validarMes` la había igual —solo que
+  // de otra fuente. Sin sembrar el plan (a propósito, más abajo) y sin
+  // `validarMes`, `encolarPiezas` seguiría de largo hasta comparar
+  // `month = '2026-13-01'` contra Postgres, que revienta con su propio
+  // error de driver —medido: "date/time field value out of range"—, no uno
+  // de dominio, y ese error de sobra hace pasar un `toThrow()` sin patrón.
+  // La promesa del nombre —"antes de tocar la base"— exige distinguir ese
+  // caso del rechazo real, así que la prueba afirma dos cosas con dientes:
+  // la *clase* del error, que solo `permanente()` produce (`@gc/shared`; el
+  // error de Postgres no la tiene, ni es instancia de `ErrorDeDominio`), y
+  // su *mensaje*, que solo `validarMes` escribe. Verificado por mutación:
+  // quitar `validarMes(args.mes)` de `encolarPiezas` pone esta prueba en
+  // rojo con `AssertionError: expected error: date/time field value out of
+  // range… to be an instance of ErrorDeDominio` — confirmado y revertido.
+  //
+  // No se siembra el plan: si el rechazo no ocurre antes de tocar la base,
+  // no hay plan que la consulta de `encolarPiezas` pueda encontrar de todos
+  // modos, así que la ausencia de filas en `pipeline_runs` por sí sola no
+  // discriminaría "rechazado antes" de "rechazado después, por falta de
+  // plan". Las dos aserciones de clase y mensaje son las que sí discriminan.
   it('un mes mal formado se rechaza antes de tocar la base', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrarConEstrategia(db)
-      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
 
-      await expect(
-        encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: '2026-13' }),
-      ).rejects.toThrow()
+      const error: unknown = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas',
+        mes: '2026-13',
+      }).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(ErrorDeDominio)
+      expect((error as ErrorDeDominio).clase).toBe('permanente')
+      expect((error as ErrorDeDominio).message).toMatch(/^Mes inválido "2026-13"/)
 
       expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
     })

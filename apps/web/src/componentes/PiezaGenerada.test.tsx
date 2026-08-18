@@ -38,6 +38,17 @@ const PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS: TipoPieza = {
   diapositivas: [],
 }
 
+const PIEZA_INSTAGRAM_CON_DIAPOSITIVAS: TipoPieza = {
+  canal: 'instagram',
+  caption: 'Tres señales de que una parcela no tiene factibilidad.',
+  hashtags: ['parcelas', 'terrenos'],
+  diapositivas: [
+    'Señal uno: no hay factibilidad sanitaria.',
+    'Señal dos: no hay factibilidad eléctrica.',
+    'Señal tres: el plano no está regularizado.',
+  ],
+}
+
 describe('PiezaGenerada', () => {
   it('muestra los campos de LinkedIn, con el gancho aparte', () => {
     render(<PiezaGenerada pieza={PIEZA_LINKEDIN} />)
@@ -88,6 +99,50 @@ describe('PiezaGenerada', () => {
     const copiado = escribir.mock.calls[0]![0]
     expect(copiado).toContain(PIEZA_LINKEDIN.gancho)
     expect(copiado).toContain(PIEZA_LINKEDIN.cuerpo)
+  })
+
+  // Importante 3 de la revisión de la rama: las diapositivas se veían en
+  // pantalla (`CampoLista`) pero `textoPlano` las omitía, así que un
+  // carrusel copiaba caption y hashtags nada más — sin su entregable
+  // principal. La prueba de copiar de arriba solo ejercita LinkedIn, que no
+  // tiene diapositivas, así que no podía detectar esto.
+  it('copiar un carrusel de Instagram incluye las diapositivas numeradas', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_INSTAGRAM_CON_DIAPOSITIVAS} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    expect(escribir).toHaveBeenCalledTimes(1)
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toContain(PIEZA_INSTAGRAM_CON_DIAPOSITIVAS.caption)
+    expect(copiado).toContain('#parcelas')
+    expect(copiado).toContain('1. Señal uno: no hay factibilidad sanitaria.')
+    expect(copiado).toContain('2. Señal dos: no hay factibilidad eléctrica.')
+    expect(copiado).toContain('3. Señal tres: el plano no está regularizado.')
+  })
+
+  it('copiar un carrusel sin diapositivas no agrega una sección vacía', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toBe(
+      [
+        PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS.caption,
+        '',
+        '#parcelas #terrenos',
+      ].join('\n'),
+    )
   })
 
   it('si el portapapeles falla lo dice y el texto sigue en pantalla', async () => {

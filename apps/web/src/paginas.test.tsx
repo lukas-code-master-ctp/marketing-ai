@@ -6,7 +6,7 @@ import type {
   ResumenDePiezas,
   SlotDeLaGrilla,
 } from '@gc/operaciones'
-import type { LecturaDeEstrategia } from '@gc/strategy'
+import type { LecturaDeEstrategia, TipoPieza } from '@gc/strategy'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
@@ -522,6 +522,39 @@ describe('la advertencia de regenerar la grilla', () => {
       screen.queryByText(/Las ediciones que hayas hecho a mano se pierden/),
     ).not.toBeNull()
   })
+
+  // Crítico 2 de la revisión de la rama: regenerar borra `plan_slots` por el
+  // `ON DELETE CASCADE` de la migración `0008`, y con ellos toda pieza que
+  // colgara de esos slots — lo único perdible que costó dinero, y lo único
+  // que la advertencia omitía. Solo alcanzable con la grilla reabierta desde
+  // `aprobada` (P3 exige la grilla aprobada), pero `abrirLaConfirmacion` no
+  // condiciona el estado de las piezas a eso — es la misma pantalla la que
+  // muestra ambas cosas juntas, según describe el hallazgo.
+  it('sin piezas escritas no promete borrar ninguna', async () => {
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))
+    await abrirLaConfirmacion([slotDeGrilla('a')])
+
+    expect(screen.queryByText(/que ya escribiste/)).toBeNull()
+  })
+
+  it('con piezas ya escritas, la advertencia dice que se borran y que se paga otra vez', async () => {
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 20 }))
+    await abrirLaConfirmacion([slotDeGrilla('a')])
+
+    expect(
+      screen.queryByText(
+        /También se borran las 20 piezas que ya escribiste, y volver a generarlas paga el modelo otra vez\./,
+      ),
+    ).not.toBeNull()
+  })
+
+  it('concuerda en singular cuando la pieza escrita es una sola', async () => {
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 1 }))
+    await abrirLaConfirmacion([slotDeGrilla('a')])
+
+    expect(screen.queryByText(/También se borra la pieza que ya escribiste/)).not.toBeNull()
+    expect(screen.queryByText(/1 piezas que ya escribiste/)).toBeNull()
+  })
 })
 
 /**
@@ -631,7 +664,17 @@ describe('generar las piezas del mes', () => {
   // listo dice que está completo y no ofrece el botón. Confundirlos —por
   // ejemplo mostrando «Las 20 piezas están escritas» también cuando
   // `listas` es 0— sería peor que no tener el resumen.
-  it('distingue «ninguna encolada» de «todas listas»', async () => {
+  //
+  // Crítico 1 de la revisión de la rama: el nombre original de esta prueba
+  // ("distingue «ninguna encolada» de «todas listas»") ya dejó fuera un
+  // tercer caso que se parece a los otros dos y que también hay que separar
+  // — la cola drenada (`enVuelo: 0`) con algunas fallidas. Antes del arreglo
+  // ese caso no anunciaba nada: `{ listas: 0, fallidas: 20, enVuelo: 0 }`
+  // producía el mismo `textContent` que "no has encolado nada". Los tres
+  // bloques de abajo comparten esa condición —`enVuelo: 0`, la cola ya
+  // drenada, el estado que el usuario de verdad mira— y por eso van juntos
+  // en una sola prueba en vez de una por caso.
+  it('distingue «ninguna encolada», «todas listas» y «algunas fallidas», con la cola drenada', async () => {
     vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
     vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))
 
@@ -639,6 +682,8 @@ describe('generar las piezas del mes', () => {
     expect(
       within(seccionDePiezas(ningunaEncolada)).queryByText('Las 20 piezas están escritas'),
     ).toBeNull()
+    expect(within(seccionDePiezas(ningunaEncolada)).queryByText(/fallaron/)).toBeNull()
+    expect(within(seccionDePiezas(ningunaEncolada)).queryByText(/falló/)).toBeNull()
     expect(
       within(seccionDePiezas(ningunaEncolada)).queryByRole('button', {
         name: 'Generar las piezas',
@@ -655,6 +700,145 @@ describe('generar las piezas del mes', () => {
     expect(
       within(seccionDePiezas(todasListas)).queryByRole('button', { name: 'Generar las piezas' }),
     ).toBeNull()
+
+    cleanup()
+
+    // La cola ya se drenó (`enVuelo: 0`) pero quedaron fallidas: no es ni
+    // "ninguna encolada" (hay 18 listas) ni "todas listas" (2 no lo están),
+    // así que necesita su propio texto — y ese texto tiene que decir qué
+    // hacer, porque el remedio (reencolar solo lo que falta) existe.
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 20, listas: 18, fallidas: 2, enVuelo: 0 }),
+    )
+    const { container: algunasFallidas } = await renderGrilla()
+    expect(
+      within(seccionDePiezas(algunasFallidas)).queryByText('Las 20 piezas están escritas'),
+    ).toBeNull()
+    expect(
+      within(seccionDePiezas(algunasFallidas)).queryByText(
+        '18 de 20 piezas escritas, 2 fallaron. Generar las piezas reintenta solo las que' +
+          ' faltan, sin volver a pagar las que ya tienes.',
+      ),
+    ).not.toBeNull()
+    expect(
+      within(seccionDePiezas(algunasFallidas)).queryByRole('button', {
+        name: 'Generar las piezas',
+      }),
+    ).not.toBeNull()
+  })
+
+  // El caso extremo del mismo hallazgo: con todo fallido y nada listo, el
+  // resumen anterior era carácter por carácter idéntico al de "no has
+  // encolado nada" — `textContent` de la sección daba exactamente "Generar
+  // las piezas" en los dos casos. Es la medición exacta que trae el brief.
+  it('con todo fallido y la cola drenada, ya no es idéntico a "no has encolado nada"', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 20, listas: 0, fallidas: 20, enVuelo: 0 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(seccionDePiezas(container).textContent).not.toBe('Generar las piezas')
+    expect(
+      within(seccionDePiezas(container)).queryByText(/20 fallaron/),
+    ).not.toBeNull()
+  })
+})
+
+// Menor 10 de la revisión de la rama: el resto de este archivo trata el
+// singular con cuidado (ver «concuerda en singular cuando el descarte es uno
+// solo», arriba), pero el avance de piezas no lo hacía — con una fallida
+// salía «1 fallaron», y con un total de una pieza, «Las 1 piezas están
+// escritas». `singularOPlural` (`page.tsx`) es el arreglo; estas pruebas son
+// las que le dan dientes.
+describe('el avance de piezas concuerda en singular', () => {
+  it('una sola pieza fallida dice "1 falló", no "1 fallaron"', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 5, listas: 3, enVuelo: 1, fallidas: 1 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText('Escribiendo las piezas: 3 de 5 listas, 1 falló'),
+    ).not.toBeNull()
+    expect(within(seccionDePiezas(container)).queryByText(/1 fallaron/)).toBeNull()
+  })
+
+  it('un total de una sola pieza en vuelo concuerda en "1 lista"', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 0, enVuelo: 1 }))
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText('Escribiendo las piezas: 0 de 1 lista'),
+    ).not.toBeNull()
+    expect(within(seccionDePiezas(container)).queryByText(/1 listas/)).toBeNull()
+  })
+
+  it('con un total de una sola pieza escrita dice "La pieza está escrita"', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 1 }))
+
+    const { container } = await renderGrilla()
+
+    expect(within(seccionDePiezas(container)).queryByText('La pieza está escrita')).not.toBeNull()
+    expect(within(seccionDePiezas(container)).queryByText(/Las 1 piezas/)).toBeNull()
+  })
+
+  it('con la cola drenada, una sola fallida sobre un total de una concuerda en singular', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 1, listas: 0, fallidas: 1, enVuelo: 0 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText(
+        '0 de 1 pieza escrita, 1 falló. Generar las piezas reintenta solo las que faltan, sin' +
+          ' volver a pagar las que ya tienes.',
+      ),
+    ).not.toBeNull()
+  })
+})
+
+/**
+ * Importante 4 de la revisión de la rama: `PiezaGenerada` está bien probado
+ * en aislamiento (`PiezaGenerada.test.tsx`), pero nada más de este arnés
+ * monta la cadena completa `page.tsx` → `RejillaDelMes` → `PanelDeDetalle` →
+ * `PiezaGenerada`. Está medido: sustituir `pieza={piezas.get(seleccionado.id)}`
+ * por `pieza={undefined}` en `RejillaDelMes.tsx` dejaba las otras 256 pruebas
+ * de `apps/web` en verde — el panel nunca mostraría una pieza y la suite no
+ * se enteraba. Por eso esta prueba abre el diálogo de verdad, con
+ * `piezasDelMes` sirviendo un mapa no vacío, y afirma el texto de la pieza
+ * **dentro de `role="dialog"`** — no contra el documento entero, el patrón
+ * que esta rama ya vio fallar cuatro veces (ver `seccionDePiezas`, arriba).
+ */
+describe('la pieza generada llega hasta el panel de detalle', () => {
+  it('el gancho y el cuerpo de la pieza aparecen dentro del diálogo del slot', async () => {
+    const slot = slotDeGrilla('a')
+    vi.mocked(grillaDelMes).mockResolvedValue(
+      grilla({ estado: 'aprobada', contentPlanId: 'plan-1', slots: [slot] }),
+    )
+    const pieza: TipoPieza = {
+      canal: 'linkedin',
+      gancho: 'Un gancho reconocible que solo trae esta prueba',
+      cuerpo:
+        'Un cuerpo reconocible que solo trae esta prueba, con largo suficiente para pasar Zod.',
+      hashtags: ['parcelas'],
+    }
+    vi.mocked(piezasDelMes).mockResolvedValue(new Map([[slot.id, pieza]]))
+
+    await renderGrilla()
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(slot.angulo) }))
+
+    const dialogo = screen.getByRole('dialog')
+    expect(within(dialogo).queryByText(pieza.gancho)).not.toBeNull()
+    expect(within(dialogo).queryByText(pieza.cuerpo)).not.toBeNull()
   })
 })
 
