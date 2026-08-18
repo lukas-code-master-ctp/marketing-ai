@@ -994,6 +994,33 @@ describe('modelos configurables', () => {
     })
   })
 
+  it('organization_models rechaza un nivel fuera del enumerado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X', slug: 'a' })
+        .returning()
+      const [modelo] = await db
+        .insert(esquema.modelCatalog)
+        .values({
+          level: 'razonamiento',
+          modelId: 'proveedor/modelo',
+          label: 'Etiqueta',
+          description: 'Descripción de prueba.',
+          priceInputUsd: '0.1000',
+          priceOutputUsd: '0.2000',
+        })
+        .returning()
+
+      await expect(
+        db.execute(sql`
+          insert into organization_models (organization_id, level, principal_id)
+          values (${org!.id}, 'inventado', ${modelo!.id})
+        `),
+      ).rejects.toThrow(/organization_models_level_check/)
+    })
+  })
+
   it('una organización no puede elegir dos veces el mismo nivel', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const [org] = await db
