@@ -203,10 +203,19 @@ describe('guardarEncargo y leerEncargo', () => {
     })
   })
 
-  it('otra organización con una marca del mismo slug no ve ni pisa este encargo', async () => {
+  it('otra organización con una marca del mismo slug ve y guarda solo su propio encargo', async () => {
     // La propiedad que importa: resolverMarca filtra por organizationId, no
-    // solo por slug. Si alguien lo cambiara por una búsqueda de slug a secas,
-    // la organización B leería (o pisaría) el encargo de la organización A.
+    // solo por slug. La versión anterior de esta prueba dejaba a B sin datos
+    // propios y comprobaba solo "B ve ausente" — pero leerEncargo filtra por
+    // `brandId = ref.brandId AND organizationId = organizationId` (el
+    // argumento, no lo que devuelva resolverMarca), así que con B vacía la
+    // combinación (brandId de A, organizationId de B) no encuentra fila tanto
+    // si resolverMarca filtra bien como si resolviera por slug a secas: cero
+    // es cero y no discrimina entre las dos versiones del código. Por eso B
+    // necesita su propio encargo: si resolverMarca le devolviera el brandId
+    // de A, leerEncargo dejaría de ver también el propio de B (volvería
+    // 'ausente' en vez de 'presente'), y guardarEncargo pisaría el de A en
+    // vez de escribir uno nuevo para B.
     await conBaseDeDatosDePrueba(async (db) => {
       const refA = await sembrar(db)
       await guardarEncargo(db, refA.organizationId, {
@@ -218,8 +227,24 @@ describe('guardarEncargo y leerEncargo', () => {
       await db.insert(esquema.brands)
         .values({ organizationId: orgB!.id, slug: 'parcelas', name: 'Otra marca' }).returning()
 
+      const encargoB = {
+        ...ENCARGO,
+        objetivo: 'Vender las parcelas del loteo sur, que es de la otra marca',
+      }
+      await guardarEncargo(db, orgB!.id, {
+        slug: 'parcelas', periodo: '2026-Q4', encargo: encargoB,
+      })
+
       const r = await leerEncargo(db, orgB!.id, { slug: 'parcelas', periodo: '2026-Q4' })
-      expect(r.tipo).toBe('ausente')
+      if (r.tipo !== 'presente') throw new Error('inalcanzable')
+      expect(r.encargo.objetivo).toBe(encargoB.objetivo)
+
+      // "No pisa": el encargo de A sigue siendo el suyo, y hay dos filas, una
+      // por organización, no una sola que B haya sobrescrito.
+      const filas = await db.select().from(esquema.strategyBriefs)
+      expect(filas).toHaveLength(2)
+      const [filaA] = filas.filter((f) => f.brandId === refA.brandId)
+      expect((filaA!.data as typeof ENCARGO).objetivo).toBe(ENCARGO.objetivo)
     })
   })
 
