@@ -484,7 +484,15 @@ export const organizationModels = pgTable('organization_models', {
     .references(() => modelCatalog.id, { onDelete: 'restrict' }),
   respaldoId: uuid('respaldo_id')
     .references(() => modelCatalog.id, { onDelete: 'restrict' }),
-  updatedAt: creadoEn(),
+  // No usa `creadoEn()`: ese ayudante nombra la columna física `created_at`,
+  // que en cada otra tabla coincide con «cuándo se creó la fila» porque crear
+  // y empezar son el mismo instante. Acá no: esta fila se actualiza con cada
+  // cambio de elección, así que el nombre tiene que decir `updated_at` de
+  // verdad. Y por no llevar `$onUpdate`, quien escriba (`onConflictDoUpdate`,
+  // en la tarea que sigue) tiene que poner este valor a mano en cada cambio;
+  // si no lo hace, la columna conserva en silencio la fecha de la primera
+  // elección y el registro de «cuándo se cambió» queda falso.
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
 }, (t) => ({
   nivelValido: chequeoEnum('organization_models_level_check', 'level', NIVELES),

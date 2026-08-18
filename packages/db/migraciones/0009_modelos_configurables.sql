@@ -19,7 +19,7 @@ CREATE TABLE "organization_models" (
 	"level" text NOT NULL,
 	"principal_id" uuid NOT NULL,
 	"respaldo_id" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_by" uuid,
 	CONSTRAINT "organization_models_org_level_unique" UNIQUE("organization_id","level"),
 	CONSTRAINT "organization_models_level_check" CHECK (level in ('razonamiento', 'redaccion', 'utilitario'))
