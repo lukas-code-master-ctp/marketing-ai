@@ -16,7 +16,11 @@ Reglas del canal:
   entre ellos: un bloque compacto de texto se lee peor en el feed que en un
   documento.
 - Si el brief pide llevar tráfico a otro lado, el enlace va al final, en su
-  propia línea — nunca a mitad del texto, donde corta la lectura.
+  propia línea — nunca a mitad del texto, donde corta la lectura. La única
+  fuente de URLs es la sección de ofertas del contexto de marca, y no todas
+  las ofertas traen una: si el brief pide tráfico pero ninguna URL aparece
+  ahí, no inventes un enlace — cierra el `cuerpo` invitando a comentar o a
+  escribir por mensaje en vez de a hacer clic.
 - Los hashtags son opcionales: úsalos solo si de verdad ayudan a que se
   encuentre la publicación. El arreglo `hashtags` puede quedar vacío si
   ninguno aporta — no rellenes por rellenar.

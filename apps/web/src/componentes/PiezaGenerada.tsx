@@ -111,8 +111,18 @@ function textoPlano(pieza: TipoPieza): string {
       return [pieza.gancho, '', pieza.cuerpo, '', formatoHashtags(pieza.hashtags)].join('\n')
     case 'facebook':
       return [pieza.cuerpo, '', formatoHashtags(pieza.hashtags)].join('\n')
-    case 'instagram':
-      return [pieza.caption, '', formatoHashtags(pieza.hashtags)].join('\n')
+    case 'instagram': {
+      // Sin las diapositivas, un carrusel copiaba caption y hashtags nada
+      // más: para ese formato las diapositivas son el entregable principal,
+      // y se veían en pantalla (`CampoLista`, arriba) sin viajar al
+      // portapapeles (Importante 3 de la revisión de la rama). Numeradas
+      // porque así se leen en pantalla y así se pegan en el orden que van.
+      const partes = [pieza.caption, '', formatoHashtags(pieza.hashtags)]
+      if (pieza.diapositivas.length > 0) {
+        partes.push('', ...pieza.diapositivas.map((texto, i) => `${i + 1}. ${texto}`))
+      }
+      return partes.join('\n')
+    }
     case 'tiktok':
       return [pieza.caption, '', pieza.guion].join('\n')
     case 'blog':

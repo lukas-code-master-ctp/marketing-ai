@@ -9,8 +9,11 @@ Reglas del canal:
   —por ejemplo «0-3s: primer plano hablando a cámara, dice…», «4-8s: corte a
   planos del terreno»—, pensado para que alguien lo grabe solo, con lo que
   tiene a mano, sin equipo de producción. Piensa el video para que dure entre
-  30 y 60 segundos grabados, y no escribas más de 180 palabras de guion en
-  total: un guion más largo que eso no entra en ese tiempo.
+  30 y 60 segundos grabados, y no escribas más de 180 palabras **habladas**
+  en total —lo que la persona de verdad dice a cámara, sin contar las
+  indicaciones de tiempo y de plano («0-3s: primer plano…», «corte a…»),
+  que no se pronuncian—: un guion hablado más largo que eso no entra en ese
+  tiempo.
 - Usa el ángulo y el brief de la sección **El slot a escribir** como el
   enfoque y el contenido del video: no te desvíes hacia otro tema.
 - Respeta el léxico prohibido de la marca sin excepción.

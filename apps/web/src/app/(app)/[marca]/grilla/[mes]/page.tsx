@@ -29,6 +29,11 @@ const ETIQUETAS_DE_ESTADO: Record<string, string> = {
   cerrada: 'Cerrada',
 }
 
+/** Concordancia de número para los textos de avance: nada de "1 fallaron". */
+function singularOPlural(cantidad: number, singular: string, plural: string): string {
+  return cantidad === 1 ? singular : plural
+}
+
 export default async function PaginaDeGrilla({
   params,
 }: {
@@ -90,17 +95,36 @@ export default async function PaginaDeGrilla({
     grilla.estado === 'aprobada' &&
     resumenPiezas.listas + resumenPiezas.enVuelo < resumenPiezas.total
 
-  // Los tres casos que la pantalla tiene que distinguir sin confundirlos: con
-  // corridas vivas, el avance parcial (más las fallidas, si las hay); con
-  // todo listo, que ya terminó; y sin nada encolado todavía, donde no hay
-  // nada que anunciar más que el botón mismo.
+  // Los cuatro casos que la pantalla tiene que distinguir sin confundirlos:
+  // con corridas vivas, el avance parcial (más las fallidas, si las hay); con
+  // todo listo, que ya terminó; con la cola ya drenada pero algo fallado, que
+  // tiene que decir qué hacer; y sin nada encolado todavía, donde no hay nada
+  // que anunciar más que el botón mismo.
   let textoAvancePiezas: string | null = null
   if (resumenPiezas.enVuelo > 0) {
     textoAvancePiezas =
-      `Escribiendo las piezas: ${resumenPiezas.listas} de ${resumenPiezas.total} listas` +
-      (resumenPiezas.fallidas > 0 ? `, ${resumenPiezas.fallidas} fallaron` : '')
+      `Escribiendo las piezas: ${resumenPiezas.listas} de ${resumenPiezas.total} ` +
+      singularOPlural(resumenPiezas.total, 'lista', 'listas') +
+      (resumenPiezas.fallidas > 0
+        ? `, ${resumenPiezas.fallidas} ${singularOPlural(resumenPiezas.fallidas, 'falló', 'fallaron')}`
+        : '')
   } else if (resumenPiezas.listas === resumenPiezas.total && resumenPiezas.total > 0) {
-    textoAvancePiezas = `Las ${resumenPiezas.total} piezas están escritas`
+    textoAvancePiezas =
+      resumenPiezas.total === 1
+        ? 'La pieza está escrita'
+        : `Las ${resumenPiezas.total} piezas están escritas`
+  } else if (resumenPiezas.fallidas > 0) {
+    // La cola ya se drenó (`enVuelo === 0`) pero algo quedó fallido: sin esta
+    // rama el texto desaparecía justo en el estado estable que el usuario
+    // mira, indistinguible de "no has encolado nada" (Crítico 1 de la
+    // revisión de la rama). `mostrarBotonPiezas` ya ofrece el botón en este
+    // estado —`listas + 0 < total`— y ese botón reencola solo los slots sin
+    // pieza, así que decirlo evita que alguien tema pagar el modelo dos veces.
+    textoAvancePiezas =
+      `${resumenPiezas.listas} de ${resumenPiezas.total} ` +
+      singularOPlural(resumenPiezas.total, 'pieza escrita', 'piezas escritas') +
+      `, ${resumenPiezas.fallidas} ${singularOPlural(resumenPiezas.fallidas, 'falló', 'fallaron')}. ` +
+      'Generar las piezas reintenta solo las que faltan, sin volver a pagar las que ya tienes.'
   }
 
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
@@ -167,7 +191,20 @@ export default async function PaginaDeGrilla({
                       ? 'La que descartaste vuelve a aparecer, y las ediciones que hiciste a mano se pierden.'
                       : descartados > 1
                         ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
-                        : 'Las ediciones que hayas hecho a mano se pierden.')
+                        : 'Las ediciones que hayas hecho a mano se pierden.') +
+                    // Lo único destruido que costó dinero: `persistir` de P2
+                    // borra todos los `plan_slots` del plan por el `ON DELETE
+                    // CASCADE` de la migración `0008`, y con ellos cualquier
+                    // pieza que colgara de ellos (Crítico 2 de la revisión de
+                    // la rama). Sin esta frase, la advertencia enumeraba todo
+                    // lo perdible salvo lo más caro.
+                    (resumenPiezas.listas > 0
+                      ? ` También se ${
+                          resumenPiezas.listas === 1
+                            ? 'borra la pieza que ya escribiste'
+                            : `borran las ${resumenPiezas.listas} piezas que ya escribiste`
+                        }, y volver a generarlas paga el modelo otra vez.`
+                      : '')
                   }
                 />
               )}
@@ -178,7 +215,7 @@ export default async function PaginaDeGrilla({
           )}
           {grilla.estado === 'aprobada' && (
             <div className="flex flex-col items-end gap-2">
-              <BotonReabrirGrilla marca={marca} mes={mes} />
+              <BotonReabrirGrilla marca={marca} mes={mes} piezasEscritas={resumenPiezas.listas} />
             </div>
           )}
           {/* Sección propia, con su nombre accesible, para que el avance de
