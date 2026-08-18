@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { corridaDe, grillaDelMes } from '@gc/operaciones'
+import { corridaDe, grillaDelMes, resumenDePiezas } from '@gc/operaciones'
 // Del submódulo: es el mismo predicado que usa la estrategia y no arrastra nada.
 import { corridaViva } from '@gc/operaciones/senales'
+import { generarPiezasAccion } from '../../../../../acciones.js'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../../datos.js'
 import { BotonAprobarGrilla } from '../../../../../componentes/BotonAprobarGrilla.js'
@@ -58,6 +59,35 @@ export default async function PaginaDeGrilla({
   // pagaba el modelo**. El avance se ve en `EstadoDeCorrida`, y cuando termine
   // el botón vuelve solo.
   const enVuelo = corridaViva(corrida)
+
+  // El resumen de las piezas —cuántas ya tiene, cuántas están en vuelo,
+  // cuántas fallaron— es independiente de la corrida de P2 de arriba: son
+  // corridas de `p3_pieza`, una por slot, y `resumenDePiezas` ya las cuenta
+  // agrupadas. Se lee siempre, sin condicionarlo al estado de la grilla,
+  // porque el cálculo es barato y el estado ya decide por su cuenta si se
+  // muestra algo con él.
+  const resumenPiezas = await resumenDePiezas(db, organizationId, { slug: marca, mes })
+
+  // El botón se apaga en cuanto no queda nada por encolar: cada slot vigente
+  // ya tiene pieza o ya tiene una corrida viva detrás. Encolar de nuevo ahí
+  // no haría nada —`encolarPiezas` filtra los mismos candidatos— pero
+  // ofrecerlo igual invitaría a creer que hace falta apretarlo otra vez.
+  const mostrarBotonPiezas =
+    grilla.estado === 'aprobada' &&
+    resumenPiezas.listas + resumenPiezas.enVuelo < resumenPiezas.total
+
+  // Los tres casos que la pantalla tiene que distinguir sin confundirlos: con
+  // corridas vivas, el avance parcial (más las fallidas, si las hay); con
+  // todo listo, que ya terminó; y sin nada encolado todavía, donde no hay
+  // nada que anunciar más que el botón mismo.
+  let textoAvancePiezas: string | null = null
+  if (resumenPiezas.enVuelo > 0) {
+    textoAvancePiezas =
+      `Escribiendo las piezas: ${resumenPiezas.listas} de ${resumenPiezas.total} listas` +
+      (resumenPiezas.fallidas > 0 ? `, ${resumenPiezas.fallidas} fallaron` : '')
+  } else if (resumenPiezas.listas === resumenPiezas.total && resumenPiezas.total > 0) {
+    textoAvancePiezas = `Las ${resumenPiezas.total} piezas están escritas`
+  }
 
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
   const avisos = grilla.problemas.filter((p) => p.severidad === 'aviso')
@@ -132,7 +162,39 @@ export default async function PaginaDeGrilla({
               )}
             </div>
           )}
-          {grilla.estado === 'aprobada' && <BotonReabrirGrilla marca={marca} mes={mes} />}
+          {grilla.estado === 'aprobada' && (
+            <div className="flex flex-col items-end gap-2">
+              <BotonReabrirGrilla marca={marca} mes={mes} />
+              {/* Sección propia, con su nombre accesible, para que el avance
+                  de las piezas y el botón que las encola se puedan pedir por
+                  separado del resto de la cabecera. */}
+              {(textoAvancePiezas || mostrarBotonPiezas) && (
+                <section
+                  aria-label="Piezas del mes"
+                  className="flex flex-col items-end gap-1 text-right"
+                >
+                  {textoAvancePiezas && (
+                    <p className="text-sm text-gray-600">{textoAvancePiezas}</p>
+                  )}
+                  {mostrarBotonPiezas && (
+                    <form
+                      action={async () => {
+                        'use server'
+                        await generarPiezasAccion(marca, mes)
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                      >
+                        Generar las piezas
+                      </button>
+                    </form>
+                  )}
+                </section>
+              )}
+            </div>
+          )}
         </div>
       </header>
 

@@ -3,10 +3,11 @@ import type {
   CorridaEnCurso,
   GrillaDelMes,
   LecturaDeEncargo,
+  ResumenDePiezas,
   SlotDeLaGrilla,
 } from '@gc/operaciones'
 import type { LecturaDeEstrategia } from '@gc/strategy'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,6 +17,7 @@ import {
   grillaDelMes,
   leerEncargo,
   perfilConHistorial,
+  resumenDePiezas,
 } from '@gc/operaciones'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
@@ -39,6 +41,7 @@ vi.mock('@gc/operaciones', () => ({
   estrategiaDelTrimestre: vi.fn(),
   perfilConHistorial: vi.fn(),
   leerEncargo: vi.fn(),
+  resumenDePiezas: vi.fn(),
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -52,6 +55,7 @@ vi.mock('./datos.js', () => ({
 vi.mock('./acciones.js', () => ({
   encolarGrillaAccion: vi.fn(),
   encolarEstrategiaAccion: vi.fn(),
+  generarPiezasAccion: vi.fn(),
   reanudarCorridaAccion: vi.fn(),
   aprobarGrillaAccion: vi.fn(),
   reabrirGrillaAccion: vi.fn(),
@@ -107,8 +111,13 @@ beforeEach(() => {
   vi.mocked(perfilConHistorial).mockReset()
   vi.mocked(leerEncargo).mockReset()
   vi.mocked(marcasDeLaOrganizacion).mockReset()
+  vi.mocked(resumenDePiezas).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
   vi.mocked(leerEncargo).mockResolvedValue(ENCARGO_ESCRITO)
+  // Por omisión, ningún slot y ninguna pieza: así las pruebas que no hablan de
+  // piezas —casi todas las de este archivo— no ven aparecer ni el botón ni
+  // ningún texto de avance por un resumen que no fijaron.
+  vi.mocked(resumenDePiezas).mockResolvedValue({ total: 0, listas: 0, fallidas: 0, enVuelo: 0 })
 })
 
 function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
@@ -128,6 +137,10 @@ function grilla(campos: Partial<GrillaDelMes> = {}): GrillaDelMes {
   return { contentPlanId: null, estado: null, slots: [], porCanal: {}, problemas: [], ...campos }
 }
 
+function resumen(campos: Partial<ResumenDePiezas> = {}): ResumenDePiezas {
+  return { total: 0, listas: 0, fallidas: 0, enVuelo: 0, ...campos }
+}
+
 const ESTRATEGIA_EN_BORRADOR: LecturaDeEstrategia = {
   tipo: 'ok',
   periodo: '2026-Q4',
@@ -143,7 +156,7 @@ const ESTRATEGIA_EN_BORRADOR: LecturaDeEstrategia = {
 }
 
 async function renderGrilla(mes = '2026-10') {
-  render(await PaginaDeGrilla({ params: Promise.resolve({ marca: 'parcelas', mes }) }))
+  return render(await PaginaDeGrilla({ params: Promise.resolve({ marca: 'parcelas', mes }) }))
 }
 
 async function renderEstrategia() {
@@ -502,6 +515,119 @@ describe('la advertencia de regenerar la grilla', () => {
     expect(
       screen.queryByText(/Las ediciones que hayas hecho a mano se pierden/),
     ).not.toBeNull()
+  })
+})
+
+/**
+ * `within(seccionDePiezas(container))` y no `screen` a secas: el mismo
+ * documento tiene otros botones y otros párrafos con números (el resumen por
+ * canal, «Regenerar grilla», «Reabrir grilla»), así que preguntarle al
+ * documento entero podría pasar aunque el texto saliera pegado a otro botón.
+ */
+function seccionDePiezas(container: HTMLElement): HTMLElement {
+  const seccion = within(container).queryByRole('region', { name: 'Piezas del mes' })
+  if (!seccion) throw new Error('La sección "Piezas del mes" no está en el documento')
+  return seccion
+}
+
+describe('generar las piezas del mes', () => {
+  it('con la grilla en borrador no ofrece generar las piezas', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'borrador', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))
+
+    const { container } = await renderGrilla()
+
+    expect(screen.queryByRole('button', { name: 'Generar las piezas' })).toBeNull()
+    // La sección entera, no solo el botón: en borrador no hay nada que
+    // anunciar sobre piezas todavía.
+    expect(within(container).queryByRole('region', { name: 'Piezas del mes' })).toBeNull()
+  })
+
+  it('con la grilla aprobada y ninguna pieza, ofrece generar', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).not.toBeNull()
+  })
+
+  it('mientras hay corridas en vuelo dice cuántas van', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 8, enVuelo: 5 }))
+
+    const { container } = await renderGrilla()
+
+    // El texto lleva «de» y los dos números: cuántas están listas y cuántas
+    // en total, no solo un conteo suelto.
+    expect(
+      within(seccionDePiezas(container)).queryByText('Escribiendo las piezas: 8 de 20 listas'),
+    ).not.toBeNull()
+    // Con corridas vivas sigue habiendo candidatas por encolar (8 + 5 < 20),
+    // así que el botón sigue ofreciéndose.
+    expect(
+      within(seccionDePiezas(container)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).not.toBeNull()
+  })
+
+  it('el avance suma las fallidas cuando las hay', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 8, enVuelo: 5, fallidas: 3 }))
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText(
+        'Escribiendo las piezas: 8 de 20 listas, 3 fallaron',
+      ),
+    ).not.toBeNull()
+  })
+
+  it('con todas las piezas listas no ofrece generar y lo dice', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 20 }))
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).toBeNull()
+    expect(
+      within(seccionDePiezas(container)).queryByText('Las 20 piezas están escritas'),
+    ).not.toBeNull()
+  })
+
+  // El caso que el spec marcó como el más fácil de arruinar: sin nada
+  // encolado todavía la sección no dice nada más que el botón, y con todo
+  // listo dice que está completo y no ofrece el botón. Confundirlos —por
+  // ejemplo mostrando «Las 20 piezas están escritas» también cuando
+  // `listas` es 0— sería peor que no tener el resumen.
+  it('distingue «ninguna encolada» de «todas listas»', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))
+
+    const { container: ningunaEncolada } = await renderGrilla()
+    expect(
+      within(seccionDePiezas(ningunaEncolada)).queryByText('Las 20 piezas están escritas'),
+    ).toBeNull()
+    expect(
+      within(seccionDePiezas(ningunaEncolada)).queryByRole('button', {
+        name: 'Generar las piezas',
+      }),
+    ).not.toBeNull()
+
+    cleanup()
+
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 20 }))
+    const { container: todasListas } = await renderGrilla()
+    expect(
+      within(seccionDePiezas(todasListas)).queryByText('Las 20 piezas están escritas'),
+    ).not.toBeNull()
+    expect(
+      within(seccionDePiezas(todasListas)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).toBeNull()
   })
 })
 

@@ -13,6 +13,7 @@ import {
   editarSlot,
   encolarEstrategia,
   encolarGrilla,
+  encolarPiezas,
   guardarEncargo,
   reabrirGrilla,
   reanudarCorridaEncolada,
@@ -167,6 +168,25 @@ export async function encolarGrillaAccion(marca: string, mes: string): Promise<R
     await encolarGrilla(db, organizationId, { slug: marca, mes })
     await despertarWorker()
     return null
+  })
+}
+
+/**
+ * La gemela de `encolarGrillaAccion` para las piezas del mes: encola una
+ * corrida de `p3_pieza` por cada slot vigente que todavía no tenga pieza ni
+ * corrida viva, despierta al worker y devuelve. `encolarPiezas` se niega con
+ * un error `permanente` si la grilla no está `aprobada` —generar sobre un
+ * borrador invitaría a seguir editando la grilla después de haber pagado el
+ * modelo— y ese mensaje llega tal cual al cliente.
+ */
+export async function generarPiezasAccion(
+  slug: string,
+  mes: string,
+): Promise<Resultado<{ encoladas: number }>> {
+  return ejecutar(`/${slug}/grilla/${mes}`, async (db, organizationId) => {
+    const resultado = await encolarPiezas(db, organizationId, { slug, mes })
+    await despertarWorker()
+    return resultado
   })
 }
 
