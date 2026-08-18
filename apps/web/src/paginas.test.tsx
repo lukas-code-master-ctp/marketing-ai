@@ -549,6 +549,27 @@ describe('generar las piezas del mes', () => {
     expect(within(container).queryByRole('region', { name: 'Piezas del mes' })).toBeNull()
   })
 
+  // Hallazgo menor de la revisión de la Task 6: el resumen de avance vivía
+  // anidado dentro de `grilla.estado === 'aprobada'`, así que reabrir la
+  // grilla —cosa que hoy nada impide mientras las corridas de piezas siguen
+  // vivas— hacía desaparecer el aviso de pantalla aunque el worker las
+  // siguiera escribiendo. El brief ataba la regla del *botón* a `aprobada`,
+  // no la del *resumen*: con la grilla en borrador el botón sigue sin
+  // ofrecerse, pero el texto de avance tiene que seguir viéndose.
+  it('con la grilla reabierta pero corridas de piezas en vuelo, sigue mostrando el avance sin ofrecer el botón', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'borrador', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 8, enVuelo: 5 }))
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText('Escribiendo las piezas: 8 de 20 listas'),
+    ).not.toBeNull()
+    expect(
+      within(seccionDePiezas(container)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).toBeNull()
+  })
+
   it('con la grilla aprobada y ninguna pieza, ofrece generar', async () => {
     vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
     vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20 }))

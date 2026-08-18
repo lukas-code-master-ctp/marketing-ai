@@ -8,11 +8,11 @@ import { corridaViva } from '@gc/operaciones/senales'
 // que —a diferencia de `RejillaDelMes.tsx` y `PanelDeDetalle.tsx`— importar
 // de `@gc/strategy` acá no arrastra nada al bundle del navegador.
 import type { TipoPieza } from '@gc/strategy'
-import { generarPiezasAccion } from '../../../../../acciones.js'
 import { mesAnterior, mesSiguiente, semanasDelMes } from '../../../../../calendario.js'
 import { conexion, organizacionPorDefecto } from '../../../../../datos.js'
 import { BotonAprobarGrilla } from '../../../../../componentes/BotonAprobarGrilla.js'
 import { BotonGenerar } from '../../../../../componentes/BotonGenerar.js'
+import { BotonGenerarPiezas } from '../../../../../componentes/BotonGenerarPiezas.js'
 import { BotonReabrirGrilla } from '../../../../../componentes/BotonReabrirGrilla.js'
 import { EstadoDeCorrida } from '../../../../../componentes/EstadoDeCorrida.js'
 import { RejillaDelMes } from '../../../../../componentes/RejillaDelMes.js'
@@ -179,35 +179,23 @@ export default async function PaginaDeGrilla({
           {grilla.estado === 'aprobada' && (
             <div className="flex flex-col items-end gap-2">
               <BotonReabrirGrilla marca={marca} mes={mes} />
-              {/* Sección propia, con su nombre accesible, para que el avance
-                  de las piezas y el botón que las encola se puedan pedir por
-                  separado del resto de la cabecera. */}
-              {(textoAvancePiezas || mostrarBotonPiezas) && (
-                <section
-                  aria-label="Piezas del mes"
-                  className="flex flex-col items-end gap-1 text-right"
-                >
-                  {textoAvancePiezas && (
-                    <p className="text-sm text-gray-600">{textoAvancePiezas}</p>
-                  )}
-                  {mostrarBotonPiezas && (
-                    <form
-                      action={async () => {
-                        'use server'
-                        await generarPiezasAccion(marca, mes)
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-                      >
-                        Generar las piezas
-                      </button>
-                    </form>
-                  )}
-                </section>
-              )}
             </div>
+          )}
+          {/* Sección propia, con su nombre accesible, para que el avance de
+              las piezas y el botón que las encola se puedan pedir por
+              separado del resto de la cabecera. Fuera del bloque de
+              `aprobada`: si alguien reabre la grilla mientras las corridas de
+              piezas siguen en vuelo —cosa que hoy nada impide—, el aviso de
+              avance tiene que seguir viéndose aunque el botón (que sí exige
+              `aprobada`, ver `mostrarBotonPiezas`) haya desaparecido. */}
+          {(textoAvancePiezas || mostrarBotonPiezas) && (
+            <section
+              aria-label="Piezas del mes"
+              className="flex flex-col items-end gap-1 text-right"
+            >
+              {textoAvancePiezas && <p className="text-sm text-gray-600">{textoAvancePiezas}</p>}
+              {mostrarBotonPiezas && <BotonGenerarPiezas marca={marca} mes={mes} />}
+            </section>
           )}
         </div>
       </header>
