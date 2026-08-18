@@ -4,6 +4,7 @@ import {
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos, type Canal } from '@gc/db'
+import { modelosDelNivel } from '@gc/operaciones'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
 import {
@@ -109,8 +110,15 @@ export function crearFlujoPieza(deps: Dependencias): DefinicionDeFlujo {
         },
       ]
 
+      // Se resuelve antes de la llamada, no después: si la organización no
+      // eligió modelo para este nivel, el `permanente` de `modelosDelNivel`
+      // tiene que cortar antes de gastar. Lee `tarea.nivel` y no un literal,
+      // así que agregar un nivel nuevo no exige tocar este flujo.
+      const modelos = await modelosDelNivel(ctx.db, ctx.organizationId, tarea.nivel)
+
       const { datos } = await ejecutarTarea(tarea, mensajes, {
         cliente: deps.cliente,
+        modelos,
         ...(deps.env !== undefined ? { env: deps.env } : {}),
         registrarUso: crearRegistrador(ctx.db, {
           organizationId: ctx.organizationId,

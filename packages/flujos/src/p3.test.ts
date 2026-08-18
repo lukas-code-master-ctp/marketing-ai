@@ -67,7 +67,39 @@ const PIEZA_BLOG_JSON = JSON.stringify({
     'Sin él, no hay forma de comprobar que el proyecto es viable.',
 })
 
-async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+// Identificador reconocible a propósito: la prueba «usa el modelo que la
+// organización eligió, no uno fijo» necesita distinguir este valor de
+// cualquier literal que pudiera quedar escrito a mano en `p3.ts`.
+const MODELO_REDACCION_ELEGIDO = 'proveedor/redactor-elegido'
+
+// `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+// pruebas (el borrado en cascada por organización no la alcanza), así que
+// cada archivo necesita su propia siembra. Un solo candidato de `redaccion`
+// alcanza: P3 no elige entre varios, solo necesita que la organización tenga
+// UNA elección para no caer en el `permanente` de `modelosDelNivel`.
+async function sembrarEleccionDeModelo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'redaccion', modelId: MODELO_REDACCION_ELEGIDO,
+    label: 'Redactor elegido', description: 'El elegido para redacción en estas pruebas.',
+    priceInputUsd: '3.0000', priceOutputUsd: '9.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId, level: 'redaccion', principalId: modelo!.id, respaldoId: null,
+  })
+}
+
+/**
+ * `conEleccionDeModelo: false` deja la organización sin elegir el nivel de
+ * redacción — es lo que necesita la prueba que confirma que P3 se niega,
+ * sin llamar al modelo, antes de gastar por una organización sin elección.
+ */
+async function sembrar(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  opciones: { conEleccionDeModelo?: boolean } = {},
+) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
@@ -82,6 +114,9 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
     data: ESTRATEGIA,
     brandProfileVersion: 1,
   })
+  if (opciones.conEleccionDeModelo !== false) {
+    await sembrarEleccionDeModelo(db, ref.organizationId)
+  }
   return ref
 }
 
@@ -175,6 +210,44 @@ describe('flujo P3 · pieza', () => {
       expect(fila).toBeDefined()
       expect(fila!.planSlotId).toBe(slotId)
       expect(fila!.channel).toBe('linkedin')
+    })
+  })
+
+  it('usa el modelo que la organización eligió, no uno fijo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+      await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
+
+      // `modelos` viaja como arreglo (principal, y respaldo si difiere) a
+      // `ClienteLlm.completar`; sin respaldo elegido, `modelosDelNivel`
+      // devuelve el principal en los dos y `ejecutarTarea` lo deduplica a un
+      // solo elemento. El identificador sembrado tiene que ser el que llegó,
+      // no un modelo fijo escrito a mano en `p3.ts`.
+      expect(cliente.peticiones[0]!.modelos).toEqual([MODELO_REDACCION_ELEGIDO])
+    })
+  })
+
+  it('sin elección para redacción falla sin llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db, { conEleccionDeModelo: false })
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
+        ),
+      ).rejects.toThrow(/\/configuracion/)
+
+      // Lo que importa no es solo que falle, sino que falle ANTES de pagar:
+      // resolver tiene que ocurrir antes de gastar, igual que la
+      // comprobación del slot y la de presupuesto.
+      expect(cliente.peticiones).toHaveLength(0)
     })
   })
 

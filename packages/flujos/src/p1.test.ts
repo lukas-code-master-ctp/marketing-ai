@@ -43,6 +43,26 @@ async function sembrarEncargo(
   })
 }
 
+// `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+// pruebas (el borrado en cascada por organización no la alcanza), así que
+// cada archivo necesita su propia siembra. Un solo candidato de
+// `razonamiento` alcanza: P1 no elige entre varios, solo necesita que la
+// organización tenga UNA elección para no caer en el `permanente` de
+// `modelosDelNivel`.
+async function sembrarEleccionDeModelo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'razonamiento', modelId: 'proveedor/fuerte',
+    label: 'Fuerte', description: 'El elegido para razonamiento en estas pruebas.',
+    priceInputUsd: '5.0000', priceOutputUsd: '15.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId, level: 'razonamiento', principalId: modelo!.id, respaldoId: null,
+  })
+}
+
 async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
@@ -52,6 +72,7 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
   const ref = { organizationId: org!.id, brandId: marca!.id }
   await guardarPerfil(db, ref, PERFIL_VALIDO)
   await sembrarEncargo(db, ref)
+  await sembrarEleccionDeModelo(db, ref.organizationId)
   return ref
 }
 

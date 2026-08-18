@@ -19,6 +19,22 @@ async function sembrarBase(db: BaseDeDatos) {
   const ref = { organizationId: org!.id, brandId: marca!.id }
   await guardarPerfil(db, ref, PERFIL_VALIDO)
 
+  // `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+  // pruebas (el borrado en cascada por organización no la alcanza). Sin esta
+  // elección, cualquier prueba que corra P1 o P2 de verdad —hoy, las del
+  // worker— cortaría antes de llamar al modelo con el `permanente` de
+  // `modelosDelNivel`. Un solo candidato de `razonamiento` alcanza: es el
+  // único nivel que P1 y P2 usan.
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'razonamiento', modelId: 'proveedor/fuerte',
+    label: 'Fuerte', description: 'El elegido para razonamiento en estas pruebas.',
+    priceInputUsd: '5.0000', priceOutputUsd: '15.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId: ref.organizationId, level: 'razonamiento',
+    principalId: modelo!.id, respaldoId: null,
+  })
+
   const [estrategia] = await db
     .insert(esquema.strategies)
     .values({

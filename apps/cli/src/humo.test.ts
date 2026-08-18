@@ -28,11 +28,31 @@ const ENCARGO = {
   algoMas: '',
 }
 
+// `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+// pruebas, así que esta prueba —que sí llama a P1 y P2 de verdad— necesita
+// sembrar su propia elección de modelo para el nivel `razonamiento`, el que
+// usan las dos tareas. Sin esto, `modelosDelNivel` corta antes de llegar al
+// modelo, con el mismo `permanente` que ejercita `p1.test.ts`.
+async function sembrarEleccionDeModelo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'razonamiento', modelId: 'proveedor/fuerte',
+    label: 'Fuerte', description: 'El elegido para razonamiento en esta prueba.',
+    priceInputUsd: '5.0000', priceOutputUsd: '15.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId, level: 'razonamiento', principalId: modelo!.id, respaldoId: null,
+  })
+}
+
 describe('marcha en seco de punta a punta', () => {
   it('va del perfil a la grilla sin gastar un solo token', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const cliente = new ClienteDeMuestra(MUESTRAS)
       const organizationId = await resolverOrganizacion(db, { env: {} })
+      await sembrarEleccionDeModelo(db, organizationId)
 
       const marca = await crearMarca(db, organizationId, { slug: 'parcelas', nombre: 'Compra Tu Parcela' })
       await cargarPerfilDeObjeto(db, organizationId, { slug: 'parcelas', perfil: PERFIL_VALIDO })
