@@ -451,6 +451,25 @@ describe('el bloque plegable del encargo', () => {
   })
 })
 
+/**
+ * `piezas.size` es lo que las advertencias de regenerar y reabrir cuentan
+ * ahora (Menor D de la revisión de la rama), en vez de `resumenPiezas.listas`
+ * — que filtra los slots descartados y por eso subcuenta lo que la cascada
+ * de verdad borra. El contenido de cada pieza no importa para esas pruebas,
+ * así que un Facebook mínimo alcanza para cualquier cantidad.
+ */
+function mapaDePiezas(cantidad: number): Map<string, TipoPieza> {
+  const mapa = new Map<string, TipoPieza>()
+  for (let i = 0; i < cantidad; i++) {
+    mapa.set(`pieza-${i}`, {
+      canal: 'facebook',
+      cuerpo: 'Un cuerpo cualquiera, sin relevancia para estas pruebas.',
+      hashtags: [],
+    })
+  }
+  return mapa
+}
+
 function slotDeGrilla(id: string, campos: Partial<SlotDeLaGrilla> = {}): SlotDeLaGrilla {
   return {
     id,
@@ -539,6 +558,7 @@ describe('la advertencia de regenerar la grilla', () => {
 
   it('con piezas ya escritas, la advertencia dice que se borran y que se paga otra vez', async () => {
     vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 20, listas: 20 }))
+    vi.mocked(piezasDelMes).mockResolvedValue(mapaDePiezas(20))
     await abrirLaConfirmacion([slotDeGrilla('a')])
 
     expect(
@@ -548,12 +568,74 @@ describe('la advertencia de regenerar la grilla', () => {
     ).not.toBeNull()
   })
 
+  // Menor C de la revisión de la rama: el pronombre plural de "generarlas"
+  // quedaba fuera del condicional de singular, así que con una sola pieza el
+  // texto terminaba en "...y volver a generarlas paga el modelo otra vez" —
+  // "las" sin nada plural detrás. La prueba anterior solo afirmaba hasta "que
+  // ya escribiste" y no llegaba a ver el resto de la frase; esta la cubre
+  // completa.
   it('concuerda en singular cuando la pieza escrita es una sola', async () => {
     vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 1 }))
+    vi.mocked(piezasDelMes).mockResolvedValue(mapaDePiezas(1))
     await abrirLaConfirmacion([slotDeGrilla('a')])
 
-    expect(screen.queryByText(/También se borra la pieza que ya escribiste/)).not.toBeNull()
+    expect(
+      screen.queryByText(
+        /También se borra la pieza que ya escribiste, y volver a generarla paga el modelo otra vez\./,
+      ),
+    ).not.toBeNull()
     expect(screen.queryByText(/1 piezas que ya escribiste/)).toBeNull()
+    expect(screen.queryByText(/generarlas paga el modelo otra vez/)).toBeNull()
+  })
+
+  // Menor D de la revisión de la rama: `resumenPiezas.listas` filtra los
+  // slots descartados (es el mismo criterio que usa `encolarPiezas` para
+  // decidir a quién encolar), pero regenerar borra `plan_slots` completo —
+  // descartados incluidos— y con ellos cualquier pieza que colgara de esos
+  // slots. Medido: descartar un slot que tenía pieza dejaba
+  // `resumenPiezas.listas` en 1 con 2 filas reales en `content_pieces`, y la
+  // advertencia decía "se borra la pieza" (singular) cuando en verdad se
+  // borraban 2. `piezas` (de `piezasDelMes`, que no filtra por descartado)
+  // es la fuente correcta.
+  it('cuenta también la pieza de un slot descartado, que resumenPiezas.listas deja fuera', async () => {
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 1 }))
+    vi.mocked(piezasDelMes).mockResolvedValue(mapaDePiezas(2))
+    await abrirLaConfirmacion([slotDeGrilla('a'), slotDeGrilla('b', { descartado: true })])
+
+    expect(
+      screen.queryByText(
+        /También se borran las 2 piezas que ya escribiste, y volver a generarlas paga el modelo otra vez\./,
+      ),
+    ).not.toBeNull()
+  })
+})
+
+/**
+ * La gemela de la de arriba para «Reabrir grilla»: `BotonReabrirGrilla`
+ * recibe `piezasEscritas` como prop, y `page.tsx` ahora se lo llena con
+ * `piezas.size` en vez de `resumenPiezas.listas`, por el mismo motivo (Menor
+ * D de la revisión de la rama). Una sola prueba alcanza: la lógica del
+ * pronombre singular/plural es de `BotonReabrirGrilla` y ya está cubierta en
+ * `BotonReabrirGrilla.test.tsx`; lo que hace falta afirmar acá es que
+ * `page.tsx` le pasa el número correcto.
+ */
+describe('la advertencia de reabrir la grilla', () => {
+  it('cuenta piezas.size, no resumenPiezas.listas, incluida la de un slot descartado', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(
+      grilla({
+        estado: 'aprobada',
+        contentPlanId: 'plan-1',
+        slots: [slotDeGrilla('a'), slotDeGrilla('b', { descartado: true })],
+      }),
+    )
+    vi.mocked(corridaDe).mockResolvedValue(null)
+    vi.mocked(resumenDePiezas).mockResolvedValue(resumen({ total: 1, listas: 1 }))
+    vi.mocked(piezasDelMes).mockResolvedValue(mapaDePiezas(2))
+
+    await renderGrilla()
+    await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
+
+    expect(screen.queryByText(/borra las 2 piezas que ya escribiste/)).not.toBeNull()
   })
 })
 
@@ -743,6 +825,78 @@ describe('generar las piezas del mes', () => {
     expect(
       within(seccionDePiezas(container)).queryByText(/20 fallaron/),
     ).not.toBeNull()
+  })
+
+  // Importante A de la revisión de la rama: la rama de "algunas fallidas"
+  // vive fuera del bloque `aprobada` a propósito (ver el comentario de la
+  // sección más abajo), así que reabrir una grilla con corridas fallidas
+  // seguía mostrando el texto — pero ese texto mandaba a apretar "Generar
+  // las piezas", un botón que `mostrarBotonPiezas` solo ofrece con la grilla
+  // `aprobada`. Medido: en borrador, con `{ total: 20, listas: 18,
+  // fallidas: 2, enVuelo: 0 }`, decía «...reintenta solo las que faltan...»
+  // sobre una sección sin botón.
+  it('con la grilla en borrador y algo fallido, no manda a apretar un botón que no está', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'borrador', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 20, listas: 18, fallidas: 2, enVuelo: 0 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByRole('button', { name: 'Generar las piezas' }),
+    ).toBeNull()
+    expect(
+      within(seccionDePiezas(container)).queryByText(/Generar las piezas reintenta/),
+    ).toBeNull()
+    // La grilla sí puede volver a aprobarse desde acá —el botón está en la
+    // misma cabecera—, así que el texto lo dice en vez de callar.
+    expect(
+      within(seccionDePiezas(container)).queryByText(
+        '18 de 20 piezas escritas, 2 fallaron. Aprueba la grilla de nuevo para poder reintentarlas.',
+      ),
+    ).not.toBeNull()
+  })
+
+  // El sub-caso del mismo hallazgo: sin el guardián de `total > 0`, un mes
+  // con todos los slots descartados pero alguna corrida fallida de un slot
+  // que ya no cuenta decía «0 de 0 piezas escritas, 2 fallaron» — una
+  // aritmética que se desmiente sola.
+  it('con todos los slots descartados no dice "0 de 0" aunque haya fallidas', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 0, listas: 0, fallidas: 2, enVuelo: 0 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(within(container).queryByText(/0 de 0/)).toBeNull()
+    // Sin nada por encolar (`total === 0`) tampoco hay botón que ofrecer, así
+    // que la sección entera no debería aparecer.
+    expect(within(container).queryByRole('region', { name: 'Piezas del mes' })).toBeNull()
+  })
+
+  // Importante B de la revisión de la rama: `fallidas` cuenta corridas, no
+  // slots, y una corrida fallida nunca se limpia. Medido: dos tandas
+  // fallidas seguidas sobre 2 slots dejan `fallidas` en 4 aunque después de
+  // que una sale bien solo falte reintentar 1. El texto usaba `fallidas`
+  // directo y decía «4 fallaron» — once piezas rotas en un mes de veinte,
+  // en el ejemplo del brief, cuando en verdad quedaba una.
+  it('con corridas fallidas acumuladas de varias tandas, cuenta lo que falta y no el historial', async () => {
+    vi.mocked(grillaDelMes).mockResolvedValue(grilla({ estado: 'aprobada', contentPlanId: 'plan-1' }))
+    vi.mocked(resumenDePiezas).mockResolvedValue(
+      resumen({ total: 2, listas: 1, fallidas: 4, enVuelo: 0 }),
+    )
+
+    const { container } = await renderGrilla()
+
+    expect(
+      within(seccionDePiezas(container)).queryByText(
+        '1 de 2 piezas escritas, 1 falló. Generar las piezas reintenta solo las que faltan,' +
+          ' sin volver a pagar las que ya tienes.',
+      ),
+    ).not.toBeNull()
+    expect(within(seccionDePiezas(container)).queryByText(/4 fallaron/)).toBeNull()
   })
 })
 

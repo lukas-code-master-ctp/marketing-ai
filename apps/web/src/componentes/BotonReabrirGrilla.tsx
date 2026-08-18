@@ -14,10 +14,12 @@ import { reabrirGrillaAccion } from '../acciones.js'
  * —que la grilla vuelve a ser regenerable por el motor— porque regenerar sí
  * reemplaza los slots, y con ellos cualquier pieza que colgara de ellos (el
  * `ON DELETE CASCADE` de la migración `0008`). `piezasEscritas` —el
- * `resumenPiezas.listas` que `page.tsx` ya calculó— es lo que permite
- * nombrar ese costo aquí: reabrir por sí solo no borra nada, pero deja la
- * puerta abierta a un "Regenerar grilla" que sí lo hace, y quien reabre
- * necesita saberlo antes, no después.
+ * `piezas.size` que `page.tsx` ya calculó con `piezasDelMes`, no
+ * `resumenPiezas.listas`, porque ese segundo número no cuenta las piezas de
+ * un slot descartado y regenerar las borra igual (Menor D de la revisión de
+ * la rama)— es lo que permite nombrar ese costo aquí: reabrir por sí solo no
+ * borra nada, pero deja la puerta abierta a un "Regenerar grilla" que sí lo
+ * hace, y quien reabre necesita saberlo antes, no después.
  */
 export function BotonReabrirGrilla({
   marca,

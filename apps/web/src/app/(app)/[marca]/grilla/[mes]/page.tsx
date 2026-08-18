@@ -113,18 +113,43 @@ export default async function PaginaDeGrilla({
       resumenPiezas.total === 1
         ? 'La pieza está escrita'
         : `Las ${resumenPiezas.total} piezas están escritas`
-  } else if (resumenPiezas.fallidas > 0) {
-    // La cola ya se drenó (`enVuelo === 0`) pero algo quedó fallido: sin esta
-    // rama el texto desaparecía justo en el estado estable que el usuario
-    // mira, indistinguible de "no has encolado nada" (Crítico 1 de la
-    // revisión de la rama). `mostrarBotonPiezas` ya ofrece el botón en este
-    // estado —`listas + 0 < total`— y ese botón reencola solo los slots sin
-    // pieza, así que decirlo evita que alguien tema pagar el modelo dos veces.
+  } else if (resumenPiezas.total > 0 && resumenPiezas.fallidas > 0) {
+    // La cola ya se drenó (`enVuelo === 0`, la única forma de llegar hasta
+    // acá) pero algo quedó fallido: sin esta rama el texto desaparecía justo
+    // en el estado estable que el usuario mira, indistinguible de "no has
+    // encolado nada" (Crítico 1 de la revisión de la rama). El guardián de
+    // `total > 0` evita el caso degenerado de un mes con todos los slots
+    // descartados: sin él, con `total === 0` y alguna corrida fallida de un
+    // slot que ya no cuenta, el texto decía «0 de 0 piezas escritas, N
+    // fallaron» (Importante A de la revisión de `feat/piezas-y-su-texto`).
+    //
+    // Lo que falta por escribir no es `resumenPiezas.fallidas`: ese número
+    // cuenta corridas de `p3_pieza`, no slots, y una corrida fallida nunca se
+    // limpia, así que con varias tandas de reintentos crece sin techo aunque
+    // cada vez quede menos por hacer de verdad (Importante B de la misma
+    // revisión — medido: dos tandas fallidas seguidas sobre 2 slots dejan
+    // `fallidas` en 4 aunque solo falte reintentar 1). Con la cola drenada lo
+    // que falta es exactamente `total - listas`, y coincide con lo que el
+    // botón va a reencolar (`encolarPiezas` toma los slots sin pieza y sin
+    // corrida viva). `resumenPiezas.fallidas` se deja como está —arreglarlo
+    // exige decidir qué cuenta como "fallida vigente", ver `pendientes.md`—
+    // pero esta pantalla ya no depende de él.
+    const faltan = resumenPiezas.total - resumenPiezas.listas
     textoAvancePiezas =
       `${resumenPiezas.listas} de ${resumenPiezas.total} ` +
       singularOPlural(resumenPiezas.total, 'pieza escrita', 'piezas escritas') +
-      `, ${resumenPiezas.fallidas} ${singularOPlural(resumenPiezas.fallidas, 'falló', 'fallaron')}. ` +
-      'Generar las piezas reintenta solo las que faltan, sin volver a pagar las que ya tienes.'
+      `, ${faltan} ${singularOPlural(faltan, 'falló', 'fallaron')}.` +
+      (mostrarBotonPiezas
+        ? // El botón exige la grilla aprobada (`mostrarBotonPiezas`, arriba).
+          // Mandar a apretarlo cuando no está en pantalla —reabrir deja la
+          // grilla en borrador sin tocar las corridas ni las piezas ya
+          // escritas— era el defecto medido en Importante A: el texto sí
+          // aparece (la sección vive fuera del bloque de `aprobada`, ver más
+          // abajo) pero el botón que menciona, no.
+          ' Generar las piezas reintenta solo las que faltan, sin volver a pagar las que ya tienes.'
+        : grilla.estado === 'borrador'
+          ? ' Aprueba la grilla de nuevo para poder reintentarlas.'
+          : '')
   }
 
   const bloqueantes = grilla.problemas.filter((p) => p.severidad === 'bloqueante')
@@ -193,17 +218,28 @@ export default async function PaginaDeGrilla({
                         ? `Las ${descartados} que descartaste vuelven a aparecer, y las ediciones que hiciste a mano se pierden.`
                         : 'Las ediciones que hayas hecho a mano se pierden.') +
                     // Lo único destruido que costó dinero: `persistir` de P2
-                    // borra todos los `plan_slots` del plan por el `ON DELETE
-                    // CASCADE` de la migración `0008`, y con ellos cualquier
-                    // pieza que colgara de ellos (Crítico 2 de la revisión de
-                    // la rama). Sin esta frase, la advertencia enumeraba todo
-                    // lo perdible salvo lo más caro.
-                    (resumenPiezas.listas > 0
-                      ? ` También se ${
-                          resumenPiezas.listas === 1
-                            ? 'borra la pieza que ya escribiste'
-                            : `borran las ${resumenPiezas.listas} piezas que ya escribiste`
-                        }, y volver a generarlas paga el modelo otra vez.`
+                    // borra todos los `plan_slots` del plan —**incluidos los
+                    // descartados**, que siguen ahí hasta que se regenera— por
+                    // el `ON DELETE CASCADE` de la migración `0008`, y con
+                    // ellos cualquier pieza que colgara de ellos (Crítico 2 de
+                    // la revisión de la rama). Sin esta frase, la advertencia
+                    // enumeraba todo lo perdible salvo lo más caro.
+                    //
+                    // Por eso cuenta con `piezas.size` y no con
+                    // `resumenPiezas.listas`: ese segundo número sale de
+                    // `slotsVigentesDelMes`, que filtra los slots
+                    // descartados a propósito (es el mismo criterio que
+                    // `encolarPiezas` usa para decidir a quién encolar), así
+                    // que subcuenta las piezas de un slot que se descartó
+                    // después de escribirse — medido: descartar un slot con
+                    // pieza deja `resumenPiezas.listas` en 1 con 2 filas reales
+                    // en `content_pieces` (Menor D de la revisión de la
+                    // rama). `piezas` (de `piezasDelMes`, arriba) no filtra
+                    // por descartado y por eso sí cuenta las dos.
+                    (piezas.size > 0
+                      ? piezas.size === 1
+                        ? ' También se borra la pieza que ya escribiste, y volver a generarla paga el modelo otra vez.'
+                        : ` También se borran las ${piezas.size} piezas que ya escribiste, y volver a generarlas paga el modelo otra vez.`
                       : '')
                   }
                 />
@@ -215,7 +251,11 @@ export default async function PaginaDeGrilla({
           )}
           {grilla.estado === 'aprobada' && (
             <div className="flex flex-col items-end gap-2">
-              <BotonReabrirGrilla marca={marca} mes={mes} piezasEscritas={resumenPiezas.listas} />
+              {/* `piezas.size`, no `resumenPiezas.listas`, por la misma razón
+                  que la advertencia de regenerar de arriba: no filtra los
+                  slots descartados, y esos también pierden su pieza cuando
+                  se regenera (Menor D de la revisión de la rama). */}
+              <BotonReabrirGrilla marca={marca} mes={mes} piezasEscritas={piezas.size} />
             </div>
           )}
           {/* Sección propia, con su nombre accesible, para que el avance de
