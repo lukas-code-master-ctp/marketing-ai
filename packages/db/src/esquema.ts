@@ -6,7 +6,7 @@ import {
 import { CANALES } from './canales.js'
 
 // Reexportados desde `./canales`, y no declarados acá: ese módulo existe para
-// que un componente de cliente los importe sin arrastrar el DDL de las trece
+// que un componente de cliente los importe sin arrastrar el DDL de las catorce
 // tablas de este archivo al bundle del navegador (ver su cabecera). Esta
 // reexportación es lo que mantiene una sola fuente de verdad: todo lo que ya
 // importaba `CANALES`/`Canal` del barril o de `./esquema` sigue resolviendo.
@@ -293,6 +293,41 @@ export const planSlots = pgTable('plan_slots', {
   }),
 }))
 
+/**
+ * El texto de una pieza: la **ejecución** de lo que el slot planificó.
+ *
+ * Una fila por slot —única sobre `plan_slot_id`—, así que regenerar reemplaza
+ * en vez de acumular. Las versiones y la autoría son de `content_revisions`,
+ * que llega con el editor (bloque 2C): hoy no hay edición humana, así que una
+ * tabla de revisiones solo registraría a la IA repitiéndose.
+ *
+ * `channel` se copia del slot a propósito: el esquema Zod está discriminado
+ * por canal, y leerlo del slot en cada validación obligaría a una consulta más
+ * justo donde importa que sea barato.
+ *
+ * No lleva columna de estado. La máquina de estados de una pieza —`en_qa`,
+ * `en_revision`, `aprobada`— pertenece a los bloques que la usan (2B y 2C);
+ * acá la pieza existe o no existe, y el avance de la generación ya lo cuentan
+ * las corridas.
+ */
+export const contentPieces = pgTable('content_pieces', {
+  id: id(),
+  organizationId: uuid('organization_id').notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  planSlotId: uuid('plan_slot_id').notNull().unique(),
+  channel: text('channel', { enum: CANALES }).notNull(),
+  data: jsonb('data').notNull(),
+  brandProfileVersion: integer('brand_profile_version').notNull(),
+  createdAt: creadoEn(),
+}, (t) => ({
+  canalValido: chequeoEnum('content_pieces_channel_check', 'channel', CANALES),
+  slotPorOrg: foreignKey({
+    columns: [t.planSlotId, t.organizationId],
+    foreignColumns: [planSlots.id, planSlots.organizationId],
+    name: 'content_pieces_slot_org_fk',
+  }).onDelete('cascade'),
+}))
+
 export const pipelineRuns = pgTable('pipeline_runs', {
   id: id(),
   organizationId: uuid('organization_id').notNull()
@@ -396,5 +431,6 @@ export const aiCalls = pgTable('ai_calls', {
 
 export const esquema = {
   organizations, users, brands, brandProfiles, channelAccounts, approvalPolicies,
-  strategies, strategyBriefs, contentPlans, planSlots, pipelineRuns, pipelineSteps, aiCalls,
+  strategies, strategyBriefs, contentPlans, planSlots, contentPieces,
+  pipelineRuns, pipelineSteps, aiCalls,
 }

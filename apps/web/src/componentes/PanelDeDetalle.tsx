@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
+// De `@gc/strategy` y no de `@gc/db`: este es un componente de cliente, y el
+// barril de `@gc/db` arrastra el conector de Cloud SQL al bundle del
+// navegador (ver la cabecera de `PiezaGenerada.tsx`).
+import type { TipoPieza } from '@gc/strategy'
 import { descartarSlotAccion, editarSlotAccion } from '../acciones.js'
+import { PiezaGenerada } from './PiezaGenerada.js'
 
 /** Para la frase «La grilla de 2026-09 está …», no para una etiqueta suelta. */
 const ESTADO_EN_PROSA: Record<EstadoDeGrilla, string> = {
@@ -43,6 +48,7 @@ export function PanelDeDetalle({
   mes,
   estado,
   derivadosVigentes,
+  pieza,
   onCerrar,
   onVerPadre,
 }: {
@@ -52,6 +58,7 @@ export function PanelDeDetalle({
   mes: string
   estado: EstadoDeGrilla
   derivadosVigentes: SlotDeLaGrilla[]
+  pieza?: TipoPieza | undefined
   onCerrar: () => void
   onVerPadre: (id: string) => void
 }) {
@@ -199,6 +206,8 @@ export function PanelDeDetalle({
 
             <p className="mb-1 text-sm font-medium text-gray-700">Brief</p>
             <p className="whitespace-pre-wrap text-sm text-gray-800">{slot.brief}</p>
+
+            {pieza && <PiezaGenerada pieza={pieza} />}
           </>
         ) : (
           <div className="mb-4 space-y-3">

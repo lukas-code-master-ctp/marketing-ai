@@ -1,9 +1,11 @@
 import { esquema } from '@gc/db'
 import { conBaseDeDatosDePrueba } from '@gc/db/pruebas'
+import { ErrorDeDominio } from '@gc/shared'
 import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
-  corridaDe, encolarEstrategia, encolarGrilla, reanudarCorridaEncolada, tomarCorridaPendiente,
+  corridaDe, encolarEstrategia, encolarGrilla, encolarPiezas, reanudarCorridaEncolada,
+  tomarCorridaPendiente,
 } from './corridas.js'
 import { guardarEncargo } from './encargos.js'
 import { crearMarca } from './marcas.js'
@@ -845,6 +847,216 @@ describe('reanudarCorridaEncolada', () => {
         .from(esquema.pipelineRuns)
         .where(eq(esquema.pipelineRuns.id, runId))
       expect(fila!.status).toBe('fallido')
+    })
+  })
+})
+
+const MES_DE_PIEZAS = '2026-09'
+
+/**
+ * Un plan del mes con tres slots: dos vigentes y uno descartado, en el mismo
+ * espíritu que el ayudante local de `piezas.test.ts` (Task 3) — que no se
+ * reutiliza acá porque no se exporta desde ese archivo. `sembrarConEstrategia`
+ * ya deja la organización, la marca y el perfil; esto agrega el plan y sus
+ * slots, con el estado que cada prueba necesita.
+ */
+async function sembrarPlanConSlots(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+  brandId: string,
+  status: 'borrador' | 'aprobada',
+) {
+  const [plan] = await db
+    .insert(esquema.contentPlans)
+    .values({ organizationId, brandId, month: `${MES_DE_PIEZAS}-01`, status })
+    .returning()
+
+  const slots = await db
+    .insert(esquema.planSlots)
+    .values([
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-01T10:00:00Z'), channel: 'linkedin', format: 'post',
+        pillar: 'educacion', angle: 'Ángulo uno', brief: 'Brief del primer slot',
+      },
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-05T10:00:00Z'), channel: 'blog', format: 'articulo',
+        pillar: 'educacion', angle: 'Ángulo dos', brief: 'Brief del segundo slot',
+      },
+      {
+        organizationId, contentPlanId: plan!.id,
+        scheduledFor: new Date('2026-09-10T10:00:00Z'), channel: 'facebook', format: 'post',
+        pillar: 'educacion', angle: 'Ángulo tres', brief: 'Brief del tercer slot',
+        status: 'descartado',
+      },
+    ])
+    .returning()
+
+  return { planId: plan!.id, slots }
+}
+
+const PIEZA_DE_PRUEBA = {
+  canal: 'linkedin' as const,
+  gancho: 'El gancho de la pieza',
+  cuerpo: 'El cuerpo largo de la pieza, con más de veinte caracteres.',
+  hashtags: ['#parcelas', '#chile'],
+}
+
+describe('encolarPiezas', () => {
+  it('se niega si la grilla no está aprobada', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'borrador')
+
+      await expect(
+        encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: MES_DE_PIEZAS }),
+      ).rejects.toThrow(/aprobada|borrador/i)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
+    })
+  })
+
+  it('encola una corrida por slot no descartado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(2)
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(2)
+    })
+  })
+
+  it('no encola los slots que ya tienen pieza', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      await db.insert(esquema.contentPieces).values({
+        organizationId: ref.organizationId,
+        planSlotId: slots[0]!.id,
+        channel: 'linkedin',
+        data: PIEZA_DE_PRUEBA,
+        brandProfileVersion: 1,
+      })
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(1)
+      // No basta con el conteo: la fila real tiene que ser la del slot sin
+      // pieza (slots[1]) y no la del que ya la tiene (slots[0]).
+      const filas = await db.select().from(esquema.pipelineRuns)
+      expect(filas).toHaveLength(1)
+      expect((filas[0]!.input as { slotId: string }).slotId).toBe(slots[1]!.id)
+    })
+  })
+
+  // La guarda es **por slot**, no por lote: un slot con corrida viva no
+  // bloquea a los demás. Sembrar los dos slots vigentes ocupados —como hacía
+  // la versión anterior de esta prueba— deja `encoladas === 0` indistinguible
+  // de una guarda más amplia y equivocada («si hay cualquier corrida viva de
+  // esta marca y este mes, no encoles nada»), que es exactamente el
+  // comportamiento de `encolar` que `encolarPiezas` existe para no repetir.
+  // Por eso acá se ocupa un solo slot y se afirma que el otro sí se encola.
+  it('no encola el slot que ya tiene una corrida viva, y sí encola el otro', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      const [ocupado, libre] = slots.filter((s) => s.status !== 'descartado')
+      await db.insert(esquema.pipelineRuns).values({
+        organizationId: ref.organizationId,
+        brandId: ref.brandId,
+        flow: 'p3_pieza' as const,
+        status: 'pendiente' as const,
+        input: { slotId: ocupado!.id, mes: MES_DE_PIEZAS, brandId: ref.brandId },
+      })
+
+      const resultado = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas', mes: MES_DE_PIEZAS,
+      })
+
+      expect(resultado.encoladas).toBe(1)
+
+      // Dos filas en total: la sembrada (el slot ocupado) y la que acaba de
+      // insertar `encolarPiezas` (el slot libre). Comprobar las filas reales
+      // —no solo el conteo devuelto— es lo que distingue "se encoló el slot
+      // correcto" de "se encoló cualquier cosa una vez".
+      const todas = await db.select().from(esquema.pipelineRuns)
+      expect(todas).toHaveLength(2)
+      const filaDelOcupado = todas.find(
+        (f) => (f.input as { slotId: string }).slotId === ocupado!.id,
+      )
+      const filaDelLibre = todas.find(
+        (f) => (f.input as { slotId: string }).slotId === libre!.id,
+      )
+      expect(filaDelOcupado).toBeTruthy()
+      expect(filaDelLibre).toBeTruthy()
+      // La fila del slot libre es la que insertó `encolarPiezas`: nace en
+      // `pendiente`. La del ocupado es la sembrada por la prueba y no la tocó.
+      expect(filaDelLibre!.status).toBe('pendiente')
+    })
+  })
+
+  it('la entrada de cada corrida lleva slotId, mes y brandId', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+      const { slots } = await sembrarPlanConSlots(db, ref.organizationId, ref.brandId, 'aprobada')
+      const idsVigentes = slots.filter((s) => s.status !== 'descartado').map((s) => s.id)
+
+      await encolarPiezas(db, ref.organizationId, { slug: 'parcelas', mes: MES_DE_PIEZAS })
+
+      const filas = await db.select().from(esquema.pipelineRuns)
+      expect(filas).toHaveLength(2)
+      for (const fila of filas) {
+        const input = fila.input as { slotId: string; mes: string; brandId: string }
+        expect(Object.keys(input).sort()).toEqual(['brandId', 'mes', 'slotId'])
+        expect(idsVigentes).toContain(input.slotId)
+        expect(input.mes).toBe(MES_DE_PIEZAS)
+        expect(input.brandId).toBe(ref.brandId)
+      }
+    })
+  })
+
+  // Importante 5 de la revisión de la rama: `rejects.toThrow()` sin patrón
+  // acepta cualquier excepción, y sin `validarMes` la había igual —solo que
+  // de otra fuente. Sin sembrar el plan (a propósito, más abajo) y sin
+  // `validarMes`, `encolarPiezas` seguiría de largo hasta comparar
+  // `month = '2026-13-01'` contra Postgres, que revienta con su propio
+  // error de driver —medido: "date/time field value out of range"—, no uno
+  // de dominio, y ese error de sobra hace pasar un `toThrow()` sin patrón.
+  // La promesa del nombre —"antes de tocar la base"— exige distinguir ese
+  // caso del rechazo real, así que la prueba afirma dos cosas con dientes:
+  // la *clase* del error, que solo `permanente()` produce (`@gc/shared`; el
+  // error de Postgres no la tiene, ni es instancia de `ErrorDeDominio`), y
+  // su *mensaje*, que solo `validarMes` escribe. Verificado por mutación:
+  // quitar `validarMes(args.mes)` de `encolarPiezas` pone esta prueba en
+  // rojo con `AssertionError: expected error: date/time field value out of
+  // range… to be an instance of ErrorDeDominio` — confirmado y revertido.
+  //
+  // No se siembra el plan: si el rechazo no ocurre antes de tocar la base,
+  // no hay plan que la consulta de `encolarPiezas` pueda encontrar de todos
+  // modos, así que la ausencia de filas en `pipeline_runs` por sí sola no
+  // discriminaría "rechazado antes" de "rechazado después, por falta de
+  // plan". Las dos aserciones de clase y mensaje son las que sí discriminan.
+  it('un mes mal formado se rechaza antes de tocar la base', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrarConEstrategia(db)
+
+      const error: unknown = await encolarPiezas(db, ref.organizationId, {
+        slug: 'parcelas',
+        mes: '2026-13',
+      }).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(ErrorDeDominio)
+      expect((error as ErrorDeDominio).clase).toBe('permanente')
+      expect((error as ErrorDeDominio).message).toMatch(/^Mes inválido "2026-13"/)
+
+      expect(await db.select().from(esquema.pipelineRuns)).toHaveLength(0)
     })
   })
 })

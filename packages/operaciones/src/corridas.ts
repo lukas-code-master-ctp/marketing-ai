@@ -4,6 +4,7 @@ import { validarMes, validarPeriodo } from '@gc/strategy'
 import { and, desc, eq, getTableColumns, inArray, or, sql } from 'drizzle-orm'
 import { leerEncargo } from './encargos.js'
 import { resolverMarca } from './marcas.js'
+import { slotsVigentesDelMes } from './piezas.js'
 import {
   describirAntiguedad, ESTADOS_VIVOS, MINUTOS_SIN_SENAL_PARA_ABANDONO,
 } from './senales.js'
@@ -15,8 +16,8 @@ import {
  */
 export type EstadoDeCorrida = (typeof ESTADOS_PIPELINE)[number]
 
-/** Los dos flujos que la web sabe encolar, con los nombres que `pipeline_runs.flow` guarda. */
-export type FlujoEncolable = 'p1_estrategia' | 'p2_grilla'
+/** Los tres flujos que la web sabe encolar, con los nombres que `pipeline_runs.flow` guarda. */
+export type FlujoEncolable = 'p1_estrategia' | 'p2_grilla' | 'p3_pieza'
 
 export interface CorridaEnCurso {
   id: string
@@ -58,10 +59,22 @@ export interface CorridaTomada {
 
 /**
  * Cada flujo guarda su periodo dentro de `input` bajo una clave distinta, y
- * este es el único sitio donde eso se declara. Antes estaba escrito tres veces
- * —al encolar la estrategia, al encolar la grilla, y en el selector de rama de
+ * este es el único sitio donde eso se declara **para `encolar` y
+ * `corridaDe`**. Antes estaba escrito tres veces ahí —al encolar la
+ * estrategia, al encolar la grilla, y en el selector de rama de
  * `corridaDe`—, así que la escritura y la lectura podían separarse sin que
  * nada lo notara: el `input` viaja como jsonb y `tsc` no ve dentro.
+ *
+ * Para `p3_pieza` la promesa ya no alcanza: `encolarPiezas` no pasa por
+ * `encolar` —arma su propio `INSERT` con `mes: args.mes` escrito a mano,
+ * porque encola muchas filas por slot en vez de una por periodo— y
+ * `resumenDePiezas` (`packages/operaciones/src/piezas.ts`) repite la misma
+ * clave en un fragmento `sql` propio para agrupar por estado. Sumada a la
+ * entrada `p3_pieza` de abajo son tres declaraciones de `'mes'`, no una: el
+ * número exacto que este ayudante existe para evitar, y hoy solo lo logra
+ * para los otros dos flujos. Las pruebas de los tres sitios sí lo cubren —lo
+ * que falta es la frase, no una guarda—, pero conviene no citarla como si
+ * `p3_pieza` también estuviera resuelto.
  *
  * `coincide` devuelve el fragmento con la clave escrita **literal** y no
  * interpolada: `sql.raw` la metería sin escapar, y pasarla como parámetro
@@ -80,6 +93,20 @@ const PERIODO_EN_LA_ENTRADA = {
     clave: 'mes',
     coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
     genera: 'la grilla',
+  },
+  // Inalcanzable hoy: ni `encolar` ni `corridaDe` se llaman nunca con
+  // `p3_pieza` —`encolarPiezas` arma su propio `INSERT` (ver el docstring de
+  // arriba) y nada en la web pide `corridaDe` para este flujo—, así que esta
+  // entrada existe solo para que el `satisfies Record<FlujoEncolable,
+  // unknown>` de abajo siga siendo exhaustivo. Su `genera: 'las piezas'`
+  // tampoco sirve si algún día se usa: produciría «Ya se está generando
+  // **las piezas** de 2026-09», que no concuerda («generando» pide
+  // singular: «la pieza» o, mejor, una frase que no fuerce el artículo).
+  // Antes de conectar este flujo a `encolar` o a `corridaDe`, corrígela.
+  p3_pieza: {
+    clave: 'mes',
+    coincide: (periodo: string) => sql`${esquema.pipelineRuns.input}->>'mes' = ${periodo}`,
+    genera: 'las piezas',
   },
 } as const satisfies Record<FlujoEncolable, unknown>
 
@@ -203,6 +230,113 @@ export async function encolarGrilla(
   return encolar(
     db, organizationId, 'p2_grilla', { brandId: ref.brandId, slug: args.slug }, args.mes,
   )
+}
+
+/**
+ * Encola una corrida de `p3_pieza` por cada slot no descartado del mes que
+ * todavía no tiene texto ni corrida viva. Es la decisión de arquitectura del
+ * bloque: una pieza es una corrida independiente, no un paso dentro de una
+ * corrida de la grilla entera, así que un slot que falla no arrastra a los
+ * otros y regenerar una sola pieza es encolar una corrida más.
+ *
+ * **No usa el ayudante `encolar`.** Ese ayudante rechaza una segunda corrida
+ * viva de la misma marca, el mismo flujo y el mismo periodo — exactamente lo
+ * que hace falta permitir acá, porque veinte piezas del mismo mes son veinte
+ * corridas de `p3_pieza` del mismo mes. La guarda equivalente es más angosta,
+ * por slot: no encolar el slot que ya tiene una corrida viva, y no encolar el
+ * que ya tiene pieza.
+ *
+ * **Exige que la grilla del mes esté `aprobada`.** Generar piezas sobre un
+ * borrador invita a seguir editando la grilla después y a que esa edición
+ * —o una regeneración— tire veinte textos que ya se pagaron. La guarda es
+ * autoritativa acá, no solo un aviso en pantalla, porque no hay ningún P3
+ * que la repita más abajo.
+ *
+ * Los slots vigentes del mes y cuáles ya tienen pieza salen de
+ * `slotsVigentesDelMes` (`piezas.ts`), y no de una consulta propia: es el
+ * mismo criterio que usa `resumenDePiezas` para contar, escrito una sola vez.
+ *
+ * **Queda una ventana de carrera, y es más ancha que la de `encolar`.** Hace
+ * cuatro `SELECT` secuenciales —el estado del plan, los slots vigentes, las
+ * piezas existentes, las corridas vivas— antes de su único `INSERT`, así que
+ * dos peticiones simultáneas pueden pasar las cuatro por delante de la otra
+ * antes de que cualquiera escriba. El remedio es el mismo que el de
+ * `encolar`: un índice único parcial, acá sobre
+ * `(brand_id, flow, input->>'slotId')` limitado a los estados vivos, o sea
+ * una migración; no se escribió a propósito y está registrado en
+ * `pendientes.md`. Lo que sí cierra es el caso real —dos clics
+ * separados por segundos, desde dos pestañas—, que es por donde ocurre. Lo
+ * que no cierra es peor que en `encolar`: ahí dos clics simultáneos duplican
+ * como mucho una corrida; acá el `INSERT` es uno solo con hasta veinte filas,
+ * y dos peticiones que lean el mismo conjunto de candidatos antes de que
+ * cualquiera escriba pueden duplicarlas todas — o sea pagar el modelo dos
+ * veces por el mes entero, no por una pieza.
+ */
+export async function encolarPiezas(
+  db: BaseDeDatos,
+  organizationId: string,
+  args: { slug: string; mes: string },
+): Promise<{ encoladas: number }> {
+  validarMes(args.mes)
+  const ref = await resolverMarca(db, organizationId, args.slug)
+
+  const [plan] = await db
+    .select({ id: esquema.contentPlans.id, status: esquema.contentPlans.status })
+    .from(esquema.contentPlans)
+    .where(
+      and(
+        eq(esquema.contentPlans.organizationId, organizationId),
+        eq(esquema.contentPlans.brandId, ref.brandId),
+        eq(esquema.contentPlans.month, `${args.mes}-01`),
+      ),
+    )
+
+  if (!plan || plan.status !== 'aprobada') {
+    throw permanente(
+      `La grilla de ${args.mes} para la marca ${args.slug} está en estado ` +
+        `"${plan?.status ?? 'sin generar'}" y las piezas solo se generan sobre una grilla ` +
+        'aprobada. Apruébala primero en su pantalla: generar sobre un borrador invita a ' +
+        'seguir editando la grilla después y a tirar textos que ya se pagaron.',
+    )
+  }
+
+  const { ids: idsDeSlots, conPieza: idsConPieza } = await slotsVigentesDelMes(
+    db, organizationId, { brandId: ref.brandId, mes: args.mes },
+  )
+  if (idsDeSlots.length === 0) return { encoladas: 0 }
+
+  // El `slotId` se lee del `input` con la misma extracción de jsonb que usa
+  // el resto del archivo: no hace falta cruzar por `mes` además, porque cada
+  // slot pertenece a un único plan y su id ya lo desambigua.
+  const corridasVivas = await db
+    .select({ slotId: sql<string>`${esquema.pipelineRuns.input}->>'slotId'` })
+    .from(esquema.pipelineRuns)
+    .where(
+      and(
+        eq(esquema.pipelineRuns.organizationId, organizationId),
+        eq(esquema.pipelineRuns.brandId, ref.brandId),
+        eq(esquema.pipelineRuns.flow, 'p3_pieza'),
+        inArray(esquema.pipelineRuns.status, [...ESTADOS_VIVOS]),
+      ),
+    )
+  const idsConCorridaViva = new Set(corridasVivas.map((c) => c.slotId))
+
+  const candidatos = idsDeSlots.filter(
+    (id) => !idsConPieza.has(id) && !idsConCorridaViva.has(id),
+  )
+  if (candidatos.length === 0) return { encoladas: 0 }
+
+  await db.insert(esquema.pipelineRuns).values(
+    candidatos.map((slotId) => ({
+      organizationId,
+      brandId: ref.brandId,
+      flow: 'p3_pieza' as const,
+      status: 'pendiente' as const,
+      input: { slotId, mes: args.mes, brandId: ref.brandId },
+    })),
+  )
+
+  return { encoladas: candidatos.length }
 }
 
 /** Las columnas que devuelve el `RETURNING`, en `snake_case` como salen de la base. */

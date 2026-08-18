@@ -125,7 +125,7 @@ y en `packages/despertador/package.json` con el que exige
 
 **Los enumerados se hacen cumplir con `CHECK` en Postgres.** `text(col, { enum })` de Drizzle no genera restricción alguna.
 
-**La tenencia se verifica dentro de cada escritura**, no confiando en una lectura previa: `WHERE id = ? AND organization_id = ?`, `.returning()`, y `permanente` si no vuelve fila. Hay trece claves foráneas compuestas que además lo exigen desde la base.
+**La tenencia se verifica dentro de cada escritura**, no confiando en una lectura previa: `WHERE id = ? AND organization_id = ?`, `.returning()`, y `permanente` si no vuelve fila. Hay catorce claves foráneas compuestas que además lo exigen desde la base.
 
 **Los modelos se leen del entorno**, nunca literales en código. Solo `@gc/ai` sabe que OpenRouter existe.
 
@@ -256,7 +256,7 @@ anotada en `pendientes.md`.
 
 ```
 @gc/shared      taxonomía de errores: transitorio | permanente | ambiguo
-@gc/db          esquema Drizzle, 13 tablas, 8 migraciones
+@gc/db          esquema Drizzle, 14 tablas, 9 migraciones
 @gc/ai          única puerta a un modelo: ejecutarTarea, presupuesto, modo seco
 @gc/pipeline    motor: reintentos, backoff, idempotencia por paso, reanudación
 @gc/brand       perfiles de marca versionados

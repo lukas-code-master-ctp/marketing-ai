@@ -2,6 +2,9 @@
 
 import { useRef, useState } from 'react'
 import type { EstadoDeGrilla, SlotDeLaGrilla } from '@gc/operaciones'
+// De `@gc/strategy` y no de `@gc/db`, por el mismo motivo que en
+// `PanelDeDetalle.tsx`: este es un componente de cliente.
+import type { TipoPieza } from '@gc/strategy'
 import { derivadosVigentesDe, slotsFueraDeLaRejilla } from '../calendario.js'
 import { FichaDeSlot } from './FichaDeSlot.js'
 import { PanelDeDetalle } from './PanelDeDetalle.js'
@@ -13,6 +16,13 @@ const DIAS_DE_LA_SEMANA = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
  * Los días de relleno de meses vecinos (los que no empiezan con `${mes}-`)
  * van apagados. Guarda qué slot está seleccionado para mostrar su
  * `PanelDeDetalle`, incluida la navegación al padre de un derivado.
+ *
+ * `piezas` es el mapa de `planSlotId` a pieza que arma `piezasDelMes`
+ * (`@gc/operaciones`, Task 3): la página lo lee una sola vez y lo pasa hasta
+ * acá, porque es este componente —y no la página— el que sabe qué slot está
+ * seleccionado y por lo tanto cuál pieza buscar. Por omisión un mapa vacío,
+ * para no volver obligatoria esta prop en las pruebas que montan la rejilla
+ * sin piezas.
  */
 export function RejillaDelMes({
   marca,
@@ -20,12 +30,14 @@ export function RejillaDelMes({
   estado,
   semanas,
   slots,
+  piezas = new Map(),
 }: {
   marca: string
   mes: string
   estado: EstadoDeGrilla
   semanas: string[][]
   slots: SlotDeLaGrilla[]
+  piezas?: Map<string, TipoPieza>
 }) {
   const [seleccionadoId, setSeleccionadoId] = useState<string | null>(null)
   // La ficha que abrió el panel, para devolverle el foco al cerrarlo. Navegar
@@ -133,6 +145,7 @@ export function RejillaDelMes({
           mes={mes}
           estado={estado}
           derivadosVigentes={derivadosVigentesDelSeleccionado}
+          pieza={piezas.get(seleccionado.id)}
           onCerrar={cerrar}
           onVerPadre={setSeleccionadoId}
         />

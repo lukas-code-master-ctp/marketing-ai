@@ -574,7 +574,7 @@ describe('estado pendiente en pipeline_runs', () => {
 
 /**
  * Catálogo, no comportamiento. Las pruebas de arriba solo se disparan cuando
- * alguien borra o inserta la fila justa, así que siete de las trece compuestas
+ * alguien borra o inserta la fila justa, así que siete de las catorce compuestas
  * no las cubre ninguna. Bastaría un `drizzle-kit generate` que reescriba una
  * migración para que la barrera desapareciera con la suite en verde.
  *
@@ -621,6 +621,12 @@ describe('catálogo de restricciones compuestas', () => {
       conname: 'channel_accounts_brand_org_fk',
       definicion:
         'FOREIGN KEY (brand_id, organization_id) REFERENCES brands(id, organization_id) ON DELETE CASCADE',
+    },
+    {
+      tabla: 'content_pieces',
+      conname: 'content_pieces_slot_org_fk',
+      definicion:
+        'FOREIGN KEY (plan_slot_id, organization_id) REFERENCES plan_slots(id, organization_id) ON DELETE CASCADE',
     },
     {
       tabla: 'content_plans',
@@ -673,7 +679,7 @@ describe('catálogo de restricciones compuestas', () => {
   ]
 
   // Las cinco `(id, organization_id)` son el otro lado del trato: sin ellas
-  // ninguna de las trece compuestas de arriba podría siquiera declararse. Se
+  // ninguna de las catorce compuestas de arriba podría siquiera declararse. Se
   // listan junto al resto de las únicas compuestas porque filtrar por su
   // definición volvería tautológica justo la comparación que interesa.
   const UNICAS: FilaDeRestriccion[] = [
@@ -751,7 +757,7 @@ describe('catálogo de restricciones compuestas', () => {
     return filas as unknown as FilaDeRestriccion[]
   }
 
-  it('declara exactamente las trece foráneas compuestas esperadas', async () => {
+  it('declara exactamente las catorce foráneas compuestas esperadas', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       expect(await leer(db, 'f')).toEqual(FK)
     })
@@ -853,6 +859,91 @@ describe('strategy_briefs', () => {
           data: {},
         }),
       ).rejects.toThrow()
+    })
+  })
+})
+
+async function sembrarSlot(db: BaseDeDatos) {
+  const [org] = await db
+    .insert(esquema.organizations)
+    .values({ name: 'Piezas', slug: 'piezas' })
+    .returning()
+  const [marca] = await db
+    .insert(esquema.brands)
+    .values({ organizationId: org!.id, slug: 'a', name: 'A' })
+    .returning()
+  const [plan] = await db
+    .insert(esquema.contentPlans)
+    .values({ organizationId: org!.id, brandId: marca!.id, month: '2026-09-01' })
+    .returning()
+  const [slot] = await db
+    .insert(esquema.planSlots)
+    .values({
+      organizationId: org!.id,
+      contentPlanId: plan!.id,
+      scheduledFor: new Date('2026-09-03T13:00:00Z'),
+      channel: 'linkedin',
+      format: 'post',
+      pillar: 'educacion',
+      angle: 'mito común',
+      brief: 'Un brief suficientemente largo para pasar la validación.',
+    })
+    .returning()
+
+  return { organizationId: org!.id, slotId: slot!.id }
+}
+
+describe('content_pieces', () => {
+  it('tiene la única por slot y la foránea compuesta', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const filas = await db.execute(sql`
+        select conname from pg_constraint where conrelid = 'content_pieces'::regclass
+      `)
+      const nombres = filas.rows.map((f) => String(f.conname))
+      expect(nombres).toContain('content_pieces_plan_slot_id_unique')
+      expect(nombres).toContain('content_pieces_slot_org_fk')
+      expect(nombres).toContain('content_pieces_channel_check')
+    })
+  })
+
+  it('rechaza una pieza cuyo slot es de otra organización', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { slotId } = await sembrarSlot(db)
+      const [otra] = await db.insert(esquema.organizations)
+        .values({ name: 'B', slug: 'b' }).returning()
+
+      await expect(
+        db.insert(esquema.contentPieces).values({
+          organizationId: otra!.id, planSlotId: slotId, channel: 'linkedin',
+          data: {}, brandProfileVersion: 1,
+        }),
+      ).rejects.toThrow(/content_pieces_slot_org_fk/)
+    })
+  })
+
+  it('rechaza un canal fuera del enumerado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { slotId, organizationId } = await sembrarSlot(db)
+      await expect(
+        db.execute(sql`
+          insert into content_pieces (organization_id, plan_slot_id, channel, data, brand_profile_version)
+          values (${organizationId}, ${slotId}, 'podcast', '{}'::jsonb, 1)
+        `),
+      ).rejects.toThrow(/content_pieces_channel_check/)
+    })
+  })
+
+  it('un slot no puede tener dos piezas', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const { slotId, organizationId } = await sembrarSlot(db)
+      const fila = {
+        organizationId, planSlotId: slotId, channel: 'linkedin' as const,
+        data: {}, brandProfileVersion: 1,
+      }
+      await db.insert(esquema.contentPieces).values(fila)
+      await expect(
+        db.insert(esquema.contentPieces).values(fila),
+      ).rejects.toThrow(/content_pieces_plan_slot_id_unique/)
     })
   })
 })

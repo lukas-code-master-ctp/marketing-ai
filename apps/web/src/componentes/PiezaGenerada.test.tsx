@@ -1,0 +1,193 @@
+// @vitest-environment jsdom
+import type { TipoPieza } from '@gc/strategy'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { PiezaGenerada } from './PiezaGenerada.js'
+
+afterEach(cleanup)
+// La misma limpieza que usa EditorDePerfil.test.tsx: una prueba reemplaza
+// `navigator.clipboard` con `Object.defineProperty`, y sin restaurarlo la
+// propiedad propia queda puesta para las pruebas que siguen en este archivo.
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'clipboard')
+})
+
+const PIEZA_LINKEDIN: TipoPieza = {
+  canal: 'linkedin',
+  gancho: 'El error que más cuesta en una compra de parcela',
+  cuerpo:
+    'Muchos compradores primerizos no revisan la factibilidad antes de firmar, y ese descuido ' +
+    'termina costando meses de trámites.',
+  hashtags: ['parcelas', 'inversion'],
+}
+
+const PIEZA_BLOG: TipoPieza = {
+  canal: 'blog',
+  titulo: 'Cómo verificar la factibilidad de una parcela antes de comprar',
+  bajada: 'Los tres documentos que hay que pedir antes de firmar cualquier promesa.',
+  cuerpo:
+    'La factibilidad sanitaria y eléctrica es el primer filtro: sin ella, ni el financiamiento ' +
+    'ni la construcción son posibles.',
+}
+
+const PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS: TipoPieza = {
+  canal: 'instagram',
+  caption: 'Tres señales de que una parcela no tiene factibilidad.',
+  hashtags: ['parcelas', 'terrenos'],
+  diapositivas: [],
+}
+
+const PIEZA_INSTAGRAM_CON_DIAPOSITIVAS: TipoPieza = {
+  canal: 'instagram',
+  caption: 'Tres señales de que una parcela no tiene factibilidad.',
+  hashtags: ['parcelas', 'terrenos'],
+  diapositivas: [
+    'Señal uno: no hay factibilidad sanitaria.',
+    'Señal dos: no hay factibilidad eléctrica.',
+    'Señal tres: el plano no está regularizado.',
+  ],
+}
+
+describe('PiezaGenerada', () => {
+  it('muestra los campos de LinkedIn, con el gancho aparte', () => {
+    render(<PiezaGenerada pieza={PIEZA_LINKEDIN} />)
+
+    // El gancho tiene su propia etiqueta, separada de la del cuerpo: son dos
+    // campos distintos y no una sola masa de texto.
+    const bloqueDelGancho = screen.getByText('Gancho').closest('div')!
+    expect(within(bloqueDelGancho).getByText(PIEZA_LINKEDIN.gancho)).not.toBeNull()
+
+    const bloqueDelCuerpo = screen.getByText('Cuerpo').closest('div')!
+    expect(within(bloqueDelCuerpo).getByText(PIEZA_LINKEDIN.cuerpo)).not.toBeNull()
+
+    const bloqueDeHashtags = screen.getByText('Hashtags').closest('div')!
+    expect(within(bloqueDeHashtags).getByText(/parcelas/)).not.toBeNull()
+    expect(within(bloqueDeHashtags).getByText(/inversion/)).not.toBeNull()
+  })
+
+  it('muestra los campos del blog', () => {
+    render(<PiezaGenerada pieza={PIEZA_BLOG} />)
+
+    const bloqueDelTitulo = screen.getByText('Título').closest('div')!
+    expect(within(bloqueDelTitulo).getByText(PIEZA_BLOG.titulo)).not.toBeNull()
+
+    const bloqueDeLaBajada = screen.getByText('Bajada').closest('div')!
+    expect(within(bloqueDeLaBajada).getByText(PIEZA_BLOG.bajada)).not.toBeNull()
+
+    const bloqueDelCuerpo = screen.getByText('Cuerpo').closest('div')!
+    expect(within(bloqueDelCuerpo).getByText(PIEZA_BLOG.cuerpo)).not.toBeNull()
+  })
+
+  it('no muestra las diapositivas cuando van vacías', () => {
+    render(<PiezaGenerada pieza={PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS} />)
+
+    expect(screen.queryByText('Diapositivas')).toBeNull()
+  })
+
+  it('copiar pone el texto completo en el portapapeles', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_LINKEDIN} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    expect(escribir).toHaveBeenCalledTimes(1)
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toContain(PIEZA_LINKEDIN.gancho)
+    expect(copiado).toContain(PIEZA_LINKEDIN.cuerpo)
+  })
+
+  // Importante 3 de la revisión de la rama: las diapositivas se veían en
+  // pantalla (`CampoLista`) pero `textoPlano` las omitía, así que un
+  // carrusel copiaba caption y hashtags nada más — sin su entregable
+  // principal. La prueba de copiar de arriba solo ejercita LinkedIn, que no
+  // tiene diapositivas, así que no podía detectar esto.
+  it('copiar un carrusel de Instagram incluye las diapositivas numeradas', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_INSTAGRAM_CON_DIAPOSITIVAS} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    expect(escribir).toHaveBeenCalledTimes(1)
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toContain(PIEZA_INSTAGRAM_CON_DIAPOSITIVAS.caption)
+    expect(copiado).toContain('#parcelas')
+    expect(copiado).toContain('1. Señal uno: no hay factibilidad sanitaria.')
+    expect(copiado).toContain('2. Señal dos: no hay factibilidad eléctrica.')
+    expect(copiado).toContain('3. Señal tres: el plano no está regularizado.')
+  })
+
+  it('copiar un carrusel sin diapositivas no agrega una sección vacía', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toBe(
+      [
+        PIEZA_INSTAGRAM_SIN_DIAPOSITIVAS.caption,
+        '',
+        '#parcelas #terrenos',
+      ].join('\n'),
+    )
+  })
+
+  // Menor F de la revisión de la rama: `formatoHashtags([])` es `''`, y el
+  // `join('\n')` de `textoPlano` la dejaba en el texto igual que si hubiera
+  // hashtags de verdad — un carrusel sin hashtags copiaba tres líneas en
+  // blanco entre el caption y las diapositivas. El esquema permite el
+  // arreglo vacío (el instructivo dice «hasta treinta», no «al menos uno»),
+  // así que es un caso alcanzable, no uno inventado.
+  it('copiar un carrusel sin hashtags no deja líneas en blanco de más', async () => {
+    const escribir = vi.fn((_texto: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: escribir },
+      configurable: true,
+    })
+    const piezaSinHashtags: TipoPieza = {
+      ...PIEZA_INSTAGRAM_CON_DIAPOSITIVAS,
+      hashtags: [],
+    }
+
+    render(<PiezaGenerada pieza={piezaSinHashtags} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    const copiado = escribir.mock.calls[0]![0]
+    expect(copiado).toBe(
+      [
+        piezaSinHashtags.caption,
+        '',
+        '1. Señal uno: no hay factibilidad sanitaria.',
+        '2. Señal dos: no hay factibilidad eléctrica.',
+        '3. Señal tres: el plano no está regularizado.',
+      ].join('\n'),
+    )
+  })
+
+  it('si el portapapeles falla lo dice y el texto sigue en pantalla', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: () => Promise.reject(new Error('denegado')) },
+      configurable: true,
+    })
+
+    render(<PiezaGenerada pieza={PIEZA_LINKEDIN} />)
+    await userEvent.click(screen.getByRole('button', { name: /Copiar/ }))
+
+    expect(screen.getByRole('alert').textContent).toMatch(/no se pudo copiar/i)
+    const bloqueDelCuerpo = screen.getByText('Cuerpo').closest('div')!
+    expect(within(bloqueDelCuerpo).getByText(PIEZA_LINKEDIN.cuerpo)).not.toBeNull()
+  })
+})

@@ -14,7 +14,7 @@ beforeEach(() => vi.mocked(reabrirGrillaAccion).mockClear())
 
 describe('BotonReabrirGrilla', () => {
   it('no reabre hasta que se confirma', async () => {
-    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" />)
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={0} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
     expect(vi.mocked(reabrirGrillaAccion)).not.toHaveBeenCalled()
@@ -28,7 +28,7 @@ describe('BotonReabrirGrilla', () => {
   })
 
   it('cancelar no reabre', async () => {
-    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" />)
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={0} />)
 
     await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
@@ -42,7 +42,7 @@ describe('BotonReabrirGrilla', () => {
       .mockResolvedValueOnce({ ok: false, mensaje: 'La base no respondió', reintentable: true })
       .mockResolvedValueOnce({ ok: true, datos: null })
 
-    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" />)
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={0} />)
     await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
     await userEvent.click(screen.getByRole('button', { name: 'Sí, reabrir' }))
 
@@ -50,5 +50,37 @@ describe('BotonReabrirGrilla', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
     expect(vi.mocked(reabrirGrillaAccion)).toHaveBeenCalledTimes(2)
+  })
+
+  // Crítico 2 de la revisión de la rama: reabrir no borra nada, pero deja
+  // la puerta abierta a "Regenerar grilla", que sí lo hace — por el
+  // `ON DELETE CASCADE` de la migración `0008`. Quien reabre con piezas ya
+  // escritas tiene que enterarse de eso antes de confirmar, no después.
+  it('sin piezas escritas no promete borrar nada', async () => {
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={0} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
+
+    expect(screen.queryByText(/piezas que ya escribiste/)).toBeNull()
+    expect(screen.queryByText(/pieza que ya escribiste/)).toBeNull()
+  })
+
+  it('con una pieza escrita, avisa en singular que se borra', async () => {
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={1} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
+
+    expect(screen.queryByText(/y borra la pieza que ya escribiste/)).not.toBeNull()
+    expect(screen.queryByText(/1 piezas/)).toBeNull()
+  })
+
+  it('con veinte piezas escritas, avisa cuántas se borran y que se paga otra vez', async () => {
+    render(<BotonReabrirGrilla marca="parcelas" mes="2026-09" piezasEscritas={20} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reabrir grilla' }))
+
+    expect(
+      screen.queryByText(/y borra las 20 piezas que ya escribiste, que volver a generar paga otra vez/),
+    ).not.toBeNull()
   })
 })
