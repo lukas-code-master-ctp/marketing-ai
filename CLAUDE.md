@@ -127,7 +127,7 @@ y en `packages/despertador/package.json` con el que exige
 
 **La tenencia se verifica dentro de cada escritura**, no confiando en una lectura previa: `WHERE id = ? AND organization_id = ?`, `.returning()`, y `permanente` si no vuelve fila. Hay catorce claves foráneas compuestas que además lo exigen desde la base.
 
-**Los modelos se leen del entorno**, nunca literales en código. Solo `@gc/ai` sabe que OpenRouter existe.
+**Los modelos se eligen desde `/configuracion` y viven en la base, no en el entorno.** La regla decía **«Los modelos se leen del entorno, nunca literales en código. Solo `@gc/ai` sabe que OpenRouter existe.»**, y la mitad sigue siendo cierta: los identificadores de modelo siguen sin ser literales en código —ese era el punto real— y `@gc/ai` sigue siendo la única puerta a OpenRouter. Lo que cambió es de dónde salen: ya no de las seis variables `MODELO_*`, sino de `model_catalog` y de la elección que cada organización guarda en `organization_models`, resuelta por `@gc/flujos` antes de llamar a `@gc/ai`. El motivo es que elegir modelo resultó ser una decisión de producto —cuál escribe mejor se descubre leyendo lo que produce, y eso pasa en el navegador, no en una terminal— y con el entorno esa decisión quedaba a dos comandos de distancia de quien la toma: editar el `.env` local y, aparte, la variable en el servicio de Cloud Run, algo que nadie iba a hacer solo para comparar un párrafo.
 
 **Ninguna salida del modelo se parsea con expresiones regulares.** Toda tarea declara un esquema Zod y valida. Validar entrada de usuario con regex sí es válido.
 
