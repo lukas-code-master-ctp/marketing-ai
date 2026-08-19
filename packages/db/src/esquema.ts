@@ -468,8 +468,11 @@ export const modelCatalog = pgTable('model_catalog', {
 
 /**
  * Qué eligió cada organización para cada nivel. El respaldo es opcional
- * porque hoy lo es: `MODELO_RAZONAMIENTO_RESPALDO` está puesta y
- * `MODELO_REDACCION_RESPALDO` vacía, y las dos son estados válidos.
+ * porque no todo nivel tiene un segundo candidato razonable hoy: obligar a
+ * elegir dos modelos donde solo hay uno sensato sería inventar una elección
+ * que nadie necesita hacer, así que `respaldo_id` queda nulable y
+ * `modelosDelNivel` (`packages/operaciones/src/modelos.ts`) cae al principal
+ * en los dos cuando no hay respaldo.
  *
  * Las dos foráneas son simples y no compuestas: `organizations` es la raíz
  * de la tenencia y `model_catalog` es global, así que no hay un par
