@@ -159,6 +159,37 @@ describe('catalogoDeModelos', () => {
       expect(barato.precioSalidaUsd).toBe(3)
     })
   })
+
+  // La prueba de arriba usa precios todos distintos, así que un desempate
+  // roto no la pondría roja: Postgres puede devolver un empate en cualquier
+  // orden de una corrida a otra. Esta siembra empata a propósito —como
+  // empatan de verdad `upstage/solar-pro4` y `poolside/laguna-xs-2.1` en la
+  // migración 0009— y corre la consulta varias veces para que un desempate
+  // ausente (que dependería del orden físico de la tabla) tenga varias
+  // oportunidades de mostrarse inestable.
+  it('a igual precio de salida, desempata por model_id', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await db.insert(esquema.modelCatalog).values([
+        {
+          level: 'razonamiento', modelId: 'proveedor/z-empatado',
+          label: 'Z', description: 'Empatado en precio con el otro.',
+          priceInputUsd: '0.0300', priceOutputUsd: '0.1200',
+        },
+        {
+          level: 'razonamiento', modelId: 'proveedor/a-empatado',
+          label: 'A', description: 'Empatado en precio con el otro.',
+          priceInputUsd: '0.0600', priceOutputUsd: '0.1200',
+        },
+      ])
+
+      for (let i = 0; i < 5; i++) {
+        const mapa = await catalogoDeModelos(db)
+        expect(mapa.get('razonamiento')?.map((m) => m.modelId)).toEqual([
+          'proveedor/a-empatado', 'proveedor/z-empatado',
+        ])
+      }
+    })
+  })
 })
 
 describe('eleccionesDeModelo', () => {

@@ -47,12 +47,20 @@ function convertirModelo(fila: typeof esquema.modelCatalog.$inferSelect): Modelo
   }
 }
 
-/** El catálogo entero, agrupado por nivel, ordenado por precio de salida. */
+/**
+ * El catálogo entero, agrupado por nivel, ordenado por precio de salida y,
+ * a igual precio, por `model_id`. El desempate importa de verdad: la siembra
+ * de la migración 0009 deja empatados `upstage/solar-pro4` y
+ * `poolside/laguna-xs-2.1` en 0.1200 para `razonamiento`, así que sin un
+ * segundo criterio el orden entre esos dos —y por tanto cuál aparece primero
+ * en el desplegable— podía cambiar de una carga a otra, porque Postgres no
+ * garantiza el orden entre filas que empatan en la columna del `ORDER BY`.
+ */
 export async function catalogoDeModelos(db: BaseDeDatos): Promise<Map<Nivel, ModeloDelCatalogo[]>> {
   const filas = await db
     .select()
     .from(esquema.modelCatalog)
-    .orderBy(asc(esquema.modelCatalog.priceOutputUsd))
+    .orderBy(asc(esquema.modelCatalog.priceOutputUsd), asc(esquema.modelCatalog.modelId))
 
   const mapa = new Map<Nivel, ModeloDelCatalogo[]>()
   for (const fila of filas) {
@@ -90,9 +98,10 @@ export async function eleccionesDeModelo(
  * Los identificadores que hay que mandarle al modelo, en el orden en que se
  * intentan. Lanza `permanente` si la organización no eligió ese nivel.
  *
- * Sin respaldo elegido devuelve el principal en los dos — el mismo criterio
- * que `resolverNivel` (`packages/ai/src/niveles.ts`) aplicaba con la
- * variable de entorno vacía, para que este cambio no altere comportamiento.
+ * Sin respaldo elegido devuelve el principal en los dos: es el mismo criterio
+ * que aplicaba la resolución por variable de entorno que este catálogo
+ * reemplazó, con la variable de respaldo vacía, para que este cambio no
+ * altere comportamiento.
  */
 export async function modelosDelNivel(
   db: BaseDeDatos, organizationId: string, nivel: Nivel,
