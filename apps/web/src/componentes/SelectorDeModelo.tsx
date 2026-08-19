@@ -162,11 +162,21 @@ export function SelectorDeModelo({
         >
           Guardar
         </button>
-        {guardado && <span className="text-sm text-green-700">Modelo guardado.</span>}
+        {/* `role="status"` para que un lector de pantalla anuncie el éxito,
+            no solo el fallo de abajo, que ya lleva `role="alert"` — mismo
+            patrón que `EditorDeEncargo`, `EditorDePerfil` y `PiezaGenerada`. */}
+        {guardado && (
+          <span role="status" className="text-sm text-green-700">
+            Modelo guardado.
+          </span>
+        )}
       </div>
 
       {error && (
-        <div className="mt-2 max-w-sm rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
+        <div
+          role="alert"
+          className="mt-2 max-w-sm rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800"
+        >
           <p>{error.mensaje}</p>
           {error.reintentable && (
             <button

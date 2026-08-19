@@ -1208,7 +1208,15 @@ describe('el encabezado de la app', () => {
 
     render(await LayoutDeApp({ children: <div>contenido</div> }))
 
-    const enlace = screen.getByRole('link', { name: /configuraci[oó]n/i })
+    // Acotado al `<header>` (rol `banner`), no al documento entero: sin esto,
+    // un enlace a `/configuracion` en cualquier otra parte de la página —un
+    // pie de página, por ejemplo— también pondría esta prueba en verde, y el
+    // nombre de la prueba promete que el enlace vive «junto al selector de
+    // marcas», dentro del encabezado. Se demostró moviendo el `<Link>` del
+    // layout a un pie de página visible y viendo la suite seguir en verde sin
+    // este acotamiento.
+    const encabezado = screen.getByRole('banner')
+    const enlace = within(encabezado).getByRole('link', { name: /configuraci[oó]n/i })
     expect(enlace.getAttribute('href')).toBe('/configuracion')
   })
 })

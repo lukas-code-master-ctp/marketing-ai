@@ -265,18 +265,70 @@ describe('SelectorDeModelo', () => {
     )
 
     const bloque = screen.getByRole('region', { name: /razonamiento/i })
-    expect(within(bloque).queryByText('Modelo guardado.')).toBeNull()
+    expect(within(bloque).queryByRole('status')).toBeNull()
 
     await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
 
-    expect(within(bloque).queryByText('Modelo guardado.')).not.toBeNull()
+    // Por rol, no por el literal: `role="status"` es lo que hace que un
+    // lector de pantalla anuncie el éxito solo, sin necesitar el texto exacto
+    // — mismo criterio que la prueba análoga de `EditorDeEncargo`.
+    expect(within(bloque).getByRole('status').textContent).toBe('Modelo guardado.')
   })
 
   it('cambiar la elección después de guardar oculta el mensaje de confirmación', async () => {
+    // Cubre los DOS selectores, no solo el principal: `cambiarRespaldo`
+    // también trae su propio `setGuardado(false)`, y una prueba que solo
+    // tocara el principal dejaría esa mitad sin cubrir — se demostró
+    // borrando ese `setGuardado(false)` a mano y viendo la suite seguir en
+    // verde sin este segundo tramo.
     const candidatos = [
       modelo({ id: 'razonamiento-1', nivel: 'razonamiento', etiqueta: 'Razonador Uno' }),
       modelo({ id: 'razonamiento-2', nivel: 'razonamiento', etiqueta: 'Razonador Dos' }),
+      modelo({ id: 'razonamiento-3', nivel: 'razonamiento', etiqueta: 'Razonador Tres' }),
     ]
+    const eleccion: EleccionDeNivel = {
+      nivel: 'razonamiento',
+      principal: candidatos[0]!,
+      respaldo: candidatos[1]!,
+    }
+
+    render(
+      <SelectorDeModelo
+        nivel="razonamiento"
+        explicacion="Decide la estrategia del trimestre y arma la grilla del mes."
+        candidatos={candidatos}
+        eleccion={eleccion}
+      />,
+    )
+
+    const bloque = screen.getByRole('region', { name: /razonamiento/i })
+    const selectorPrincipal = within(bloque).getByLabelText('Modelo principal')
+    const selectorRespaldo = within(bloque).getByLabelText('Modelo de respaldo (opcional)')
+
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
+    expect(within(bloque).getByRole('status').textContent).toBe('Modelo guardado.')
+
+    await userEvent.selectOptions(selectorPrincipal, 'razonamiento-3')
+    expect(within(bloque).queryByRole('status')).toBeNull()
+
+    // Se vuelve a guardar para poder demostrar la segunda mitad: si el
+    // aviso no reapareciera acá, el cambio de respaldo de abajo no probaría
+    // nada porque ya no habría nada que ocultar.
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
+    expect(within(bloque).getByRole('status').textContent).toBe('Modelo guardado.')
+
+    await userEvent.selectOptions(selectorRespaldo, 'razonamiento-2')
+    expect(within(bloque).queryByRole('status')).toBeNull()
+  })
+
+  // Menor 2 de la segunda ola de re-revisión: `guardar()` también borra el
+  // aviso de éxito al empezar, no solo al terminar. Sin ese
+  // `setGuardado(false)` inicial, un segundo intento fallido dejaría
+  // conviviendo «Modelo guardado.» (de la vez anterior) con el mensaje de
+  // error nuevo — se demostró borrando esa línea a mano y viendo la suite
+  // seguir en verde sin esta prueba.
+  it('un segundo intento de guardado que falla oculta el aviso de éxito de la vez anterior', async () => {
+    const candidatos = [modelo({ id: 'razonamiento-1', nivel: 'razonamiento' })]
     const eleccion: EleccionDeNivel = {
       nivel: 'razonamiento',
       principal: candidatos[0]!,
@@ -294,11 +346,16 @@ describe('SelectorDeModelo', () => {
 
     const bloque = screen.getByRole('region', { name: /razonamiento/i })
     await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
-    expect(within(bloque).queryByText('Modelo guardado.')).not.toBeNull()
+    expect(within(bloque).getByRole('status').textContent).toBe('Modelo guardado.')
 
-    const selectorPrincipal = within(bloque).getByLabelText('Modelo principal')
-    await userEvent.selectOptions(selectorPrincipal, 'razonamiento-2')
+    vi.mocked(guardarModeloAccion).mockResolvedValueOnce({
+      ok: false,
+      mensaje: 'La base no respondió',
+      reintentable: true,
+    })
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
 
-    expect(within(bloque).queryByText('Modelo guardado.')).toBeNull()
+    expect(within(bloque).getByRole('alert').textContent).toContain('La base no respondió')
+    expect(within(bloque).queryByRole('status')).toBeNull()
   })
 })
