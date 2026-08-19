@@ -1,5 +1,6 @@
 'use server'
 
+import type { Nivel } from '@gc/db'
 import { despertarWorker } from '@gc/despertador'
 import { clasificarError } from '@gc/shared'
 import { revalidatePath } from 'next/cache'
@@ -14,6 +15,7 @@ import {
   encolarEstrategia,
   encolarGrilla,
   encolarPiezas,
+  guardarEleccionDeModelo,
   guardarEncargo,
   reabrirGrilla,
   reanudarCorridaEncolada,
@@ -286,5 +288,32 @@ export async function guardarEncargoAction(
 
     await guardarEncargo(db, organizationId, { slug, periodo, encargo }, usuarioId)
     return null
+  })
+}
+
+/**
+ * Guarda qué modelo usa la organización para un nivel. **No** llama a
+ * `despertarWorker`: no encola ninguna corrida, solo escribe la elección.
+ *
+ * `nivel` llega como `string` desde `SelectorDeModelo` —un componente de
+ * cliente que no puede importar `Nivel` del barril de `@gc/db` sin arrastrar
+ * el conector de Cloud SQL al bundle del navegador— y se pasa tal cual a
+ * `guardarEleccionDeModelo`. No hace falta validarlo contra `NIVELES` acá: el
+ * `CHECK` de la base y la comprobación de `guardarEleccionDeModelo` (que un
+ * modelo elegido pertenezca al nivel pedido) ya cubren un valor que no sea
+ * ninguno de los tres reales, con el mismo mensaje que cualquier otro
+ * desajuste de nivel.
+ */
+export async function guardarModeloAccion(
+  nivel: string,
+  principalId: string,
+  respaldoId: string | null,
+): Promise<Resultado<void>> {
+  return ejecutar('/configuracion', async (db, organizationId) => {
+    await guardarEleccionDeModelo(db, organizationId, {
+      nivel: nivel as Nivel,
+      principalId,
+      respaldoId,
+    })
   })
 }
