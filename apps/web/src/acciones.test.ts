@@ -19,9 +19,8 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 process.env.DATABASE_URL = process.env.DATABASE_URL_TEST
 
 const { sesionActual } = await import('./auth.js')
-const { aprobarGrillaAccion, descartarSlotAccion, guardarPerfilAction } = await import(
-  './acciones.js'
-)
+const { aprobarGrillaAccion, descartarSlotAccion, guardarPerfilAction, guardarModeloAccion } =
+  await import('./acciones.js')
 
 afterEach(() => vi.mocked(sesionActual).mockReset())
 
@@ -167,6 +166,38 @@ describe('las Server Actions pasan el id de la sesión al dominio', () => {
         .from(esquema.contentPlans)
         .where(eq(esquema.contentPlans.id, plan!.id))
       expect(despues!.approvedBy).toBe(persona!.id)
+    })
+  })
+
+  // Hallazgo Importante 4 de la revisión de rama: `guardarModeloAccion`
+  // declaraba `async (db, organizationId) => …` y descartaba el tercer
+  // argumento que `ejecutar` le pasa, así que `organization_models.updated_by`
+  // nunca se llenaba pese a que `guardarEleccionDeModelo` sabe escribirla y la
+  // migración crea la foránea a `users`. Confirmado en la base con las dos
+  // filas de la organización real: las dos tenían `updated_by` nulo.
+  it('guardar el modelo deja updated_by con el id de la sesión activa', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await sembrarConEstrategia(db)
+      const [persona] = await db
+        .insert(esquema.users)
+        .values({ email: 'lukas@ejemplo.cl', name: 'Lukas' })
+        .returning({ id: esquema.users.id })
+      vi.mocked(sesionActual).mockResolvedValue({ id: persona!.id, email: 'lukas@ejemplo.cl' })
+
+      const [modelo] = await db.insert(esquema.modelCatalog).values({
+        level: 'redaccion', modelId: 'proveedor/redactor',
+        label: 'Redactor', description: 'El elegido para redacción en esta prueba.',
+        priceInputUsd: '1.0000', priceOutputUsd: '3.0000',
+      }).returning()
+
+      const r = await guardarModeloAccion('redaccion', modelo!.id, null)
+
+      expect(r.ok).toBe(true)
+      const [fila] = await db
+        .select({ updatedBy: esquema.organizationModels.updatedBy })
+        .from(esquema.organizationModels)
+        .where(eq(esquema.organizationModels.level, 'redaccion'))
+      expect(fila!.updatedBy).toBe(persona!.id)
     })
   })
 })

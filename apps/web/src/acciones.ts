@@ -309,11 +309,11 @@ export async function guardarModeloAccion(
   principalId: string,
   respaldoId: string | null,
 ): Promise<Resultado<void>> {
-  return ejecutar('/configuracion', async (db, organizationId) => {
-    await guardarEleccionDeModelo(db, organizationId, {
-      nivel: nivel as Nivel,
-      principalId,
-      respaldoId,
-    })
+  return ejecutar('/configuracion', async (db, organizationId, usuarioId) => {
+    await guardarEleccionDeModelo(
+      db, organizationId,
+      { nivel: nivel as Nivel, principalId, respaldoId },
+      usuarioId,
+    )
   })
 }
