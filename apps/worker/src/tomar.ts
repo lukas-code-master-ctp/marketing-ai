@@ -8,7 +8,6 @@ import { flujoDe } from './flujos.js'
 
 export interface DependenciasDelWorker {
   cliente: ClienteLlm
-  env?: Record<string, string | undefined>
 }
 
 export type ResultadoDeTurno = 'nada' | 'completada' | 'fallida'
@@ -31,10 +30,7 @@ export async function tomarYEjecutarUna(
   if (!corrida) return 'nada'
 
   try {
-    const flujo = flujoDe(corrida.flow, {
-      cliente: deps.cliente,
-      ...(deps.env !== undefined ? { env: deps.env } : {}),
-    })
+    const flujo = flujoDe(corrida.flow, { cliente: deps.cliente })
 
     // El slug va junto al id porque los pasos lo usan como `nombreVisible` en
     // todo mensaje de error que ve el usuario —sin estrategia vigente, grilla

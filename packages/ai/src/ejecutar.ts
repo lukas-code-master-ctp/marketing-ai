@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto'
 import type { z } from 'zod'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { ClienteLlm, MensajeLlm } from './cliente.js'
-import { resolverNivel } from './niveles.js'
 import type { DefinicionDeTarea } from './tarea.js'
 
 export interface UsoDeLlamada {
@@ -23,7 +22,8 @@ export interface ResultadoDeTarea<T> {
 
 export interface ContextoDeEjecucion {
   cliente: ClienteLlm
-  env?: Record<string, string | undefined>
+  /** Los modelos a intentar, en orden. Los resuelve quien llama. */
+  modelos: { principal: string; respaldo: string }
   registrarUso?: (uso: UsoDeLlamada) => Promise<void>
 }
 
@@ -43,7 +43,7 @@ export async function ejecutarTarea<S extends z.ZodTypeAny>(
   mensajes: MensajeLlm[],
   ctx: ContextoDeEjecucion,
 ): Promise<ResultadoDeTarea<z.infer<S>>> {
-  const { principal, respaldo } = resolverNivel(tarea.nivel, ctx.env)
+  const { principal, respaldo } = ctx.modelos
   const modelos = principal === respaldo ? [principal] : [principal, respaldo]
   const esquemaJson = zodToJsonSchema(tarea.esquema, {
     name: tarea.nombre,

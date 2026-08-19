@@ -3,7 +3,7 @@
 // Del submódulo `./canales` y no del barril `@gc/db` ni de `@gc/db/esquema`:
 // este es un componente de cliente. El barril arrastraría `cliente.ts` —el
 // conector de Cloud SQL, con `google-auth-library`—, y `esquema.ts` arrastra
-// el DDL de las catorce tablas (`@gc/db` no declara `sideEffects: false`, así
+// el DDL de las dieciséis tablas (`@gc/db` no declara `sideEffects: false`, así
 // que webpack no puede descartar esos `pgTable(...)`). Mismo motivo por el
 // que `EstadoDeCorrida` importa `@gc/operaciones/senales` y no el barril de
 // `@gc/operaciones`.

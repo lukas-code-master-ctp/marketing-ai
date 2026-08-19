@@ -1,36 +1,10 @@
-import { permanente } from '@gc/shared'
-
-export type NivelDeModelo = 'razonamiento' | 'redaccion' | 'utilitario'
-
-export interface ModelosDelNivel {
-  principal: string
-  respaldo: string
-}
-
-const VARIABLE_POR_NIVEL: Record<NivelDeModelo, string> = {
-  razonamiento: 'MODELO_RAZONAMIENTO',
-  redaccion: 'MODELO_REDACCION',
-  utilitario: 'MODELO_UTILITARIO',
-}
+import { NIVELES, type Nivel } from '@gc/db'
 
 /**
- * Los identificadores de modelo nunca se escriben en el código: se configuran
- * por entorno y se cambian tras correr los evals.
+ * El nivel vive en `@gc/db` y no acá porque la columna `level` de
+ * `model_catalog` lo hace cumplir con un `CHECK`, y `@gc/db` no puede
+ * importar `@gc/ai`: está en el cierre de dependencias de `apps/web`, así
+ * que esa flecha pondría roja la comprobación de aislamiento.
  */
-export function resolverNivel(
-  nivel: NivelDeModelo,
-  env: Record<string, string | undefined> = process.env,
-): ModelosDelNivel {
-  const variable = VARIABLE_POR_NIVEL[nivel]
-  const principal = env[variable]?.trim()
-  if (!principal) {
-    throw permanente(`Falta la variable de entorno ${variable} para el nivel "${nivel}"`)
-  }
-  // `?? principal` no basta: solo cae al principal si la variable de
-  // respaldo está ausente (`null`/`undefined`), no si está presente y vacía
-  // o llena de espacios — que es como `dotenv` carga
-  // `MODELO_RAZONAMIENTO_RESPALDO=` en el `.env` de este proyecto hoy. Es el
-  // mismo error que `drizzle.config.ts` ya sufrió con `??` en vez de `||`.
-  const respaldo = env[`${variable}_RESPALDO`]?.trim()
-  return { principal, respaldo: respaldo || principal }
-}
+export type NivelDeModelo = Nivel
+export { NIVELES }

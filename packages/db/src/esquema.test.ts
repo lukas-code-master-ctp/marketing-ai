@@ -719,6 +719,16 @@ describe('catálogo de restricciones compuestas', () => {
       definicion: 'UNIQUE (id, organization_id)',
     },
     {
+      tabla: 'model_catalog',
+      conname: 'model_catalog_level_model_unique',
+      definicion: 'UNIQUE (level, model_id)',
+    },
+    {
+      tabla: 'organization_models',
+      conname: 'organization_models_org_level_unique',
+      definicion: 'UNIQUE (organization_id, level)',
+    },
+    {
       tabla: 'pipeline_runs',
       conname: 'pipeline_runs_id_organization_id_unique',
       definicion: 'UNIQUE (id, organization_id)',
@@ -944,6 +954,134 @@ describe('content_pieces', () => {
       await expect(
         db.insert(esquema.contentPieces).values(fila),
       ).rejects.toThrow(/content_pieces_plan_slot_id_unique/)
+    })
+  })
+})
+
+describe('modelos configurables', () => {
+  it('el catálogo rechaza un nivel fuera del enumerado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(
+        db.execute(sql`
+          insert into model_catalog (level, model_id, label, description, price_input_usd, price_output_usd)
+          values ('inventado', 'proveedor/modelo', 'Etiqueta', 'Descripción de prueba.', 0.1, 0.2)
+        `),
+      ).rejects.toThrow(/model_catalog_level_check/)
+    })
+  })
+
+  it('el catálogo rechaza una modalidad fuera del enumerado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      await expect(
+        db.execute(sql`
+          insert into model_catalog (level, model_id, label, description, modality, price_input_usd, price_output_usd)
+          values ('razonamiento', 'proveedor/modelo', 'Etiqueta', 'Descripción de prueba.', 'video', 0.1, 0.2)
+        `),
+      ).rejects.toThrow(/model_catalog_modality_check/)
+    })
+  })
+
+  it('el mismo modelo no puede repetirse dentro de un nivel', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const insertar = () => db.execute(sql`
+        insert into model_catalog (level, model_id, label, description, price_input_usd, price_output_usd)
+        values ('razonamiento', 'proveedor/modelo', 'Etiqueta', 'Descripción de prueba.', 0.1, 0.2)
+      `)
+
+      await insertar()
+
+      await expect(insertar()).rejects.toThrow(/model_catalog_level_model_unique/)
+    })
+  })
+
+  it('organization_models rechaza un nivel fuera del enumerado', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X', slug: 'a' })
+        .returning()
+      const [modelo] = await db
+        .insert(esquema.modelCatalog)
+        .values({
+          level: 'razonamiento',
+          modelId: 'proveedor/modelo',
+          label: 'Etiqueta',
+          description: 'Descripción de prueba.',
+          priceInputUsd: '0.1000',
+          priceOutputUsd: '0.2000',
+        })
+        .returning()
+
+      await expect(
+        db.execute(sql`
+          insert into organization_models (organization_id, level, principal_id)
+          values (${org!.id}, 'inventado', ${modelo!.id})
+        `),
+      ).rejects.toThrow(/organization_models_level_check/)
+    })
+  })
+
+  it('una organización no puede elegir dos veces el mismo nivel', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X', slug: 'a' })
+        .returning()
+      const [modelo] = await db
+        .insert(esquema.modelCatalog)
+        .values({
+          level: 'razonamiento',
+          modelId: 'proveedor/modelo',
+          label: 'Etiqueta',
+          description: 'Descripción de prueba.',
+          priceInputUsd: '0.1000',
+          priceOutputUsd: '0.2000',
+        })
+        .returning()
+
+      await db.insert(esquema.organizationModels).values({
+        organizationId: org!.id,
+        level: 'razonamiento',
+        principalId: modelo!.id,
+      })
+
+      await expect(
+        db.insert(esquema.organizationModels).values({
+          organizationId: org!.id,
+          level: 'razonamiento',
+          principalId: modelo!.id,
+        }),
+      ).rejects.toThrow(/organization_models_org_level_unique/)
+    })
+  })
+
+  it('borrar la organización se lleva su elección', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const [org] = await db
+        .insert(esquema.organizations)
+        .values({ name: 'X', slug: 'a' })
+        .returning()
+      const [modelo] = await db
+        .insert(esquema.modelCatalog)
+        .values({
+          level: 'razonamiento',
+          modelId: 'proveedor/modelo',
+          label: 'Etiqueta',
+          description: 'Descripción de prueba.',
+          priceInputUsd: '0.1000',
+          priceOutputUsd: '0.2000',
+        })
+        .returning()
+
+      await db.insert(esquema.organizationModels).values({
+        organizationId: org!.id,
+        level: 'razonamiento',
+        principalId: modelo!.id,
+      })
+
+      await db.delete(esquema.organizations).where(eq(esquema.organizations.id, org!.id))
+
+      expect(await db.select().from(esquema.organizationModels)).toHaveLength(0)
     })
   })
 })

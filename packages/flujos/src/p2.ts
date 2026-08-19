@@ -4,6 +4,7 @@ import {
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca, type TipoPerfilDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
+import { modelosDelNivel } from '@gc/operaciones'
 import { definirPaso, type ContextoDePaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
 import {
@@ -86,6 +87,11 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
         brandProfileVersion: version,
       })
 
+      // Se resuelve antes del primer intento, no después: si la organización
+      // no eligió modelo para este nivel, el `permanente` de `modelosDelNivel`
+      // tiene que cortar antes de gastar la primera llamada.
+      const modelos = await modelosDelNivel(ctx.db, ctx.organizationId, TAREA_GRILLA.nivel)
+
       let mensajes: MensajeLlm[] = [
         { rol: 'sistema', texto: instrucciones },
         {
@@ -109,7 +115,7 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
       for (let intento = 1; intento <= 2; intento++) {
         const { datos } = await ejecutarTarea(TAREA_GRILLA, mensajes, {
           cliente: deps.cliente,
-          ...(deps.env !== undefined ? { env: deps.env } : {}),
+          modelos,
           registrarUso,
         })
 

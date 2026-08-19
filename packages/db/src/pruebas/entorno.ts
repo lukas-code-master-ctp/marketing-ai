@@ -93,6 +93,14 @@ export async function conBaseDeDatosDePrueba(
     // sobrevive a la siguiente corrida y su correo único choca contra la
     // próxima prueba que intente crear la misma persona.
     await db.delete(esquema.users)
+    // `model_catalog` tampoco cuelga de `organization_id`: es el menú global de
+    // modelos, no datos de un inquilino. Mismo problema que `users` arriba: sin
+    // este borrado, una fila que una prueba deja insertada sobrevive a la
+    // siguiente y choca contra la única (level, model_id) de la próxima prueba
+    // que use el mismo modelo. Va después del borrado de `organizations` a
+    // propósito: `organization_models` referencia el catálogo con ON DELETE
+    // RESTRICT, y esa tabla ya quedó vacía por la cascada de arriba.
+    await db.delete(esquema.modelCatalog)
     await fn(db)
   } finally {
     await cerrar()

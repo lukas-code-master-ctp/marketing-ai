@@ -4,6 +4,7 @@ import {
 } from '@gc/ai'
 import { cargarPerfilVigente, contextoDeMarca } from '@gc/brand'
 import { esquema, type BaseDeDatos } from '@gc/db'
+import { modelosDelNivel } from '@gc/operaciones'
 import { definirPaso, type DefinicionDeFlujo } from '@gc/pipeline'
 import { permanente } from '@gc/shared'
 import { and, eq } from 'drizzle-orm'
@@ -74,6 +75,12 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
       const { version, perfil } = await cargarPerfilVigente(ctx.db, entrada.brandId, ctx.brandSlug)
       const instrucciones = await readFile(RUTA_PROMPT, 'utf8')
 
+      // Se resuelve antes de la llamada, no después: si la organización no
+      // eligió modelo para este nivel, el `permanente` de `modelosDelNivel`
+      // tiene que cortar antes de gastar, igual que la comprobación de
+      // presupuesto de arriba.
+      const modelos = await modelosDelNivel(ctx.db, ctx.organizationId, TAREA_ESTRATEGIA.nivel)
+
       const mensajes: MensajeLlm[] = [
         { rol: 'sistema', texto: instrucciones },
         {
@@ -91,7 +98,7 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
 
       const { datos } = await ejecutarTarea(TAREA_ESTRATEGIA, mensajes, {
         cliente: deps.cliente,
-        ...(deps.env !== undefined ? { env: deps.env } : {}),
+        modelos,
         registrarUso: crearRegistrador(ctx.db, {
           organizationId: ctx.organizationId,
           brandId: entrada.brandId,

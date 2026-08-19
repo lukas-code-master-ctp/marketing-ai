@@ -7,8 +7,6 @@ import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { drenarCola } from './drenar.js'
 
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
-
 /** Mismo mes de 2026-Q3 que usa `tomar.test.ts`: la siembra trae esa estrategia. */
 const MES = '2026-09'
 
@@ -25,7 +23,7 @@ const GRILLA = JSON.stringify({
 describe('drenarCola', () => {
   it('con la cola vacía devuelve cero y no dice que quede trabajo', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      const r = await drenarCola(db, { cliente: new ClienteFalso([]), env: ENV })
+      const r = await drenarCola(db, { cliente: new ClienteFalso([]) })
       expect(r).toEqual({ completadas: 0, fallidas: 0, quedaTrabajo: false })
     })
   })
@@ -47,7 +45,7 @@ describe('drenarCola', () => {
       // Solo `parcelas` tiene estrategia sembrada, así que las otras dos
       // fallan en el primer paso sin llamar al modelo. Lo que esta prueba
       // afirma es que el drenado no se detiene: las tres se atienden.
-      const r = await drenarCola(db, { cliente: new ClienteFalso([GRILLA]), env: ENV })
+      const r = await drenarCola(db, { cliente: new ClienteFalso([GRILLA]) })
 
       expect(r.completadas + r.fallidas).toBe(3)
       expect(r.quedaTrabajo).toBe(false)
@@ -68,7 +66,7 @@ describe('drenarCola', () => {
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: MES })
 
-      const r = await drenarCola(db, { cliente: new ClienteFalso([GRILLA]), env: ENV })
+      const r = await drenarCola(db, { cliente: new ClienteFalso([GRILLA]) })
 
       expect(r).toMatchObject({ completadas: 1, fallidas: 1, quedaTrabajo: false })
     })
@@ -83,7 +81,7 @@ describe('drenarCola', () => {
       await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: '2026-10' })
       await encolarGrilla(db, ref.organizationId, { slug: 'dos', mes: '2026-10' })
 
-      const r = await drenarCola(db, { cliente: new ClienteFalso([]), env: ENV }, 1)
+      const r = await drenarCola(db, { cliente: new ClienteFalso([]) }, 1)
 
       // Sin el límite, este turno se llevaría las dos. Con él se lleva una y
       // deja constancia de que hay más, que es lo que permite a quien llame
@@ -124,7 +122,7 @@ describe('drenarCola', () => {
         return antes
       }
 
-      const r = await drenarCola(db, { cliente: new ClienteFalso([]), env: ENV }, { debeParar })
+      const r = await drenarCola(db, { cliente: new ClienteFalso([]) }, { debeParar })
 
       expect(r).toMatchObject({ completadas: 0, fallidas: 1, quedaTrabajo: true })
       const pendientes = await db
@@ -156,7 +154,7 @@ describe('drenarCola', () => {
 
       const r = await drenarCola(
         db,
-        { cliente: new ClienteFalso([]), env: ENV },
+        { cliente: new ClienteFalso([]) },
         { presupuestoMs: 1 },
       )
 
@@ -174,7 +172,7 @@ describe('drenarCola', () => {
     // `quedaTrabajo: true` —afirmando que queda trabajo **sin haber consultado
     // la cola**— más un log diciendo que el turno cortó por llegar al tope.
     await conBaseDeDatosDePrueba(async (db) => {
-      const deps = { cliente: new ClienteFalso([]), env: ENV }
+      const deps = { cliente: new ClienteFalso([]) }
       await expect(drenarCola(db, deps, 0)).rejects.toThrow(/límite=0/)
       await expect(drenarCola(db, deps, { presupuestoMs: 0 })).rejects.toThrow(/presupuesto=0/)
     })

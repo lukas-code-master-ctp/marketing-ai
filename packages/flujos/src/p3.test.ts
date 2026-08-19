@@ -12,7 +12,6 @@ import { crearFlujoPieza, type SalidaP3 } from './p3.js'
 
 const MUESTRAS = fileURLToPath(new URL('../../strategy/muestras', import.meta.url))
 
-const ENV = { MODELO_REDACCION: 'proveedor/redactor' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA = {
@@ -67,7 +66,39 @@ const PIEZA_BLOG_JSON = JSON.stringify({
     'Sin él, no hay forma de comprobar que el proyecto es viable.',
 })
 
-async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+// Identificador reconocible a propósito: la prueba «usa el modelo que la
+// organización eligió, no uno fijo» necesita distinguir este valor de
+// cualquier literal que pudiera quedar escrito a mano en `p3.ts`.
+const MODELO_REDACCION_ELEGIDO = 'proveedor/redactor-elegido'
+
+// `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+// pruebas (el borrado en cascada por organización no la alcanza), así que
+// cada archivo necesita su propia siembra. Un solo candidato de `redaccion`
+// alcanza: P3 no elige entre varios, solo necesita que la organización tenga
+// UNA elección para no caer en el `permanente` de `modelosDelNivel`.
+async function sembrarEleccionDeModelo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'redaccion', modelId: MODELO_REDACCION_ELEGIDO,
+    label: 'Redactor elegido', description: 'El elegido para redacción en estas pruebas.',
+    priceInputUsd: '3.0000', priceOutputUsd: '9.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId, level: 'redaccion', principalId: modelo!.id, respaldoId: null,
+  })
+}
+
+/**
+ * `conEleccionDeModelo: false` deja la organización sin elegir el nivel de
+ * redacción — es lo que necesita la prueba que confirma que P3 se niega,
+ * sin llamar al modelo, antes de gastar por una organización sin elección.
+ */
+async function sembrar(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  opciones: { conEleccionDeModelo?: boolean } = {},
+) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
@@ -82,6 +113,9 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
     data: ESTRATEGIA,
     brandProfileVersion: 1,
   })
+  if (opciones.conEleccionDeModelo !== false) {
+    await sembrarEleccionDeModelo(db, ref.organizationId)
+  }
   return ref
 }
 
@@ -164,7 +198,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       const r = await ejecutarFlujo(
         db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
@@ -178,12 +212,50 @@ describe('flujo P3 · pieza', () => {
     })
   })
 
+  it('usa el modelo que la organización eligió, no uno fijo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente })
+
+      await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
+
+      // `modelos` viaja como arreglo (principal, y respaldo si difiere) a
+      // `ClienteLlm.completar`; sin respaldo elegido, `modelosDelNivel`
+      // devuelve el principal en los dos y `ejecutarTarea` lo deduplica a un
+      // solo elemento. El identificador sembrado tiene que ser el que llegó,
+      // no un modelo fijo escrito a mano en `p3.ts`.
+      expect(cliente.peticiones[0]!.modelos).toEqual([MODELO_REDACCION_ELEGIDO])
+    })
+  })
+
+  it('sin elección para redacción falla sin llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db, { conEleccionDeModelo: false })
+      const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
+      const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
+      const flujo = crearFlujoPieza({ cliente })
+
+      await expect(
+        ejecutarFlujo(
+          db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
+        ),
+      ).rejects.toThrow(/\/configuracion/)
+
+      // Lo que importa no es solo que falle, sino que falle ANTES de pagar:
+      // resolver tiene que ocurrir antes de gastar, igual que la
+      // comprobación del slot y la de presupuesto.
+      expect(cliente.peticiones).toHaveLength(0)
+    })
+  })
+
   it('manda al modelo el contexto de marca, la estrategia y el ángulo y el brief del slot', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
 
@@ -202,14 +274,14 @@ describe('flujo P3 · pieza', () => {
 
       const { slotId: slotBlog, planId } = await sembrarSlot(db, ref, { channel: 'blog' })
       const clienteBlog = new ClienteFalso([PIEZA_BLOG_JSON])
-      const flujoBlog = crearFlujoPieza({ cliente: clienteBlog, env: ENV })
+      const flujoBlog = crearFlujoPieza({ cliente: clienteBlog })
       await ejecutarFlujo(
         db, flujoBlog, { slotId: slotBlog, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
       )
 
       const { slotId: slotLinkedin } = await sembrarSlot(db, ref, { channel: 'linkedin', planId })
       const clienteLinkedin = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujoLinkedin = crearFlujoPieza({ cliente: clienteLinkedin, env: ENV })
+      const flujoLinkedin = crearFlujoPieza({ cliente: clienteLinkedin })
       await ejecutarFlujo(
         db, flujoLinkedin, { slotId: slotLinkedin, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
       )
@@ -239,7 +311,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       // Igual que en p1.test.ts/p2.test.ts: un trigger que revienta el primer
       // INSERT en content_pieces con un código transitorio, y se desactiva solo
@@ -285,7 +357,7 @@ describe('flujo P3 · pieza', () => {
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const entrada = { slotId, mes: '2026-09', brandId: ref.brandId }
 
-      const flujo1 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]), env: ENV })
+      const flujo1 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]) })
       await ejecutarFlujo(db, flujo1, entrada, ref, SIN_ESPERA)
 
       // Una segunda versión del perfil, para que la segunda corrida resuelva
@@ -300,7 +372,7 @@ describe('flujo P3 · pieza', () => {
       // fila, pero con el contenido del primer intento. `toHaveLength(1)`
       // sola no distingue "reemplaza" de "ignora la segunda"; lo que sigue,
       // sobre `fila.data`, `fila.channel` y `fila.brandProfileVersion`, sí.
-      const flujo2 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON_V2]), env: ENV })
+      const flujo2 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON_V2]) })
       await ejecutarFlujo(db, flujo2, entrada, ref, SIN_ESPERA)
 
       const filas = await db.select().from(esquema.contentPieces)
@@ -317,7 +389,7 @@ describe('flujo P3 · pieza', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -342,7 +414,7 @@ describe('flujo P3 · pieza', () => {
       // pasar con la corrida ya `pendiente` en la cola.
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin', status: 'descartado' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -368,7 +440,7 @@ describe('flujo P3 · pieza', () => {
       const refOtraMarca = await sembrarOtraMarca(db, ref.organizationId)
 
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -387,7 +459,7 @@ describe('flujo P3 · pieza', () => {
       // `sembrarSlot` cuelga el slot de un plan de `2026-09`.
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       // `2026-08` y no `2026-10`: los dos son un mes distinto del `2026-09`
       // del plan, pero `2026-08` cae en el mismo trimestre —`2026-Q3`— que sí
@@ -412,7 +484,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
       await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
 
       const mensajeUsuario = cliente.peticiones[0]!.mensajes.find((m) => m.rol === 'usuario')!.texto
@@ -445,7 +517,7 @@ describe('flujo P3 · pieza', () => {
         const ref = await sembrar(db)
         const { slotId } = await sembrarSlot(db, ref, { channel: canal })
         const cliente = new ClienteDeMuestra(MUESTRAS)
-        const flujo = crearFlujoPieza({ cliente, env: ENV })
+        const flujo = crearFlujoPieza({ cliente })
 
         const r = await ejecutarFlujo(
           db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,

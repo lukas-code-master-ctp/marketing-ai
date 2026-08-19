@@ -7,12 +7,15 @@ import type {
   SlotDeLaGrilla,
 } from '@gc/operaciones'
 import type { LecturaDeEstrategia, TipoPieza } from '@gc/strategy'
+import type { ModeloDelCatalogo } from '@gc/operaciones'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  catalogoDeModelos,
   corridaDe,
+  eleccionesDeModelo,
   estrategiaDelTrimestre,
   grillaDelMes,
   leerEncargo,
@@ -20,8 +23,10 @@ import {
   piezasDelMes,
   resumenDePiezas,
 } from '@gc/operaciones'
+import PaginaDeConfiguracion from './app/(app)/configuracion/page.js'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
+import LayoutDeApp from './app/(app)/layout.js'
 import PaginaDePerfil from './app/(app)/[marca]/perfil/page.js'
 import Inicio from './app/(app)/page.js'
 import { marcasDeLaOrganizacion } from './datos.js'
@@ -44,6 +49,8 @@ vi.mock('@gc/operaciones', () => ({
   leerEncargo: vi.fn(),
   resumenDePiezas: vi.fn(),
   piezasDelMes: vi.fn(),
+  catalogoDeModelos: vi.fn(),
+  eleccionesDeModelo: vi.fn(),
 }))
 vi.mock('./datos.js', () => ({
   conexion: () => ({}),
@@ -65,10 +72,15 @@ vi.mock('./acciones.js', () => ({
   editarSlotAccion: vi.fn(),
   guardarPerfilAction: vi.fn(),
   crearMarcaAccion: vi.fn(),
+  guardarModeloAccion: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  // `SelectorDeMarca` (dentro de `LayoutDeApp`) lo necesita para armar sus
+  // enlaces conservando la sección actual. Ninguna prueba de este archivo
+  // afirma sobre esa ruta, así que un valor fijo alcanza.
+  usePathname: () => '/parcelas/grilla/2026-09',
   notFound: () => {
     throw new Error('notFound')
   },
@@ -115,6 +127,8 @@ beforeEach(() => {
   vi.mocked(marcasDeLaOrganizacion).mockReset()
   vi.mocked(resumenDePiezas).mockReset()
   vi.mocked(piezasDelMes).mockReset()
+  vi.mocked(catalogoDeModelos).mockReset()
+  vi.mocked(eleccionesDeModelo).mockReset()
   vi.mocked(corridaDe).mockResolvedValue(null)
   vi.mocked(leerEncargo).mockResolvedValue(ENCARGO_ESCRITO)
   // Por omisión, ningún slot y ninguna pieza: así las pruebas que no hablan de
@@ -124,6 +138,11 @@ beforeEach(() => {
   // Por la misma razón: un mapa vacío por omisión, para que ninguna pieza
   // aparezca en el panel de detalle de las pruebas que no la fijan.
   vi.mocked(piezasDelMes).mockResolvedValue(new Map())
+  // Un catálogo y unas elecciones vacíos por omisión: así las pruebas que no
+  // hablan de la pantalla de configuración —todas menos las suyas— no ven
+  // aparecer ningún bloque de nivel por un valor que no fijaron.
+  vi.mocked(catalogoDeModelos).mockResolvedValue(new Map())
+  vi.mocked(eleccionesDeModelo).mockResolvedValue([])
 })
 
 function corrida(campos: Partial<CorridaEnCurso> = {}): CorridaEnCurso {
@@ -1121,6 +1140,84 @@ describe('la pantalla de inicio', () => {
     await renderInicio({ nueva: '1' })
 
     expect(screen.queryByRole('button', { name: 'Crear marca' })).not.toBeNull()
+  })
+})
+
+async function renderConfiguracion() {
+  return render(await PaginaDeConfiguracion())
+}
+
+function modeloDelCatalogo(campos: Partial<ModeloDelCatalogo> = {}): ModeloDelCatalogo {
+  return {
+    id: 'modelo-1',
+    nivel: 'razonamiento',
+    modelId: 'proveedor/modelo-1',
+    etiqueta: 'Modelo Uno',
+    descripcion: 'Un modelo cualquiera',
+    precioEntradaUsd: 1.5,
+    precioSalidaUsd: 4.5,
+    ...campos,
+  }
+}
+
+describe('la pantalla de configuración', () => {
+  // Un bloque por nivel presente en el catálogo, no una lista fija: con
+  // `utilitario` ausente del catálogo mockeado (sin candidatos, como en la
+  // base real hoy) la pantalla no debe inventarle un bloque.
+  it('la pantalla de configuración lista los niveles del catálogo', async () => {
+    vi.mocked(catalogoDeModelos).mockResolvedValue(
+      new Map([
+        ['razonamiento', [modeloDelCatalogo({ id: 'r-1', nivel: 'razonamiento' })]],
+        [
+          'redaccion',
+          [modeloDelCatalogo({ id: 'w-1', nivel: 'redaccion', etiqueta: 'Redactor Uno' })],
+        ],
+      ]),
+    )
+
+    await renderConfiguracion()
+
+    expect(screen.queryByRole('region', { name: /razonamiento/i })).not.toBeNull()
+    expect(screen.queryByRole('region', { name: /redacci[oó]n/i })).not.toBeNull()
+    expect(screen.queryByRole('region', { name: /utilitario/i })).toBeNull()
+  })
+
+  it('un nivel sin elección se muestra sin elegir y lo dice', async () => {
+    vi.mocked(catalogoDeModelos).mockResolvedValue(
+      new Map([['razonamiento', [modeloDelCatalogo({ id: 'r-1', nivel: 'razonamiento' })]]]),
+    )
+    vi.mocked(eleccionesDeModelo).mockResolvedValue([])
+
+    await renderConfiguracion()
+
+    const bloque = screen.getByRole('region', { name: /razonamiento/i })
+    expect(
+      within(bloque).queryByText('Todavía no has elegido un modelo para este nivel.'),
+    ).not.toBeNull()
+  })
+})
+
+// Hallazgo Importante 5 de la revisión de rama: un grep sobre `apps/web/src`
+// no encontraba ningún enlace a `/configuracion` — solo la ruta que
+// `guardarModeloAccion` revalida y el import de esta prueba. Quedaba a una
+// URL que había que saber de memoria, incluso cuando el mensaje de error de
+// `modelosDelNivel` dice «Elígelo en /configuracion».
+describe('el encabezado de la app', () => {
+  it('lleva un enlace a /configuracion, junto al selector de marcas', async () => {
+    vi.mocked(marcasDeLaOrganizacion).mockResolvedValue(UNA_MARCA)
+
+    render(await LayoutDeApp({ children: <div>contenido</div> }))
+
+    // Acotado al `<header>` (rol `banner`), no al documento entero: sin esto,
+    // un enlace a `/configuracion` en cualquier otra parte de la página —un
+    // pie de página, por ejemplo— también pondría esta prueba en verde, y el
+    // nombre de la prueba promete que el enlace vive «junto al selector de
+    // marcas», dentro del encabezado. Se demostró moviendo el `<Link>` del
+    // layout a un pie de página visible y viendo la suite seguir en verde sin
+    // este acotamiento.
+    const encabezado = screen.getByRole('banner')
+    const enlace = within(encabezado).getByRole('link', { name: /configuraci[oó]n/i })
+    expect(enlace.getAttribute('href')).toBe('/configuracion')
   })
 })
 

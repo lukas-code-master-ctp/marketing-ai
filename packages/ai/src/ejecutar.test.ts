@@ -12,13 +12,16 @@ const TAREA = definirTarea({
   maxTokensSalida: 500,
 })
 
-const ENTORNO = { MODELO_UTILITARIO: 'proveedor/barato' }
+// Antes de la Task 3 esto era `resolverNivel('utilitario', ENTORNO)`: el
+// contexto ya no lee el entorno, así que las pruebas pasan directamente los
+// modelos que antes resolvía esa función.
+const MODELOS = { principal: 'proveedor/barato', respaldo: 'proveedor/barato' }
 const MENSAJES = [{ rol: 'usuario' as const, texto: 'hola' }]
 
 describe('ejecutarTarea', () => {
   it('valida y devuelve los datos cuando el modelo responde bien', async () => {
     const cliente = new ClienteFalso(['{"titulo":"Hola","puntaje":8}'])
-    const { datos, uso } = await ejecutarTarea(TAREA, MENSAJES, { cliente, env: ENTORNO })
+    const { datos, uso } = await ejecutarTarea(TAREA, MENSAJES, { cliente, modelos: MODELOS })
 
     expect(datos).toEqual({ titulo: 'Hola', puntaje: 8 })
     expect(uso.tarea).toBe('tarea_de_prueba')
@@ -30,7 +33,7 @@ describe('ejecutarTarea', () => {
       '{"titulo":"Hola"}',
       '{"titulo":"Hola","puntaje":8}',
     ])
-    const { datos } = await ejecutarTarea(TAREA, MENSAJES, { cliente, env: ENTORNO })
+    const { datos } = await ejecutarTarea(TAREA, MENSAJES, { cliente, modelos: MODELOS })
 
     expect(datos.puntaje).toBe(8)
     expect(cliente.peticiones).toHaveLength(2)
@@ -41,7 +44,7 @@ describe('ejecutarTarea', () => {
   it('falla de forma permanente si la reparación tampoco valida', async () => {
     const cliente = new ClienteFalso(['{"titulo":"a"}', '{"titulo":"b"}'])
     await expect(
-      ejecutarTarea(TAREA, MENSAJES, { cliente, env: ENTORNO }),
+      ejecutarTarea(TAREA, MENSAJES, { cliente, modelos: MODELOS }),
     ).rejects.toMatchObject({ clase: 'permanente' })
     expect(cliente.peticiones).toHaveLength(2)
   })
@@ -49,7 +52,7 @@ describe('ejecutarTarea', () => {
   it('falla de forma permanente si la respuesta no es JSON', async () => {
     const cliente = new ClienteFalso(['no soy json', 'tampoco'])
     await expect(
-      ejecutarTarea(TAREA, MENSAJES, { cliente, env: ENTORNO }),
+      ejecutarTarea(TAREA, MENSAJES, { cliente, modelos: MODELOS }),
     ).rejects.toMatchObject({ clase: 'permanente' })
   })
 
@@ -57,7 +60,7 @@ describe('ejecutarTarea', () => {
     const cliente = new ClienteFalso(['{"titulo":"a","puntaje":1}'])
     await ejecutarTarea(TAREA, MENSAJES, {
       cliente,
-      env: { ...ENTORNO, MODELO_UTILITARIO_RESPALDO: 'proveedor/barato-alt' },
+      modelos: { principal: 'proveedor/barato', respaldo: 'proveedor/barato-alt' },
     })
     expect(cliente.peticiones[0]!.modelos).toEqual([
       'proveedor/barato',
@@ -70,7 +73,7 @@ describe('ejecutarTarea', () => {
     const cliente = new ClienteFalso(['{"titulo":"a","puntaje":1}'])
     await ejecutarTarea(TAREA, MENSAJES, {
       cliente,
-      env: ENTORNO,
+      modelos: MODELOS,
       registrarUso: async (u) => void registrado.push(u),
     })
     expect(registrado).toHaveLength(1)
@@ -86,7 +89,7 @@ describe('ejecutarTarea', () => {
     ])
     const { uso } = await ejecutarTarea(TAREA, MENSAJES, {
       cliente,
-      env: ENTORNO,
+      modelos: MODELOS,
       registrarUso: async (u) => void registrado.push(u),
     })
 
@@ -103,11 +106,33 @@ describe('ejecutarTarea', () => {
     await expect(
       ejecutarTarea(TAREA, MENSAJES, {
         cliente,
-        env: ENTORNO,
+        modelos: MODELOS,
         registrarUso: async (u) => void registrado.push(u),
       }),
     ).rejects.toMatchObject({ clase: 'permanente' })
 
     expect(registrado).toHaveLength(2)
+  })
+
+  it('usa los modelos del contexto y no mira el entorno', async () => {
+    // Es la prueba que fija que la retirada del entorno ocurrió de verdad:
+    // si alguien reintrodujera una lectura de `process.env`, este caso —con
+    // la variable del nivel de `TAREA` borrada y el contexto puesto—
+    // seguiría pasando por accidente solo si el código de verdad la ignora.
+    const previo = process.env.MODELO_UTILITARIO
+    delete process.env.MODELO_UTILITARIO
+    try {
+      const cliente = new ClienteFalso(['{"titulo":"a","puntaje":1}'])
+      await ejecutarTarea(TAREA, MENSAJES, {
+        cliente,
+        modelos: { principal: 'proveedor/modelo-a', respaldo: 'proveedor/modelo-b' },
+      })
+      expect(cliente.peticiones.at(-1)!.modelos).toEqual([
+        'proveedor/modelo-a',
+        'proveedor/modelo-b',
+      ])
+    } finally {
+      if (previo !== undefined) process.env.MODELO_UTILITARIO = previo
+    }
   })
 })

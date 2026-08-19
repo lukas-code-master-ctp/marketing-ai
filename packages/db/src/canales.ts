@@ -4,8 +4,8 @@
  * necesita es `EditorDeEncargo`, un componente de cliente de `apps/web`.
  * Importarlo del barril `@gc/db` arrastraría `cliente.ts` —el conector de
  * Cloud SQL, con `google-auth-library`— al bundle del navegador; importarlo
- * de `esquema.ts` arrastraría el DDL de las catorce tablas (`pgTable(...)` de
- * las catorce, porque `@gc/db` no declara `sideEffects: false` y webpack no
+ * de `esquema.ts` arrastraría el DDL de las dieciséis tablas (`pgTable(...)` de
+ * las dieciséis, porque `@gc/db` no declara `sideEffects: false` y webpack no
  * puede descartar esas llamadas). Mismo problema, mismo remedio que ya usa
  * `@gc/operaciones/senales` para `EstadoDeCorrida`: un módulo tallado a
  * propósito para el componente de cliente, sin nada más colgando.

@@ -95,7 +95,6 @@ async function principal(): Promise<void> {
         const r = await generarEstrategia(db, crearCliente(opcionesDeCliente), organizationId, {
           slug: exigir(values.marca, '--marca'),
           periodo: exigir(values.periodo, '--periodo'),
-          env,
         })
         console.log(`Estrategia ${r.strategyId} generada en borrador`)
         break
@@ -104,7 +103,6 @@ async function principal(): Promise<void> {
         const r = await generarGrilla(db, crearCliente(opcionesDeCliente), organizationId, {
           slug: exigir(values.marca, '--marca'),
           mes: exigir(values.mes, '--mes'),
-          env,
         })
         console.log(`Grilla ${r.contentPlanId}: ${r.totalSlots} publicaciones`)
         for (const a of r.avisos) console.log(`  aviso [${a.regla}] ${a.detalle}`)

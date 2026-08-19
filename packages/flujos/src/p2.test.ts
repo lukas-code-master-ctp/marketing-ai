@@ -7,7 +7,6 @@ import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoGrilla } from './p2.js'
 
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA = {
@@ -40,7 +39,40 @@ const GRILLA_VALIDA = grilla([
   SLOT('2026-09-23', 'producto'),
 ])
 
-async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+// Identificador reconocible a propósito: la prueba «usa el modelo que la
+// organización eligió, no uno fijo» necesita distinguir este valor de
+// cualquier literal que pudiera quedar escrito a mano en `p2.ts`.
+const MODELO_RAZONAMIENTO_ELEGIDO = 'proveedor/fuerte-elegido'
+
+// `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
+// pruebas (el borrado en cascada por organización no la alcanza), así que
+// cada archivo necesita su propia siembra. Un solo candidato de
+// `razonamiento` alcanza: P2 no elige entre varios, solo necesita que la
+// organización tenga UNA elección para no caer en el `permanente` de
+// `modelosDelNivel`.
+async function sembrarEleccionDeModelo(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  organizationId: string,
+) {
+  const [modelo] = await db.insert(esquema.modelCatalog).values({
+    level: 'razonamiento', modelId: MODELO_RAZONAMIENTO_ELEGIDO,
+    label: 'Fuerte', description: 'El elegido para razonamiento en estas pruebas.',
+    priceInputUsd: '5.0000', priceOutputUsd: '15.0000',
+  }).returning()
+  await db.insert(esquema.organizationModels).values({
+    organizationId, level: 'razonamiento', principalId: modelo!.id, respaldoId: null,
+  })
+}
+
+/**
+ * `conEleccionDeModelo: false` deja la organización sin elegir el nivel de
+ * razonamiento — es lo que necesita la prueba que confirma que P2 se niega,
+ * sin llamar al modelo, antes de gastar por una organización sin elección.
+ */
+async function sembrar(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  opciones: { conEleccionDeModelo?: boolean } = {},
+) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
@@ -55,6 +87,9 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
     data: ESTRATEGIA,
     brandProfileVersion: 1,
   })
+  if (opciones.conEleccionDeModelo !== false) {
+    await sembrarEleccionDeModelo(db, ref.organizationId)
+  }
   return ref
 }
 
@@ -62,7 +97,7 @@ describe('flujo P2 · grilla', () => {
   it('persiste el plan, los slots y sus derivados enlazados', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
@@ -94,12 +129,46 @@ describe('flujo P2 · grilla', () => {
     })
   })
 
+  it('usa el modelo que la organización eligió, no uno fijo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente })
+
+      await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
+
+      // `modelos` viaja como arreglo (principal, y respaldo si difiere) a
+      // `ClienteLlm.completar`; sin respaldo elegido, `modelosDelNivel`
+      // devuelve el principal en los dos y `ejecutarTarea` lo deduplica a un
+      // solo elemento. El identificador sembrado tiene que ser el que llegó,
+      // no un modelo fijo escrito a mano en `p2.ts`.
+      expect(cliente.peticiones[0]!.modelos).toEqual([MODELO_RAZONAMIENTO_ELEGIDO])
+    })
+  })
+
+  it('sin elección para razonamiento falla sin llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db, { conEleccionDeModelo: false })
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente })
+
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
+      ).rejects.toThrow(/\/configuracion/)
+
+      // Lo que importa no es solo que falle, sino que falle ANTES de pagar:
+      // resolver tiene que ocurrir antes de gastar la primera llamada, igual
+      // que la comprobación de presupuesto.
+      expect(cliente.peticiones).toHaveLength(0)
+    })
+  })
+
   it('repara una sola vez cuando la grilla tiene problemas bloqueantes', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const invalida = grilla([SLOT('2026-10-05', 'educacion')])
       const cliente = new ClienteFalso([invalida, GRILLA_VALIDA])
-      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+      const flujo = crearFlujoGrilla({ cliente })
 
       await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
 
@@ -113,10 +182,7 @@ describe('flujo P2 · grilla', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const invalida = grilla([SLOT('2026-10-05', 'educacion')])
-      const flujo = crearFlujoGrilla({
-        cliente: new ClienteFalso([invalida, invalida]),
-        env: ENV,
-      })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([invalida, invalida]) })
 
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
@@ -133,7 +199,7 @@ describe('flujo P2 · grilla', () => {
       // septiembre que `grilla:ver --mes 2026-09` no ve y que aparece en octubre.
       const conHora = (hora: string) => grilla([{ ...SLOT('2026-09-30', 'educacion'), hora }])
       const cliente = new ClienteFalso([conHora('24:00'), conHora('23:00')])
-      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+      const flujo = crearFlujoGrilla({ cliente })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
@@ -159,7 +225,7 @@ describe('flujo P2 · grilla', () => {
         SLOT('2026-09-02', 'educacion'),
         SLOT('2026-09-04', 'educacion', 'linkedin'),
       ])
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([choque]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([choque]) })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
@@ -185,7 +251,7 @@ describe('flujo P2 · grilla', () => {
         })
         .where(eq(esquema.strategies.brandId, ref.brandId))
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
 
       const slots = await db.select().from(esquema.planSlots)
@@ -200,7 +266,7 @@ describe('flujo P2 · grilla', () => {
       // La propuesta trae 0 publicaciones de linkedin frente a las ~4 que pide
       // la estrategia; la expansión aporta exactamente esas 4. El aviso de
       // cadencia solo desaparece si se valida la grilla final.
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
@@ -214,7 +280,7 @@ describe('flujo P2 · grilla', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const pocos = grilla([SLOT('2026-09-02', 'educacion')])
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([pocos]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([pocos]) })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
@@ -230,7 +296,7 @@ describe('flujo P2 · grilla', () => {
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
       for (const _ of [1, 2]) {
-        const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+        const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
         await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
       }
 
@@ -258,7 +324,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
-      const primera = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const primera = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, primera, entrada, ref, SIN_ESPERA)
 
       // Se descartan los cuatro padres, como haría la web con `descartarSlot`.
@@ -269,7 +335,7 @@ describe('flujo P2 · grilla', () => {
         .returning({ id: esquema.planSlots.id })
       expect(descartados).toHaveLength(4)
 
-      const segunda = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const segunda = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const r = await ejecutarFlujo(db, segunda, entrada, ref, SIN_ESPERA)
       expect(r.estado).toBe('completado')
 
@@ -296,7 +362,7 @@ describe('flujo P2 · grilla', () => {
       const ref = { organizationId: org!.id, brandId: marca!.id }
       await guardarPerfil(db, ref, PERFIL_VALIDO)
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
       ).rejects.toMatchObject({ clase: 'permanente' })
@@ -308,7 +374,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
 
       await db
@@ -316,7 +382,7 @@ describe('flujo P2 · grilla', () => {
         .set({ status: 'aprobada' })
         .where(eq(esquema.contentPlans.brandId, ref.brandId))
 
-      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await expect(
         ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
       ).rejects.toMatchObject({ clase: 'permanente' })
@@ -333,7 +399,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
 
       await db
@@ -341,7 +407,7 @@ describe('flujo P2 · grilla', () => {
         .set({ status: 'aprobada' })
         .where(eq(esquema.contentPlans.brandId, ref.brandId))
 
-      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const error = await ejecutarFlujo(
         db, otro, entrada, { ...ref, brandSlug: 'parcelas' }, SIN_ESPERA,
       ).catch((e: unknown) => e)
@@ -356,7 +422,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
       expect(await db.select().from(esquema.planSlots)).toHaveLength(8)
 
@@ -371,7 +437,7 @@ describe('flujo P2 · grilla', () => {
       `)
 
       try {
-        const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+        const otro = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
         await expect(ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA)).rejects.toThrow()
       } finally {
         await db.execute(sql`drop trigger if exists gc_romper_slots on plan_slots`)
@@ -389,7 +455,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, mes: '2026-09' }
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
 
       await db
@@ -399,7 +465,7 @@ describe('flujo P2 · grilla', () => {
       await db.delete(esquema.aiCalls)
 
       const cliente = new ClienteFalso([GRILLA_VALIDA])
-      const otro = crearFlujoGrilla({ cliente, env: ENV })
+      const otro = crearFlujoGrilla({ cliente })
 
       // El mensaje nombra el estado que de verdad bloquea y el remedio real:
       // content_plans no tiene estado "archivada", así que pedirlo era imposible.
@@ -417,7 +483,7 @@ describe('flujo P2 · grilla', () => {
       const ref = await sembrar(db)
 
       // sembrar() crea la estrategia de 2026-Q3. Septiembre calza; diciembre no.
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const error = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-12' }, ref, SIN_ESPERA,
       ).catch((e: unknown) => e)
@@ -436,7 +502,7 @@ describe('flujo P2 · grilla', () => {
         .set({ status: 'archivada' })
         .where(eq(esquema.strategies.brandId, ref.brandId))
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const fallo = ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
       )
@@ -457,7 +523,7 @@ describe('flujo P2 · grilla', () => {
         .set({ data: { objetivos: 'esto no es un arreglo' } })
         .where(eq(esquema.strategies.brandId, ref.brandId))
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const fallo = ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
       )
@@ -484,7 +550,7 @@ describe('flujo P2 · grilla', () => {
         brandProfileVersion: 1,
       })
 
-      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]), env: ENV })
+      const flujo = crearFlujoGrilla({ cliente: new ClienteFalso([GRILLA_VALIDA]) })
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA,
       )
@@ -507,7 +573,7 @@ describe('flujo P2 · grilla', () => {
       // El cliente trae una sola respuesta: si el modelo se llamara dos veces,
       // ClienteFalso lanzaría permanente por quedarse sin respuestas.
       const cliente = new ClienteFalso([GRILLA_VALIDA])
-      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+      const flujo = crearFlujoGrilla({ cliente })
 
       // Un trigger que revienta el primer INSERT en plan_slots con un código
       // transitorio, y se desactiva solo para que el reintento pase. El
