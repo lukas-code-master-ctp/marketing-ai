@@ -54,10 +54,26 @@ export function SelectorDeModelo({
   const [respaldoId, setRespaldoId] = useState(eleccion?.respaldo?.id ?? '')
   const [ocupado, setOcupado] = useState(false)
   const [error, setError] = useState<{ mensaje: string; reintentable: boolean } | null>(null)
+  const [guardado, setGuardado] = useState(false)
+
+  // Un cambio en cualquiera de los dos selectores invalida el aviso de
+  // éxito: sin esto, elegir un modelo distinto después de guardar dejaría
+  // «Modelo guardado.» en pantalla describiendo una elección que ya no es la
+  // que se ve — mismo criterio que `versionGuardada` en `EditorDePerfil`.
+  function cambiarPrincipal(id: string) {
+    setPrincipalId(id)
+    setGuardado(false)
+  }
+
+  function cambiarRespaldo(id: string) {
+    setRespaldoId(id)
+    setGuardado(false)
+  }
 
   async function guardar() {
     setOcupado(true)
     setError(null)
+    setGuardado(false)
 
     const resultado = await guardarModeloAccion(
       nivel,
@@ -70,6 +86,7 @@ export function SelectorDeModelo({
       return
     }
 
+    setGuardado(true)
     setOcupado(false)
   }
 
@@ -99,7 +116,7 @@ export function SelectorDeModelo({
         <select
           id={idPrincipal}
           value={principalId}
-          onChange={(e) => setPrincipalId(e.target.value)}
+          onChange={(e) => cambiarPrincipal(e.target.value)}
           disabled={ocupado}
           className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-900 disabled:opacity-50"
         >
@@ -122,7 +139,7 @@ export function SelectorDeModelo({
         <select
           id={idRespaldo}
           value={respaldoId}
-          onChange={(e) => setRespaldoId(e.target.value)}
+          onChange={(e) => cambiarRespaldo(e.target.value)}
           disabled={ocupado}
           className="w-full rounded border border-gray-300 px-2 py-1 text-sm text-gray-900 disabled:opacity-50"
         >
@@ -136,14 +153,17 @@ export function SelectorDeModelo({
         </select>
       </div>
 
-      <button
-        type="button"
-        disabled={ocupado || principalId === ''}
-        onClick={() => void guardar()}
-        className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-      >
-        Guardar
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={ocupado || principalId === ''}
+          onClick={() => void guardar()}
+          className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          Guardar
+        </button>
+        {guardado && <span className="text-sm text-green-700">Modelo guardado.</span>}
+      </div>
 
       {error && (
         <div className="mt-2 max-w-sm rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">

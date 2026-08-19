@@ -243,4 +243,62 @@ describe('SelectorDeModelo', () => {
 
     expect(within(bloque).queryByText('La base no respondió')).not.toBeNull()
   })
+
+  // Menor 11 de la revisión de rama: el botón se rehabilitaba y no pasaba
+  // nada más. Con los dos selectores mostrando lo que ya se eligió, no había
+  // ninguna señal de que la escritura ocurrió.
+  it('guardar con éxito muestra un mensaje de confirmación', async () => {
+    const candidatos = [modelo({ id: 'razonamiento-1', nivel: 'razonamiento' })]
+    const eleccion: EleccionDeNivel = {
+      nivel: 'razonamiento',
+      principal: candidatos[0]!,
+      respaldo: null,
+    }
+
+    render(
+      <SelectorDeModelo
+        nivel="razonamiento"
+        explicacion="Decide la estrategia del trimestre y arma la grilla del mes."
+        candidatos={candidatos}
+        eleccion={eleccion}
+      />,
+    )
+
+    const bloque = screen.getByRole('region', { name: /razonamiento/i })
+    expect(within(bloque).queryByText('Modelo guardado.')).toBeNull()
+
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
+
+    expect(within(bloque).queryByText('Modelo guardado.')).not.toBeNull()
+  })
+
+  it('cambiar la elección después de guardar oculta el mensaje de confirmación', async () => {
+    const candidatos = [
+      modelo({ id: 'razonamiento-1', nivel: 'razonamiento', etiqueta: 'Razonador Uno' }),
+      modelo({ id: 'razonamiento-2', nivel: 'razonamiento', etiqueta: 'Razonador Dos' }),
+    ]
+    const eleccion: EleccionDeNivel = {
+      nivel: 'razonamiento',
+      principal: candidatos[0]!,
+      respaldo: null,
+    }
+
+    render(
+      <SelectorDeModelo
+        nivel="razonamiento"
+        explicacion="Decide la estrategia del trimestre y arma la grilla del mes."
+        candidatos={candidatos}
+        eleccion={eleccion}
+      />,
+    )
+
+    const bloque = screen.getByRole('region', { name: /razonamiento/i })
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
+    expect(within(bloque).queryByText('Modelo guardado.')).not.toBeNull()
+
+    const selectorPrincipal = within(bloque).getByLabelText('Modelo principal')
+    await userEvent.selectOptions(selectorPrincipal, 'razonamiento-2')
+
+    expect(within(bloque).queryByText('Modelo guardado.')).toBeNull()
+  })
 })
