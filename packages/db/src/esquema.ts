@@ -468,11 +468,13 @@ export const modelCatalog = pgTable('model_catalog', {
 
 /**
  * Qué eligió cada organización para cada nivel. El respaldo es opcional
- * porque no todo nivel tiene un segundo candidato razonable hoy: obligar a
- * elegir dos modelos donde solo hay uno sensato sería inventar una elección
- * que nadie necesita hacer, así que `respaldo_id` queda nulable y
- * `modelosDelNivel` (`packages/operaciones/src/modelos.ts`) cae al principal
- * en los dos cuando no hay respaldo.
+ * porque `guardarEleccionDeModelo` (`packages/operaciones/src/modelos.ts`)
+ * acepta `respaldoId: null` y la pantalla de configuración ofrece
+ * explícitamente «Sin respaldo»: quien opera puede no querer pagar un
+ * segundo modelo. También conserva el comportamiento previo a esta rama,
+ * donde la variable de entorno de respaldo vacía caía al principal. Por eso
+ * `respaldo_id` queda nulable, y `modelosDelNivel` (mismo archivo) devuelve
+ * el principal en los dos cuando no hay respaldo elegido.
  *
  * Las dos foráneas son simples y no compuestas: `organizations` es la raíz
  * de la tenencia y `model_catalog` es global, así que no hay un par
