@@ -136,7 +136,7 @@ y en `packages/despertador/package.json` con el que exige
 **Proteger las páginas no protege las Server Actions.** Son endpoints HTTP con
 identificador estable: cualquiera que lo conozca puede llamarlos sin pasar por
 la página. La comprobación de sesión vive en el ayudante `ejecutar` de
-`apps/web/src/acciones.ts`, por el que pasan las diez acciones, no en los
+`apps/web/src/acciones.ts`, por el que pasan las doce acciones, no en los
 componentes de servidor. Una acción que no use ese ayudante nace desprotegida.
 
 **La configuración de Auth.js está partida en dos archivos, y quien edite uno
