@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { conexion, marcasDeLaOrganizacion, organizacionPorDefecto } from '../../datos.js'
 import { SelectorDeMarca } from '../selector-de-marca.js'
@@ -24,8 +25,11 @@ export default async function LayoutDeApp({ children }: { children: ReactNode })
 
   return (
     <>
-      <header className="p-4 border-b">
+      <header className="p-4 border-b flex items-center justify-between">
         <SelectorDeMarca marcas={marcas} />
+        <Link href="/configuracion" className="text-gray-500 hover:text-gray-800">
+          Configuración
+        </Link>
       </header>
       {children}
     </>

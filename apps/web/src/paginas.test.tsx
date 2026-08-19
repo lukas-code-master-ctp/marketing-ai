@@ -26,6 +26,7 @@ import {
 import PaginaDeConfiguracion from './app/(app)/configuracion/page.js'
 import PaginaDeEstrategia from './app/(app)/[marca]/estrategia/page.js'
 import PaginaDeGrilla from './app/(app)/[marca]/grilla/[mes]/page.js'
+import LayoutDeApp from './app/(app)/layout.js'
 import PaginaDePerfil from './app/(app)/[marca]/perfil/page.js'
 import Inicio from './app/(app)/page.js'
 import { marcasDeLaOrganizacion } from './datos.js'
@@ -76,6 +77,10 @@ vi.mock('./acciones.js', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+  // `SelectorDeMarca` (dentro de `LayoutDeApp`) lo necesita para armar sus
+  // enlaces conservando la sección actual. Ninguna prueba de este archivo
+  // afirma sobre esa ruta, así que un valor fijo alcanza.
+  usePathname: () => '/parcelas/grilla/2026-09',
   notFound: () => {
     throw new Error('notFound')
   },
@@ -1189,6 +1194,22 @@ describe('la pantalla de configuración', () => {
     expect(
       within(bloque).queryByText('Todavía no has elegido un modelo para este nivel.'),
     ).not.toBeNull()
+  })
+})
+
+// Hallazgo Importante 5 de la revisión de rama: un grep sobre `apps/web/src`
+// no encontraba ningún enlace a `/configuracion` — solo la ruta que
+// `guardarModeloAccion` revalida y el import de esta prueba. Quedaba a una
+// URL que había que saber de memoria, incluso cuando el mensaje de error de
+// `modelosDelNivel` dice «Elígelo en /configuracion».
+describe('el encabezado de la app', () => {
+  it('lleva un enlace a /configuracion, junto al selector de marcas', async () => {
+    vi.mocked(marcasDeLaOrganizacion).mockResolvedValue(UNA_MARCA)
+
+    render(await LayoutDeApp({ children: <div>contenido</div> }))
+
+    const enlace = screen.getByRole('link', { name: /configuraci[oó]n/i })
+    expect(enlace.getAttribute('href')).toBe('/configuracion')
   })
 })
 
