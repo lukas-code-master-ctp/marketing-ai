@@ -173,6 +173,48 @@ describe('SelectorDeModelo', () => {
     await vi.waitFor(() => expect(boton.disabled).toBe(false))
   })
 
+  // Nada en las pruebas de arriba afirma sobre los argumentos que
+  // `SelectorDeModelo` le manda a `guardarModeloAccion`: cubren filtrado,
+  // precios, el botón deshabilitado y el mensaje de error, pero no que el
+  // principal y el respaldo elegidos lleguen en el orden correcto.
+  // Intercambiarlos en la llamada invertiría en silencio qué modelo se paga
+  // primero, y ninguna de las otras cinco pruebas se pondría roja.
+  it('guardar manda el nivel, el principal y el respaldo elegidos, en ese orden', async () => {
+    const candidatos = [
+      modelo({ id: 'razonamiento-1', nivel: 'razonamiento', etiqueta: 'Razonador Uno' }),
+      modelo({ id: 'razonamiento-2', nivel: 'razonamiento', etiqueta: 'Razonador Dos' }),
+      modelo({ id: 'razonamiento-3', nivel: 'razonamiento', etiqueta: 'Razonador Tres' }),
+    ]
+    const eleccion: EleccionDeNivel = {
+      nivel: 'razonamiento',
+      principal: candidatos[0]!,
+      respaldo: candidatos[1]!,
+    }
+
+    render(
+      <SelectorDeModelo
+        nivel="razonamiento"
+        explicacion="Decide la estrategia del trimestre y arma la grilla del mes."
+        candidatos={candidatos}
+        eleccion={eleccion}
+      />,
+    )
+
+    const bloque = screen.getByRole('region', { name: /razonamiento/i })
+    const selectorPrincipal = within(bloque).getByLabelText('Modelo principal') as HTMLSelectElement
+    const selectorRespaldo = within(bloque).getByLabelText('Modelo de respaldo (opcional)') as HTMLSelectElement
+
+    // Se elige una opción distinta de la inicial en los DOS selectores: con
+    // una sola cambiada, un intercambio de argumentos podría pasar por
+    // casualidad si el valor que no cambió coincidiera en las dos posiciones.
+    await userEvent.selectOptions(selectorPrincipal, 'razonamiento-3')
+    await userEvent.selectOptions(selectorRespaldo, 'razonamiento-1')
+
+    await userEvent.click(within(bloque).getByRole('button', { name: 'Guardar' }))
+
+    expect(guardarModeloAccion).toHaveBeenCalledWith('razonamiento', 'razonamiento-3', 'razonamiento-1')
+  })
+
   it('si la acción rechaza, el mensaje se ve', async () => {
     vi.mocked(guardarModeloAccion).mockResolvedValue({
       ok: false,

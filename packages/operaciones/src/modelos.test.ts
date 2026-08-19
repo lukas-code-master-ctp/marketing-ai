@@ -228,4 +228,34 @@ describe('guardarEleccionDeModelo', () => {
       expect(filas).toHaveLength(0)
     })
   })
+
+  // La base no ata el nivel de `respaldo_id` al `level` de la fila —las dos
+  // foráneas apuntan a `model_catalog` sin más—, así que el principal
+  // correcto no basta: un `respaldoId` de otro nivel tiene que rechazar
+  // igual. La única prueba de arriba usa el principal de otro nivel y nunca
+  // ejercita el respaldo; sin esta, cambiar `idsAComprobar` a solo
+  // `[args.principalId]` (sin el respaldo) deja pasar un respaldo de otro
+  // nivel sin que nada se ponga rojo.
+  it('no deja elegir un respaldo de otro nivel, aunque el principal sea correcto', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const organizationId = await crearOrganizacion(db)
+      const catalogo = await sembrarCatalogo(db)
+      const principalCorrecto = catalogo.find((m) => m.modelId === 'proveedor/redaccion-caro')!
+      const respaldoDeOtroNivel = catalogo.find((m) => m.modelId === 'proveedor/utilitario-barato')!
+
+      await expect(
+        guardarEleccionDeModelo(
+          db, organizationId,
+          {
+            nivel: 'redaccion',
+            principalId: principalCorrecto.id,
+            respaldoId: respaldoDeOtroNivel.id,
+          },
+        ),
+      ).rejects.toMatchObject({ clase: 'permanente' })
+
+      const filas = await db.select().from(esquema.organizationModels)
+      expect(filas).toHaveLength(0)
+    })
+  })
 })

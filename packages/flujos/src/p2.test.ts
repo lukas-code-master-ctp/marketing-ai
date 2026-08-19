@@ -40,6 +40,12 @@ const GRILLA_VALIDA = grilla([
   SLOT('2026-09-23', 'producto'),
 ])
 
+// Identificador reconocible a propósito: la prueba «usa el modelo que la
+// organización eligió, no uno fijo» necesita distinguir este valor de
+// cualquier literal que pudiera quedar escrito a mano en `p2.ts`, y de
+// `ENV.MODELO_RAZONAMIENTO` de arriba, que ya no influye en nada.
+const MODELO_RAZONAMIENTO_ELEGIDO = 'proveedor/fuerte-elegido'
+
 // `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
 // pruebas (el borrado en cascada por organización no la alcanza), así que
 // cada archivo necesita su propia siembra. Un solo candidato de
@@ -51,7 +57,7 @@ async function sembrarEleccionDeModelo(
   organizationId: string,
 ) {
   const [modelo] = await db.insert(esquema.modelCatalog).values({
-    level: 'razonamiento', modelId: 'proveedor/fuerte',
+    level: 'razonamiento', modelId: MODELO_RAZONAMIENTO_ELEGIDO,
     label: 'Fuerte', description: 'El elegido para razonamiento en estas pruebas.',
     priceInputUsd: '5.0000', priceOutputUsd: '15.0000',
   }).returning()
@@ -60,7 +66,15 @@ async function sembrarEleccionDeModelo(
   })
 }
 
-async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0]) {
+/**
+ * `conEleccionDeModelo: false` deja la organización sin elegir el nivel de
+ * razonamiento — es lo que necesita la prueba que confirma que P2 se niega,
+ * sin llamar al modelo, antes de gastar por una organización sin elección.
+ */
+async function sembrar(
+  db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[0]>[0],
+  opciones: { conEleccionDeModelo?: boolean } = {},
+) {
   const [org] = await db.insert(esquema.organizations).values({ name: 'X', slug: 'x' }).returning()
   const [marca] = await db
     .insert(esquema.brands)
@@ -75,7 +89,9 @@ async function sembrar(db: Parameters<Parameters<typeof conBaseDeDatosDePrueba>[
     data: ESTRATEGIA,
     brandProfileVersion: 1,
   })
-  await sembrarEleccionDeModelo(db, ref.organizationId)
+  if (opciones.conEleccionDeModelo !== false) {
+    await sembrarEleccionDeModelo(db, ref.organizationId)
+  }
   return ref
 }
 
@@ -112,6 +128,40 @@ describe('flujo P2 · grilla', () => {
           (d.scheduledFor.getTime() - padre!.scheduledFor.getTime()) / 86_400_000
         expect(dias).toBe(2)
       }
+    })
+  })
+
+  it('usa el modelo que la organización eligió, no uno fijo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db)
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+
+      await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA)
+
+      // `modelos` viaja como arreglo (principal, y respaldo si difiere) a
+      // `ClienteLlm.completar`; sin respaldo elegido, `modelosDelNivel`
+      // devuelve el principal en los dos y `ejecutarTarea` lo deduplica a un
+      // solo elemento. El identificador sembrado tiene que ser el que llegó,
+      // no un modelo fijo escrito a mano en `p2.ts` ni el de `ENV`.
+      expect(cliente.peticiones[0]!.modelos).toEqual([MODELO_RAZONAMIENTO_ELEGIDO])
+    })
+  })
+
+  it('sin elección para razonamiento falla sin llamar al modelo', async () => {
+    await conBaseDeDatosDePrueba(async (db) => {
+      const ref = await sembrar(db, { conEleccionDeModelo: false })
+      const cliente = new ClienteFalso([GRILLA_VALIDA])
+      const flujo = crearFlujoGrilla({ cliente, env: ENV })
+
+      await expect(
+        ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: '2026-09' }, ref, SIN_ESPERA),
+      ).rejects.toThrow(/\/configuracion/)
+
+      // Lo que importa no es solo que falle, sino que falle ANTES de pagar:
+      // resolver tiene que ocurrir antes de gastar la primera llamada, igual
+      // que la comprobación de presupuesto.
+      expect(cliente.peticiones).toHaveLength(0)
     })
   })
 
