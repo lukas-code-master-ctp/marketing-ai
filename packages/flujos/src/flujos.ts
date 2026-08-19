@@ -9,13 +9,10 @@ export async function generarEstrategia(
   db: BaseDeDatos,
   cliente: ClienteLlm,
   organizationId: string,
-  args: { slug: string; periodo: string; env?: Record<string, string | undefined> },
+  args: { slug: string; periodo: string },
 ): Promise<SalidaP1> {
   const ref = await resolverMarca(db, organizationId, args.slug)
-  const flujo = crearFlujoEstrategia({
-    cliente,
-    ...(args.env !== undefined ? { env: args.env } : {}),
-  })
+  const flujo = crearFlujoEstrategia({ cliente })
   const r = await ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: args.periodo }, ref)
   return r.salida as SalidaP1
 }
@@ -24,13 +21,10 @@ export async function generarGrilla(
   db: BaseDeDatos,
   cliente: ClienteLlm,
   organizationId: string,
-  args: { slug: string; mes: string; env?: Record<string, string | undefined> },
+  args: { slug: string; mes: string },
 ): Promise<SalidaP2> {
   const ref = await resolverMarca(db, organizationId, args.slug)
-  const flujo = crearFlujoGrilla({
-    cliente,
-    ...(args.env !== undefined ? { env: args.env } : {}),
-  })
+  const flujo = crearFlujoGrilla({ cliente })
   const r = await ejecutarFlujo(db, flujo, { brandId: ref.brandId, mes: args.mes }, ref)
   return r.salida as SalidaP2
 }

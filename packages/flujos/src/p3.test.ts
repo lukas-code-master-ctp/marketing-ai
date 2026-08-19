@@ -12,7 +12,6 @@ import { crearFlujoPieza, type SalidaP3 } from './p3.js'
 
 const MUESTRAS = fileURLToPath(new URL('../../strategy/muestras', import.meta.url))
 
-const ENV = { MODELO_REDACCION: 'proveedor/redactor' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA = {
@@ -199,7 +198,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       const r = await ejecutarFlujo(
         db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
@@ -218,7 +217,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
 
@@ -236,7 +235,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db, { conEleccionDeModelo: false })
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -256,7 +255,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
 
@@ -275,14 +274,14 @@ describe('flujo P3 · pieza', () => {
 
       const { slotId: slotBlog, planId } = await sembrarSlot(db, ref, { channel: 'blog' })
       const clienteBlog = new ClienteFalso([PIEZA_BLOG_JSON])
-      const flujoBlog = crearFlujoPieza({ cliente: clienteBlog, env: ENV })
+      const flujoBlog = crearFlujoPieza({ cliente: clienteBlog })
       await ejecutarFlujo(
         db, flujoBlog, { slotId: slotBlog, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
       )
 
       const { slotId: slotLinkedin } = await sembrarSlot(db, ref, { channel: 'linkedin', planId })
       const clienteLinkedin = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujoLinkedin = crearFlujoPieza({ cliente: clienteLinkedin, env: ENV })
+      const flujoLinkedin = crearFlujoPieza({ cliente: clienteLinkedin })
       await ejecutarFlujo(
         db, flujoLinkedin, { slotId: slotLinkedin, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,
       )
@@ -312,7 +311,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       // Igual que en p1.test.ts/p2.test.ts: un trigger que revienta el primer
       // INSERT en content_pieces con un código transitorio, y se desactiva solo
@@ -358,7 +357,7 @@ describe('flujo P3 · pieza', () => {
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const entrada = { slotId, mes: '2026-09', brandId: ref.brandId }
 
-      const flujo1 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]), env: ENV })
+      const flujo1 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON]) })
       await ejecutarFlujo(db, flujo1, entrada, ref, SIN_ESPERA)
 
       // Una segunda versión del perfil, para que la segunda corrida resuelva
@@ -373,7 +372,7 @@ describe('flujo P3 · pieza', () => {
       // fila, pero con el contenido del primer intento. `toHaveLength(1)`
       // sola no distingue "reemplaza" de "ignora la segunda"; lo que sigue,
       // sobre `fila.data`, `fila.channel` y `fila.brandProfileVersion`, sí.
-      const flujo2 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON_V2]), env: ENV })
+      const flujo2 = crearFlujoPieza({ cliente: new ClienteFalso([PIEZA_LINKEDIN_JSON_V2]) })
       await ejecutarFlujo(db, flujo2, entrada, ref, SIN_ESPERA)
 
       const filas = await db.select().from(esquema.contentPieces)
@@ -390,7 +389,7 @@ describe('flujo P3 · pieza', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -415,7 +414,7 @@ describe('flujo P3 · pieza', () => {
       // pasar con la corrida ya `pendiente` en la cola.
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin', status: 'descartado' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -441,7 +440,7 @@ describe('flujo P3 · pieza', () => {
       const refOtraMarca = await sembrarOtraMarca(db, ref.organizationId)
 
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       await expect(
         ejecutarFlujo(
@@ -460,7 +459,7 @@ describe('flujo P3 · pieza', () => {
       // `sembrarSlot` cuelga el slot de un plan de `2026-09`.
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
 
       // `2026-08` y no `2026-10`: los dos son un mes distinto del `2026-09`
       // del plan, pero `2026-08` cae en el mismo trimestre —`2026-Q3`— que sí
@@ -485,7 +484,7 @@ describe('flujo P3 · pieza', () => {
       const ref = await sembrar(db)
       const { slotId } = await sembrarSlot(db, ref, { channel: 'linkedin' })
       const cliente = new ClienteFalso([PIEZA_LINKEDIN_JSON])
-      const flujo = crearFlujoPieza({ cliente, env: ENV })
+      const flujo = crearFlujoPieza({ cliente })
       await ejecutarFlujo(db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA)
 
       const mensajeUsuario = cliente.peticiones[0]!.mensajes.find((m) => m.rol === 'usuario')!.texto
@@ -518,7 +517,7 @@ describe('flujo P3 · pieza', () => {
         const ref = await sembrar(db)
         const { slotId } = await sembrarSlot(db, ref, { channel: canal })
         const cliente = new ClienteDeMuestra(MUESTRAS)
-        const flujo = crearFlujoPieza({ cliente, env: ENV })
+        const flujo = crearFlujoPieza({ cliente })
 
         const r = await ejecutarFlujo(
           db, flujo, { slotId, mes: '2026-09', brandId: ref.brandId }, ref, SIN_ESPERA,

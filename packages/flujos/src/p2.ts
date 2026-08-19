@@ -116,7 +116,6 @@ export function crearFlujoGrilla(deps: Dependencias): DefinicionDeFlujo {
         const { datos } = await ejecutarTarea(TAREA_GRILLA, mensajes, {
           cliente: deps.cliente,
           modelos,
-          ...(deps.env !== undefined ? { env: deps.env } : {}),
           registrarUso,
         })
 

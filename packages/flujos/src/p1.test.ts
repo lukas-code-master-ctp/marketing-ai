@@ -7,7 +7,6 @@ import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { crearFlujoEstrategia } from './p1.js'
 
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
 const SIN_ESPERA = { dormir: async () => {}, aleatorio: () => 0 }
 
 const ESTRATEGIA_JSON = JSON.stringify({
@@ -45,8 +44,7 @@ async function sembrarEncargo(
 
 // Identificador reconocible a propósito: la prueba «usa el modelo que la
 // organización eligió, no uno fijo» necesita distinguir este valor de
-// cualquier literal que pudiera quedar escrito a mano en `p1.ts`, y de
-// `ENV.MODELO_RAZONAMIENTO` de arriba, que ya no influye en nada.
+// cualquier literal que pudiera quedar escrito a mano en `p1.ts`.
 const MODELO_RAZONAMIENTO_ELEGIDO = 'proveedor/fuerte-elegido'
 
 // `model_catalog` es global y `conBaseDeDatosDePrueba` la vacía entre
@@ -97,7 +95,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       const r = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA,
@@ -115,7 +113,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA)
 
@@ -129,7 +127,7 @@ describe('flujo P1 · estrategia', () => {
   it('registra el costo de la llamada', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
-      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
 
       await ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA)
 
@@ -147,7 +145,7 @@ describe('flujo P1 · estrategia', () => {
         organizationId: ref.organizationId, brandId: ref.brandId,
         task: 't', model: 'm', costUsd: '999.00', promptHash: 'h',
       })
-      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
 
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
@@ -162,7 +160,7 @@ describe('flujo P1 · estrategia', () => {
         organizationId: ref.organizationId, brandId: ref.brandId,
         task: 't', model: 'm', costUsd: '999.00', promptHash: 'h',
       })
-      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
 
       const error = await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, period: '2026-Q4' },
@@ -180,7 +178,7 @@ describe('flujo P1 · estrategia', () => {
       const entrada = { brandId: ref.brandId, period: '2026-Q4' }
 
       for (const _ of [1, 2]) {
-        const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+        const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
         await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
       }
 
@@ -193,7 +191,7 @@ describe('flujo P1 · estrategia', () => {
       const ref = await sembrar(db)
       const entrada = { brandId: ref.brandId, period: '2026-Q4' }
 
-      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
       await ejecutarFlujo(db, flujo, entrada, ref, SIN_ESPERA)
 
       await db
@@ -201,7 +199,7 @@ describe('flujo P1 · estrategia', () => {
         .set({ status: 'aprobada', data: { marca: 'revisada a mano' } })
         .where(eq(esquema.strategies.brandId, ref.brandId))
 
-      const otro = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const otro = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
       await expect(
         ejecutarFlujo(db, otro, entrada, ref, SIN_ESPERA),
       ).rejects.toMatchObject({ clase: 'permanente' })
@@ -225,7 +223,7 @@ describe('flujo P1 · estrategia', () => {
       })
 
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
@@ -249,7 +247,7 @@ describe('flujo P1 · estrategia', () => {
         brandProfileVersion: 1,
       })
 
-      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]), env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente: new ClienteFalso([ESTRATEGIA_JSON]) })
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
       ).rejects.toThrow(/"archivada".*borrador/s)
@@ -260,7 +258,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-3' }, ref, SIN_ESPERA),
@@ -275,7 +273,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await ejecutarFlujo(
         db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA,
@@ -298,7 +296,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       // `sembrar` escribió el encargo de 2026-Q4; este es otro trimestre.
       // `ejecutarFlujo` no devuelve un resultado con `estado: 'fallido'` para
@@ -317,7 +315,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA)
 
@@ -325,7 +323,7 @@ describe('flujo P1 · estrategia', () => {
       // `ClienteLlm.completar`; sin respaldo elegido, `modelosDelNivel`
       // devuelve el principal en los dos y `ejecutarTarea` lo deduplica a un
       // solo elemento. El identificador sembrado tiene que ser el que llegó,
-      // no un modelo fijo escrito a mano en `p1.ts` ni el de `ENV`.
+      // no un modelo fijo escrito a mano en `p1.ts`.
       expect(cliente.peticiones[0]!.modelos).toEqual([MODELO_RAZONAMIENTO_ELEGIDO])
     })
   })
@@ -334,7 +332,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db, { conEleccionDeModelo: false })
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       await expect(
         ejecutarFlujo(db, flujo, { brandId: ref.brandId, period: '2026-Q4' }, ref, SIN_ESPERA),
@@ -351,7 +349,7 @@ describe('flujo P1 · estrategia', () => {
     await conBaseDeDatosDePrueba(async (db) => {
       const ref = await sembrar(db)
       const cliente = new ClienteFalso([ESTRATEGIA_JSON])
-      const flujo = crearFlujoEstrategia({ cliente, env: ENV })
+      const flujo = crearFlujoEstrategia({ cliente })
 
       // Una secuencia y no una tabla de bandera: el UPDATE de una tabla se
       // revertiría junto con la transacción cuyo fallo provoca, y el trigger

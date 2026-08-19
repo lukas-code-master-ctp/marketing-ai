@@ -12,8 +12,6 @@ import {
 } from '@gc/operaciones'
 
 const MUESTRAS = fileURLToPath(new URL('../../../packages/strategy/muestras', import.meta.url))
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
-
 // P1 exige un encargo escrito para el periodo (bloque «el encargo del
 // trimestre»): sin esto la marcha en seco se niega antes de llegar al modelo.
 const ENCARGO = {
@@ -59,12 +57,12 @@ describe('marcha en seco de punta a punta', () => {
       await guardarEncargo(db, organizationId, { slug: 'parcelas', periodo: '2026-Q3', encargo: ENCARGO })
 
       const estrategia = await generarEstrategia(db, cliente, organizationId, {
-        slug: 'parcelas', periodo: '2026-Q3', env: ENV,
+        slug: 'parcelas', periodo: '2026-Q3',
       })
       expect(estrategia.strategyId).toBeTruthy()
 
       const grilla = await generarGrilla(db, cliente, organizationId, {
-        slug: 'parcelas', mes: '2026-09', env: ENV,
+        slug: 'parcelas', mes: '2026-09',
       })
 
       // 4 artículos de blog + 2 derivados por cada uno (linkedin e instagram)
@@ -94,7 +92,7 @@ describe('marcha en seco de punta a punta', () => {
 
       await expect(
         generarGrilla(db, new ClienteDeMuestra(MUESTRAS), organizationId, {
-          slug: 'no-existe', mes: '2026-09', env: ENV,
+          slug: 'no-existe', mes: '2026-09',
         }),
       ).rejects.toMatchObject({ clase: 'permanente' })
     })

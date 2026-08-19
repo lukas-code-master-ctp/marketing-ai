@@ -99,7 +99,6 @@ export function crearFlujoEstrategia(deps: Dependencias): DefinicionDeFlujo {
       const { datos } = await ejecutarTarea(TAREA_ESTRATEGIA, mensajes, {
         cliente: deps.cliente,
         modelos,
-        ...(deps.env !== undefined ? { env: deps.env } : {}),
         registrarUso: crearRegistrador(ctx.db, {
           organizationId: ctx.organizationId,
           brandId: entrada.brandId,

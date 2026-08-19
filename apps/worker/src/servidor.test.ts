@@ -9,8 +9,6 @@ import { describe, expect, it } from 'vitest'
 import { crearServidor } from './servidor.js'
 
 const TOKEN = 'token-de-prueba'
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
-
 /** Mismo mes de 2026-Q3 que usan `tomar.test.ts` y `drenar.test.ts`: la siembra trae esa estrategia. */
 const MES = '2026-09'
 
@@ -21,7 +19,7 @@ async function conServidor(
 ): Promise<void> {
   const servidor: Server = crearServidor({
     db,
-    deps: { cliente: new ClienteFalso([]), env: ENV },
+    deps: { cliente: new ClienteFalso([]) },
     token: TOKEN,
   })
   await new Promise<void>((listo) => servidor.listen(0, '127.0.0.1', listo))

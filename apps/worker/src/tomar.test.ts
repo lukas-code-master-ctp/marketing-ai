@@ -9,8 +9,6 @@ import { and, eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { tomarYEjecutarUna } from './tomar.js'
 
-const ENV = { MODELO_RAZONAMIENTO: 'proveedor/fuerte' }
-
 /**
  * El mes es de 2026-Q3 y no de Q4 a propósito: `sembrarConEstrategia` siembra
  * la estrategia de `2026-Q3`, así que pedir la grilla de octubre falla en el
@@ -56,7 +54,7 @@ const ENCARGO = {
 describe('tomarYEjecutarUna', () => {
   it('sin corridas pendientes no hace nada', async () => {
     await conBaseDeDatosDePrueba(async (db) => {
-      expect(await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]), env: ENV })).toBe('nada')
+      expect(await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]) })).toBe('nada')
     })
   })
 
@@ -65,7 +63,7 @@ describe('tomarYEjecutarUna', () => {
       const ref = await sembrarConEstrategia(db)
       const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: MES })
 
-      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([GRILLA]), env: ENV })
+      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([GRILLA]) })
 
       expect(r).toBe('completada')
       const [fila] = await db
@@ -85,7 +83,7 @@ describe('tomarYEjecutarUna', () => {
       const runId = await encolarGrilla(db, ref.organizationId, { slug: 'parcelas', mes: MES })
 
       // Sin respuestas en el cliente, el flujo no puede proponer nada.
-      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]), env: ENV })
+      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]) })
 
       expect(r).toBe('fallida')
       const [fila] = await db
@@ -113,7 +111,7 @@ describe('tomarYEjecutarUna', () => {
         })
         .returning({ id: esquema.pipelineRuns.id })
 
-      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]), env: ENV })
+      const r = await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]) })
 
       expect(r).toBe('fallida')
       const [despues] = await db
@@ -142,7 +140,7 @@ describe('tomarYEjecutarUna', () => {
         slug: 'parcelas', mes: '2026-10',
       })
 
-      expect(await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]), env: ENV })).toBe(
+      expect(await tomarYEjecutarUna(db, { cliente: new ClienteFalso([]) })).toBe(
         'fallida',
       )
 
@@ -173,7 +171,7 @@ describe('tomarYEjecutarUna', () => {
       })
 
       const r = await tomarYEjecutarUna(db, {
-        cliente: new ClienteFalso([ESTRATEGIA]), env: ENV,
+        cliente: new ClienteFalso([ESTRATEGIA]),
       })
 
       expect(r).toBe('completada')
@@ -234,7 +232,7 @@ describe('tomarYEjecutarUna', () => {
         for each row execute function gc_romper_persistencia()
       `)
       try {
-        expect(await tomarYEjecutarUna(db, { cliente, env: ENV })).toBe('fallida')
+        expect(await tomarYEjecutarUna(db, { cliente })).toBe('fallida')
       } finally {
         await db.execute(sql`drop trigger if exists gc_romper_persistencia on plan_slots`)
         await db.execute(sql`drop function if exists gc_romper_persistencia()`)
@@ -255,7 +253,7 @@ describe('tomarYEjecutarUna', () => {
       expect(await db.select().from(esquema.aiCalls)).toHaveLength(1)
 
       await reanudarCorridaEncolada(db, ref.organizationId, runId)
-      expect(await tomarYEjecutarUna(db, { cliente, env: ENV })).toBe('completada')
+      expect(await tomarYEjecutarUna(db, { cliente })).toBe('completada')
 
       // La grilla quedó guardada —o sea que el segundo paso sí se ejecutó de
       // verdad— y el modelo se cobró una sola vez en toda la historia.
